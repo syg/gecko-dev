@@ -172,28 +172,42 @@ ThreadPoolWorker::helperLoop()
 
 
     for (;;) {
-        // Wait for work to arrive or for us to terminate.
-        {
+        // Start with a busy wait, and back off to waiting on a conditional
+        // variable if we have not received a work for a while.
+        uint32_t spinCount = 100000000;
+        while (state_ == ACTIVE && !pool_->hasWork() && spinCount > 0)
+            spinCount--;
+
+        // If we still don't have work, wait on a conditional variable for
+        // work or until we're asked to terminate.
+        if (!(state_ == ACTIVE && pool_->hasWork())) {
             AutoLockMonitor lock(*pool_);
             while (state_ == ACTIVE && !pool_->hasWork())
                 lock.wait();
 
             if (state_ == TERMINATED) {
-                pool_->join(lock);
+                pool_->activeWorkers_--;
                 return;
             }
+        }
 
-            pool_->activeWorkers_++;
+        pool_->activeWorkers_++;
+
+        // Check if the pool still has work. After relinquishing the
+        // pool lock above, other threads may have already finished
+        // all the work before activeWorkers_ was incremented. We must
+        // abort in that case, since the pool->job() will be nulled
+        // out.
+        if (!pool_->hasWork()) {
+            pool_->activeWorkers_--;
+            continue;
         }
 
         if (!pool_->job()->executeFromWorker(this, stackLimit))
             pool_->abortJob();
 
         // Join the pool.
-        {
-            AutoLockMonitor lock(*pool_);
-            pool_->join(lock);
-        }
+        pool_->activeWorkers_--;
     }
 }
 
@@ -239,7 +253,6 @@ ThreadPoolWorker::terminate(AutoLockMonitor &lock)
 
 ThreadPool::ThreadPool(JSRuntime *rt)
   : activeWorkers_(0),
-    joinBarrier_(nullptr),
     job_(nullptr),
 #ifdef DEBUG
     runtime_(rt),
@@ -252,10 +265,6 @@ ThreadPool::ThreadPool(JSRuntime *rt)
 ThreadPool::~ThreadPool()
 {
     terminateWorkers();
-#ifdef JS_THREADSAFE
-    if (joinBarrier_)
-        PR_DestroyCondVar(joinBarrier_);
-#endif
 }
 
 bool
@@ -264,11 +273,8 @@ ThreadPool::init()
 #ifdef JS_THREADSAFE
     if (!Monitor::init())
         return false;
-    joinBarrier_ = PR_NewCondVar(lock_);
-    return !!joinBarrier_;
-#else
-    return true;
 #endif
+    return true;
 }
 
 uint32_t
@@ -359,13 +365,13 @@ ThreadPool::terminateWorkers()
         // current number of workers so we can make sure they all join.
         activeWorkers_ = workers_.length() - 1;
         lock.notifyAll();
-
-        // Wait for all workers to join.
-        waitForWorkers(lock);
-
-        while (workers_.length() > 0)
-            js_delete(workers_.popCopy());
     }
+
+    // Wait for all workers to join.
+    waitForWorkers();
+
+    while (workers_.length() > 0)
+        js_delete(workers_.popCopy());
 }
 
 void
@@ -375,19 +381,11 @@ ThreadPool::terminate()
 }
 
 void
-ThreadPool::join(AutoLockMonitor &lock)
+ThreadPool::waitForWorkers()
 {
-    MOZ_ASSERT(lock.isFor(*this));
-    if (--activeWorkers_ == 0)
-        lock.notify(joinBarrier_);
-}
-
-void
-ThreadPool::waitForWorkers(AutoLockMonitor &lock)
-{
-    MOZ_ASSERT(lock.isFor(*this));
-    while (activeWorkers_ > 0)
-        lock.wait(joinBarrier_);
+    // Busy wait until all active workers are finished, which is more
+    // performant than using a condvar.
+    while (activeWorkers_ > 0);
     job_ = nullptr;
 }
 
@@ -438,10 +436,7 @@ ThreadPool::executeJob(JSContext *cx, ParallelJob *job, uint16_t sliceStart, uin
 
     // Wait for all threads to join. While there are no pending slices at this
     // point, the slices themselves may not be finished processing.
-    {
-        AutoLockMonitor lock(*this);
-        waitForWorkers(lock);
-    }
+    waitForWorkers();
 
     // Guard against errors in the self-hosted slice processing function. If
     // we still have work at this point, it is the user function's fault.

@@ -33,6 +33,7 @@ class ThreadPool;
 
 class ThreadPoolWorker
 {
+  private:
     const uint32_t workerId_;
     ThreadPool *pool_;
 
@@ -161,15 +162,13 @@ class ParallelJob
 
 class ThreadPool : public Monitor
 {
-  private:
     friend class ThreadPoolWorker;
 
     // Initialized lazily.
     js::Vector<ThreadPoolWorker *, 8, SystemAllocPolicy> workers_;
 
-    // The number of active workers. Should only access under lock.
-    uint32_t activeWorkers_;
-    PRCondVar *joinBarrier_;
+    // The number of active workers.
+    mozilla::Atomic<uint32_t, mozilla::ReleaseAcquire> activeWorkers_;
 
     // The current job.
     ParallelJob *job_;
@@ -191,8 +190,7 @@ class ThreadPool : public Monitor
     bool lazyStartWorkers(JSContext *cx);
     void terminateWorkers();
     void terminateWorkersAndReportOOM(JSContext *cx);
-    void join(AutoLockMonitor &lock);
-    void waitForWorkers(AutoLockMonitor &lock);
+    void waitForWorkers();
     ThreadPoolWorker *mainThreadWorker() { return workers_[0]; }
 
   public:
