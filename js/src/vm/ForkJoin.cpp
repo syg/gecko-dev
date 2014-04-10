@@ -332,7 +332,6 @@ class ForkJoinOperation
     TrafficLight sequentialExecution(bool disqualified, ExecutionStatus *status);
     TrafficLight recoverFromBailout(ExecutionStatus *status);
     TrafficLight fatalError(ExecutionStatus *status);
-    bool isInitialScript(HandleScript script);
     void determineBailoutCause();
     bool invalidateBailedOutScripts();
     ExecutionStatus sequentialExecution(bool disqualified);
@@ -703,13 +702,6 @@ ForkJoinOperation::enqueueInitialScript(ExecutionStatus *status)
         return RedLight;
 
     if (script->hasParallelIonScript()) {
-        // Notify that there's been activity on the entry script.
-        JitCompartment *jitComp = cx_->compartment()->jitCompartment();
-        if (!jitComp->notifyOfActiveParallelEntryScript(cx_, script)) {
-            *status = ExecutionFatal;
-            return RedLight;
-        }
-
         if (!script->parallelIonScript()->hasUncompiledCallTarget()) {
             Spew(SpewOps, "Script %p:%s:%d already compiled, no uncompiled callees",
                  script.get(), script->filename(), script->lineno());
@@ -830,15 +822,6 @@ ForkJoinOperation::compileForParallelExecution(ExecutionStatus *status)
                          "Script %p:%s:%d compiled",
                          script.get(), script->filename(), script->lineno());
                     JS_ASSERT(script->hasParallelIonScript());
-
-                    if (isInitialScript(script)) {
-                        JitCompartment *jitComp = cx_->compartment()->jitCompartment();
-                        if (!jitComp->notifyOfActiveParallelEntryScript(cx_, script)) {
-                            *status = ExecutionFatal;
-                            return RedLight;
-                        }
-                    }
-
                     break;
                 }
             }
@@ -1083,12 +1066,6 @@ BailoutExplanation(ParallelBailoutCause cause)
     }
 }
 
-bool
-ForkJoinOperation::isInitialScript(HandleScript script)
-{
-    return fun_->is<JSFunction>() && (fun_->as<JSFunction>().nonLazyScript() == script);
-}
-
 void
 ForkJoinOperation::determineBailoutCause()
 {
@@ -1244,9 +1221,16 @@ ForkJoinOperation::parallelExecution(ExecutionStatus *status)
     }
 
     switch (shared.execute()) {
-      case TP_SUCCESS:
-        *status = ExecutionParallel;
+     case TP_SUCCESS: {
+        // Notify that there's been activity on the entry script in case of success.
+        JitCompartment *jitComp = cx_->compartment()->jitCompartment();
+        RootedScript entryScript(cx_, fun_->nonLazyScript());
+        if (!jitComp->notifyOfActiveParallelEntryScript(cx_, entryScript))
+            *status = ExecutionFatal;
+        else
+            *status = ExecutionParallel;
         return RedLight;
+      }
 
       case TP_FATAL:
         *status = ExecutionFatal;

@@ -938,8 +938,11 @@ IonScript::trace(JSTracer *trc)
     // at compilation time and is read only.
     for (size_t i = 0; i < callTargetEntries(); i++) {
         // Propagate the parallelAge to the call targets.
-        if (callTargetList()[i]->hasParallelIonScript())
+        if (callTargetList()[i]->hasParallelIonScript() &&
+            callTargetList()[i]->parallelIonScript()->parallelAge() > parallelAge_)
+        {
             callTargetList()[i]->parallelIonScript()->parallelAge_ = parallelAge_;
+        }
 
         gc::MarkScriptUnbarriered(trc, &callTargetList()[i], "callTarget");
     }
