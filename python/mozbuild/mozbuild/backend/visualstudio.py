@@ -173,9 +173,14 @@ class VisualStudioBackend(CommonBackend):
                     defines.append('%s=%s' % (k, v))
 
             basename = 'library_%s' % lib
+            forced_includes = ['$(TopObjDir)\\dist\\include\\mozilla-config.h']
+            if lib is 'mozjs':
+                forced_includes.append('$(TopObjDir)\\js\\src\\js-confdefs.h')
+                defines.append('DEBUG')
+
             project_id = self._write_vs_project(out_dir, basename, lib,
                 includes=includes,
-                forced_includes=['$(TopObjDir)\\dist\\include\\mozilla-config.h'],
+                forced_includes=forced_includes,
                 defines=defines,
                 headers=headers,
                 sources=sources)
