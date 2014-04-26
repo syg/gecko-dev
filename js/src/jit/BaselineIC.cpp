@@ -10138,11 +10138,12 @@ ICCall_Scripted::ICCall_Scripted(JitCode *stubCode, ICStub *firstMonitorStub,
 
 ICCall_Native::ICCall_Native(JitCode *stubCode, ICStub *firstMonitorStub,
                              HandleFunction callee, HandleObject templateObject,
-                             uint32_t pcOffset)
+                             uint32_t pcOffset, CodeLocationJump debugModeOSRPointOffset)
   : ICMonitoredStub(ICStub::Call_Native, stubCode, firstMonitorStub),
     callee_(callee),
     templateObject_(templateObject),
-    pcOffset_(pcOffset)
+    pcOffset_(pcOffset),
+    debugModeOSRPointOffset_(debugModeOSRPointOffset)
 {
 #ifdef JS_ARM_SIMULATOR
     // The simulator requires VM calls to be redirected to a special swi

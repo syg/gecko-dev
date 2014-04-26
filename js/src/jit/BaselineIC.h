@@ -5627,7 +5627,8 @@ class ICCall_Native : public ICMonitoredStub
 
         ICStub *getStub(ICStubSpace *space) {
             return ICCall_Native::New(space, getStubCode(), firstMonitorStub_,
-                                      callee_, templateObject_, pcOffset_);
+                                      callee_, templateObject_, pcOffset_,
+                                      debugModeOSRPointOffset_);
         }
     };
 };
