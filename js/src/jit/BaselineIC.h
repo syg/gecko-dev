@@ -5554,6 +5554,7 @@ class ICCall_Native : public ICMonitoredStub
     HeapPtrFunction callee_;
     HeapPtrObject templateObject_;
     uint32_t pcOffset_;
+    CodeLocationJump debugModeOSRPointOffset_;
 
 #ifdef JS_ARM_SIMULATOR
     void *native_;
@@ -5561,17 +5562,18 @@ class ICCall_Native : public ICMonitoredStub
 
     ICCall_Native(JitCode *stubCode, ICStub *firstMonitorStub,
                   HandleFunction callee, HandleObject templateObject,
-                  uint32_t pcOffset);
+                  uint32_t pcOffset, CodeLocationJump debugModeOSRPointOffset);
 
   public:
     static inline ICCall_Native *New(ICStubSpace *space, JitCode *code, ICStub *firstMonitorStub,
                                      HandleFunction callee, HandleObject templateObject,
-                                     uint32_t pcOffset)
+                                     uint32_t pcOffset, CodeLocationJump debugModeOSRPointOffset)
     {
         if (!code)
             return nullptr;
         return space->allocate<ICCall_Native>(code, firstMonitorStub,
-                                              callee, templateObject, pcOffset);
+                                              callee, templateObject, pcOffset,
+                                              debugModeOSRPointOffset);
     }
 
     HeapPtrFunction &callee() {
@@ -5602,7 +5604,9 @@ class ICCall_Native : public ICMonitoredStub
         RootedFunction callee_;
         RootedObject templateObject_;
         uint32_t pcOffset_;
+        CodeLocationJump debugModeOSRPointOffset_;
         bool generateStubCode(MacroAssembler &masm);
+        bool postGenerateStubCode(MacroAssembler &masm, Handle<JitCode *> code);
 
         virtual int32_t getKey() const {
             return static_cast<int32_t>(kind) | (static_cast<int32_t>(isConstructing_) << 16);
@@ -5617,7 +5621,8 @@ class ICCall_Native : public ICMonitoredStub
             isConstructing_(isConstructing),
             callee_(cx, callee),
             templateObject_(cx, templateObject),
-            pcOffset_(pcOffset)
+            pcOffset_(pcOffset),
+            debugModeOSRPointOffset_()
         { }
 
         ICStub *getStub(ICStubSpace *space) {

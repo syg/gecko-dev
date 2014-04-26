@@ -248,6 +248,8 @@ PatchBaselineFramesForDebugMode(JSContext *cx, const JitActivationIterator &acti
     //
     // Off to On:
     //  A. From a "can call" stub.
+    //    i.  ...with a real exit frame.
+    //    ii. ...with a fake exit frame.
     //  B. From a VM call (interrupt handler, debugger statement handler).
     //
     // On to Off:
@@ -395,6 +397,16 @@ PatchBaselineFramesForDebugMode(JSContext *cx, const JitActivationIterator &acti
                 // script. The fallback stub is guaranteed to exist.
                 ICEntry &entry = script->baselineScript()->icEntryFromPCOffset(pcOffset);
                 ICStub *newStub = entry.fallbackStub();
+
+                // Case A.ii above.
+                //
+                // When we have a fake exit frame, the stub frame and the fake
+                // exit frame are on the same ABI frame, with the same return
+                // address.
+                if (prev->returnAddress() == iter.current()->returnAddress()) {
+
+                }
+
                 SpewPatchStubFrame(prev->returnAddress(), retAddr, layout->maybeStubPtr(), newStub);
                 prev->setReturnAddress(retAddr);
                 layout->setStubPtr(newStub);

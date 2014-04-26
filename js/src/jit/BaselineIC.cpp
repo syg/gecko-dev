@@ -8899,6 +8899,11 @@ ICCall_Native::Compiler::generateStubCode(MacroAssembler &masm)
     // Load the return value into R0.
     masm.loadValue(Address(StackPointer, IonNativeExitFrameLayout::offsetOfResult()), R0);
 
+    // Since we don't have a real exit frame, insert a debug mode OSR point.
+    RepatchLabel dummy;
+    debugModeOSRPointOffset_ = masm.jumpWithPatch(&dummy);
+    masm.bind(&dummy);
+
     leaveStubFrame(masm);
 
     // Enter type monitor IC to type-check result.
@@ -8907,6 +8912,12 @@ ICCall_Native::Compiler::generateStubCode(MacroAssembler &masm)
     masm.bind(&failure);
     EmitStubGuardFailure(masm);
     return true;
+}
+
+bool
+ICCall_Native::Compiler::postGenerateStubCode(MacroAssembler &masm, Handle<JitCode *> code)
+{
+    nextStubOffset_.fixup(&masm);
 }
 
 bool
