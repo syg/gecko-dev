@@ -225,12 +225,12 @@ class NativeIterCache
  */
 class NewObjectCache
 {
-    /* Statically asserted to be equal to sizeof(JSObject_Slots16) */
-    static const unsigned MAX_OBJ_SIZE = 4 * sizeof(void*) + 16 * sizeof(Value);
+    /* Statically asserted to be equal to sizeof(JSObject_Slots8) */
+    static const unsigned MAX_OBJ_SIZE = 4 * sizeof(void*) + 8 * sizeof(Value);
 
     static void staticAsserts() {
-        JS_STATIC_ASSERT(NewObjectCache::MAX_OBJ_SIZE == sizeof(JSObject_Slots16));
-        JS_STATIC_ASSERT(gc::FINALIZE_OBJECT_LAST == gc::FINALIZE_OBJECT16_BACKGROUND);
+        JS_STATIC_ASSERT(NewObjectCache::MAX_OBJ_SIZE == sizeof(JSObject_Slots8));
+        JS_STATIC_ASSERT(gc::FINALIZE_OBJECT_LAST == gc::FINALIZE_OBJECT8_BACKGROUND);
     }
 
     struct Entry

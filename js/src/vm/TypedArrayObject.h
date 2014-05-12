@@ -44,6 +44,7 @@ class TypedArrayObject : public ArrayBufferViewObject
 
     // For typed arrays which can store their data inline, the array buffer
     // object is created lazily.
+    // njn: this is zero if MAX_FIXED_SLOTS is 8...
     static const uint32_t INLINE_BUFFER_LIMIT =
         (JSObject::MAX_FIXED_SLOTS - FIXED_DATA_START) * sizeof(Value);
 

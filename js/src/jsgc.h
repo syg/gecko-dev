@@ -119,10 +119,6 @@ MapAllocToTraceKind(AllocKind kind)
         JSTRACE_OBJECT,     /* FINALIZE_OBJECT4_BACKGROUND */
         JSTRACE_OBJECT,     /* FINALIZE_OBJECT8 */
         JSTRACE_OBJECT,     /* FINALIZE_OBJECT8_BACKGROUND */
-        JSTRACE_OBJECT,     /* FINALIZE_OBJECT12 */
-        JSTRACE_OBJECT,     /* FINALIZE_OBJECT12_BACKGROUND */
-        JSTRACE_OBJECT,     /* FINALIZE_OBJECT16 */
-        JSTRACE_OBJECT,     /* FINALIZE_OBJECT16_BACKGROUND */
         JSTRACE_SCRIPT,     /* FINALIZE_SCRIPT */
         JSTRACE_LAZY_SCRIPT,/* FINALIZE_LAZY_SCRIPT */
         JSTRACE_SHAPE,      /* FINALIZE_SHAPE */
@@ -191,10 +187,6 @@ IsNurseryAllocable(AllocKind kind)
         true,      /* FINALIZE_OBJECT4_BACKGROUND */
         false,     /* FINALIZE_OBJECT8 */
         true,      /* FINALIZE_OBJECT8_BACKGROUND */
-        false,     /* FINALIZE_OBJECT12 */
-        true,      /* FINALIZE_OBJECT12_BACKGROUND */
-        false,     /* FINALIZE_OBJECT16 */
-        true,      /* FINALIZE_OBJECT16_BACKGROUND */
         false,     /* FINALIZE_SCRIPT */
         false,     /* FINALIZE_LAZY_SCRIPT */
         false,     /* FINALIZE_SHAPE */
@@ -223,10 +215,6 @@ IsBackgroundFinalized(AllocKind kind)
         true,      /* FINALIZE_OBJECT4_BACKGROUND */
         false,     /* FINALIZE_OBJECT8 */
         true,      /* FINALIZE_OBJECT8_BACKGROUND */
-        false,     /* FINALIZE_OBJECT12 */
-        true,      /* FINALIZE_OBJECT12_BACKGROUND */
-        false,     /* FINALIZE_OBJECT16 */
-        true,      /* FINALIZE_OBJECT16_BACKGROUND */
         false,     /* FINALIZE_SCRIPT */
         false,     /* FINALIZE_LAZY_SCRIPT */
         true,      /* FINALIZE_SHAPE */
@@ -260,7 +248,7 @@ inline JSGCTraceKind
 GetGCThingTraceKind(const void *thing);
 
 /* Capacity for slotsToThingKind */
-const size_t SLOTS_TO_THING_KIND_LIMIT = 17;
+const size_t SLOTS_TO_THING_KIND_LIMIT = 9;
 
 extern const AllocKind slotsToThingKind[];
 
@@ -269,7 +257,7 @@ static inline AllocKind
 GetGCObjectKind(size_t numSlots)
 {
     if (numSlots >= SLOTS_TO_THING_KIND_LIMIT)
-        return FINALIZE_OBJECT16;
+        return FINALIZE_OBJECT8;
     return slotsToThingKind[numSlots];
 }
 
@@ -336,12 +324,6 @@ GetGCKindSlots(AllocKind thingKind)
       case FINALIZE_OBJECT8:
       case FINALIZE_OBJECT8_BACKGROUND:
         return 8;
-      case FINALIZE_OBJECT12:
-      case FINALIZE_OBJECT12_BACKGROUND:
-        return 12;
-      case FINALIZE_OBJECT16:
-      case FINALIZE_OBJECT16_BACKGROUND:
-        return 16;
       default:
         MOZ_ASSUME_UNREACHABLE("Bad object finalize kind");
     }

@@ -635,6 +635,7 @@ ArrayBufferObject::create(JSContext *cx, uint32_t nbytes, void *data /* = nullpt
 
     size_t nslots = reservedSlots;
     if (!data) {
+        JS_ASSERT(JSObject::MAX_FIXED_SLOTS >= reservedSlots);
         size_t usableSlots = JSObject::MAX_FIXED_SLOTS - reservedSlots;
         if (nbytes <= usableSlots * sizeof(Value)) {
             int newSlots = (nbytes - 1) / sizeof(Value) + 1;

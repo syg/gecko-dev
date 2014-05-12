@@ -3408,7 +3408,7 @@ CheckNewScriptProperties(JSContext *cx, TypeObject *type, JSFunction *fun)
         return;
 
     /* Strawman object to add properties to and watch for duplicates. */
-    RootedObject baseobj(cx, NewBuiltinClassInstance(cx, &JSObject::class_, gc::FINALIZE_OBJECT16));
+    RootedObject baseobj(cx, NewBuiltinClassInstance(cx, &JSObject::class_, gc::FINALIZE_OBJECT8));
     if (!baseobj)
         return;
 

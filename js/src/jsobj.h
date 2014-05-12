@@ -340,7 +340,7 @@ class JSObject : public js::ObjectImpl
 
     // MAX_FIXED_SLOTS is the biggest number of fixed slots our GC
     // size classes will give an object.
-    static const uint32_t MAX_FIXED_SLOTS = 16;
+    static const uint32_t MAX_FIXED_SLOTS = js::shadow::Object::MAX_FIXED_SLOTS;
 
   public:
 
@@ -1190,8 +1190,6 @@ operator!=(const JSObject &lhs, const JSObject &rhs)
 struct JSObject_Slots2 : JSObject { js::Value fslots[2]; };
 struct JSObject_Slots4 : JSObject { js::Value fslots[4]; };
 struct JSObject_Slots8 : JSObject { js::Value fslots[8]; };
-struct JSObject_Slots12 : JSObject { js::Value fslots[12]; };
-struct JSObject_Slots16 : JSObject { js::Value fslots[16]; };
 
 static inline bool
 js_IsCallable(const js::Value &v)

@@ -2280,7 +2280,7 @@ JSObject::TradeGuts(JSContext *cx, JSObject *a, JSObject *b, TradeGutsReserved &
          * whether they have dynamically allocated slots and instead just copy
          * them over wholesale.
          */
-        char tmp[mozilla::tl::Max<sizeof(JSFunction), sizeof(JSObject_Slots16)>::value];
+        char tmp[mozilla::tl::Max<sizeof(JSFunction), sizeof(JSObject_Slots8)>::value];
         JS_ASSERT(size <= sizeof(tmp));
 
         js_memcpy(tmp, a, size);

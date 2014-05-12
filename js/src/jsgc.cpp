@@ -245,9 +245,7 @@ static const int MAX_EMPTY_CHUNK_COUNT = 30;
 const AllocKind gc::slotsToThingKind[] = {
     /* 0 */  FINALIZE_OBJECT0,  FINALIZE_OBJECT2,  FINALIZE_OBJECT2,  FINALIZE_OBJECT4,
     /* 4 */  FINALIZE_OBJECT4,  FINALIZE_OBJECT8,  FINALIZE_OBJECT8,  FINALIZE_OBJECT8,
-    /* 8 */  FINALIZE_OBJECT8,  FINALIZE_OBJECT12, FINALIZE_OBJECT12, FINALIZE_OBJECT12,
-    /* 12 */ FINALIZE_OBJECT12, FINALIZE_OBJECT16, FINALIZE_OBJECT16, FINALIZE_OBJECT16,
-    /* 16 */ FINALIZE_OBJECT16
+    /* 8 */  FINALIZE_OBJECT8
 };
 
 static_assert(JS_ARRAY_LENGTH(slotsToThingKind) == SLOTS_TO_THING_KIND_LIMIT,
@@ -262,10 +260,6 @@ const uint32_t Arena::ThingSizes[] = {
     sizeof(JSObject_Slots4),    /* FINALIZE_OBJECT4_BACKGROUND  */
     sizeof(JSObject_Slots8),    /* FINALIZE_OBJECT8             */
     sizeof(JSObject_Slots8),    /* FINALIZE_OBJECT8_BACKGROUND  */
-    sizeof(JSObject_Slots12),   /* FINALIZE_OBJECT12            */
-    sizeof(JSObject_Slots12),   /* FINALIZE_OBJECT12_BACKGROUND */
-    sizeof(JSObject_Slots16),   /* FINALIZE_OBJECT16            */
-    sizeof(JSObject_Slots16),   /* FINALIZE_OBJECT16_BACKGROUND */
     sizeof(JSScript),           /* FINALIZE_SCRIPT              */
     sizeof(LazyScript),         /* FINALIZE_LAZY_SCRIPT         */
     sizeof(Shape),              /* FINALIZE_SHAPE               */
@@ -288,10 +282,6 @@ const uint32_t Arena::FirstThingOffsets[] = {
     OFFSET(JSObject_Slots4),    /* FINALIZE_OBJECT4_BACKGROUND  */
     OFFSET(JSObject_Slots8),    /* FINALIZE_OBJECT8             */
     OFFSET(JSObject_Slots8),    /* FINALIZE_OBJECT8_BACKGROUND  */
-    OFFSET(JSObject_Slots12),   /* FINALIZE_OBJECT12            */
-    OFFSET(JSObject_Slots12),   /* FINALIZE_OBJECT12_BACKGROUND */
-    OFFSET(JSObject_Slots16),   /* FINALIZE_OBJECT16            */
-    OFFSET(JSObject_Slots16),   /* FINALIZE_OBJECT16_BACKGROUND */
     OFFSET(JSScript),           /* FINALIZE_SCRIPT              */
     OFFSET(LazyScript),         /* FINALIZE_LAZY_SCRIPT         */
     OFFSET(Shape),              /* FINALIZE_SHAPE               */
@@ -365,9 +355,7 @@ static const AllocKind BackgroundPhaseObjects[] = {
     FINALIZE_OBJECT0_BACKGROUND,
     FINALIZE_OBJECT2_BACKGROUND,
     FINALIZE_OBJECT4_BACKGROUND,
-    FINALIZE_OBJECT8_BACKGROUND,
-    FINALIZE_OBJECT12_BACKGROUND,
-    FINALIZE_OBJECT16_BACKGROUND
+    FINALIZE_OBJECT8_BACKGROUND
 };
 
 static const AllocKind BackgroundPhaseStrings[] = {
@@ -574,10 +562,6 @@ FinalizeArenas(FreeOp *fop,
       case FINALIZE_OBJECT4_BACKGROUND:
       case FINALIZE_OBJECT8:
       case FINALIZE_OBJECT8_BACKGROUND:
-      case FINALIZE_OBJECT12:
-      case FINALIZE_OBJECT12_BACKGROUND:
-      case FINALIZE_OBJECT16:
-      case FINALIZE_OBJECT16_BACKGROUND:
         return FinalizeTypedArenas<JSObject>(fop, src, dest, thingKind, budget);
       case FINALIZE_SCRIPT:
         return FinalizeTypedArenas<JSScript>(fop, src, dest, thingKind, budget);
@@ -1732,15 +1716,11 @@ ArenaLists::queueObjectsForSweep(FreeOp *fop)
     finalizeNow(fop, FINALIZE_OBJECT2);
     finalizeNow(fop, FINALIZE_OBJECT4);
     finalizeNow(fop, FINALIZE_OBJECT8);
-    finalizeNow(fop, FINALIZE_OBJECT12);
-    finalizeNow(fop, FINALIZE_OBJECT16);
 
     queueForBackgroundSweep(fop, FINALIZE_OBJECT0_BACKGROUND);
     queueForBackgroundSweep(fop, FINALIZE_OBJECT2_BACKGROUND);
     queueForBackgroundSweep(fop, FINALIZE_OBJECT4_BACKGROUND);
     queueForBackgroundSweep(fop, FINALIZE_OBJECT8_BACKGROUND);
-    queueForBackgroundSweep(fop, FINALIZE_OBJECT12_BACKGROUND);
-    queueForBackgroundSweep(fop, FINALIZE_OBJECT16_BACKGROUND);
 }
 
 void
