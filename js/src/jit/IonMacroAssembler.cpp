@@ -493,9 +493,13 @@ MacroAssembler::nurseryAllocate(Register result, Register slots, gc::AllocKind a
 }
 
 // Inlined version of FreeSpan::allocate.
+template <>
 void
-MacroAssembler::freeSpanAllocate(Register result, Register temp, gc::AllocKind allocKind, Label *fail)
+MacroAssembler::freeSpanAllocate<SequentialExecution>(InlineAllocateArgs &args, Label *fail)
 {
+    Register result = args.result;
+    Register temp = args.temp;
+    gc::AllocKind allocKind = args.allocKind;
     CompileZone *zone = GetIonContext()->compartment->zone();
     int thingSize = int(gc::Arena::thingSize(allocKind));
 
@@ -507,6 +511,37 @@ MacroAssembler::freeSpanAllocate(Register result, Register temp, gc::AllocKind a
     branchPtr(Assembler::BelowOrEqual, AbsoluteAddress(zone->addressOfFreeListLast(allocKind)), result, fail);
     computeEffectiveAddress(Address(result, thingSize), temp);
     storePtr(temp, AbsoluteAddress(zone->addressOfFreeListFirst(allocKind)));
+}
+
+template <>
+void
+MacroAssembler::freeSpanAllocate<ParallelExecution>(InlineAllocateArgs &args, Label *fail)
+{
+    // Unlike the sequential version, we cannot bake in the free list
+    // addresses as each thread has its own allocator. Otherwise the logic is
+    // the same.
+    Register result = args.result;
+    Register cx = args.cx;
+    Register temp1 = args.temp;
+    Register temp2 = args.temp2;
+    gc::AllocKind allocKind = args.allocKind;
+    int thingSize = int(gc::Arena::thingSize(allocKind));
+    uint32_t freeListOffset = (offsetof(Allocator, arenas) +
+                               js::gc::ArenaLists::getFreeListOffset(allocKind));
+
+    // Load the allocator from the context, then the freeLists of |allocKind|,
+    // then its FreeList::first.
+    loadPtr(Address(cx, ThreadSafeContext::offsetOfAllocator()), temp1);
+    addPtr(Imm32(freeListOffset), temp1);
+    loadPtr(Address(temp1, gc::FreeList::offsetOfFirst()), result);
+
+    // If there is no room remaining in the span, we bail to finish the
+    // allocation.
+    branchPtr(Assembler::BelowOrEqual, Address(temp1, gc::FreeList::offsetOfLast()), result, fail);
+
+    // Bump allocate.
+    computeEffectiveAddress(Address(result, thingSize), temp2);
+    storePtr(temp2, Address(temp1, gc::FreeList::offsetOfFirst()));
 }
 
 void
@@ -542,11 +577,17 @@ MacroAssembler::callFreeStub(Register slots)
 }
 
 // Inlined equivalent of gc::AllocateObject, without failure case handling.
+template <ExecutionMode mode>
 void
-MacroAssembler::allocateObject(Register result, Register slots, gc::AllocKind allocKind,
-                               uint32_t nDynamicSlots, gc::InitialHeap initialHeap, Label *fail)
+MacroAssembler::allocateObject(InlineAllocateArgs &args, uint32_t nDynamicSlots, Label *fail)
 {
-    JS_ASSERT(allocKind >= gc::FINALIZE_OBJECT0 && allocKind <= gc::FINALIZE_OBJECT_LAST);
+    Register result = args.result;
+    Register slots = args.slots;
+    gc::AllocKind allocKind = args.allocKind;
+    gc::InitialHeap initialHeap = args.initialHeap;
+
+    MOZ_ASSERT(allocKind >= gc::FINALIZE_OBJECT0 && allocKind <= gc::FINALIZE_OBJECT_LAST);
+    MOZ_ASSERT_IF(mode == ParallelExecution, !shouldNurseryAllocate(allocKind, initialHeap));
 
     checkAllocatorState(fail);
 
@@ -554,7 +595,7 @@ MacroAssembler::allocateObject(Register result, Register slots, gc::AllocKind al
         return nurseryAllocate(result, slots, allocKind, nDynamicSlots, initialHeap, fail);
 
     if (!nDynamicSlots)
-        return freeSpanAllocate(result, slots, allocKind, fail);
+        return freeSpanAllocate<mode>(args, fail);
 
     callMallocStub(nDynamicSlots * sizeof(HeapValue), slots, fail);
 
@@ -562,7 +603,7 @@ MacroAssembler::allocateObject(Register result, Register slots, gc::AllocKind al
     Label success;
 
     push(slots);
-    freeSpanAllocate(result, slots, allocKind, &failAlloc);
+    freeSpanAllocate<mode>(args, &failAlloc);
     pop(slots);
     jump(&success);
 
@@ -573,6 +614,13 @@ MacroAssembler::allocateObject(Register result, Register slots, gc::AllocKind al
 
     bind(&success);
 }
+
+template void
+MacroAssembler::allocateObject<SequentialExecution>(InlineAllocateArgs &args,
+                                                    uint32_t nDynamicSlots, Label *fail);
+template void
+MacroAssembler::allocateObject<ParallelExecution>(InlineAllocateArgs &args,
+                                                  uint32_t nDynamicSlots, Label *fail);
 
 void
 MacroAssembler::newGCThing(Register result, Register temp, JSObject *templateObj,
@@ -586,7 +634,8 @@ MacroAssembler::newGCThing(Register result, Register temp, JSObject *templateObj
     gc::AllocKind allocKind = templateObj->tenuredGetAllocKind();
     JS_ASSERT(allocKind >= gc::FINALIZE_OBJECT0 && allocKind <= gc::FINALIZE_OBJECT_LAST);
 
-    allocateObject(result, temp, allocKind, templateObj->numDynamicSlots(), initialHeap, fail);
+    InlineAllocateArgs args(result, temp, allocKind, initialHeap);
+    allocateObject<SequentialExecution>(args, templateObj->numDynamicSlots(), fail);
 }
 
 void
@@ -597,7 +646,8 @@ MacroAssembler::createGCObject(Register obj, Register temp, JSObject *templateOb
     gc::AllocKind allocKind = templateObj->tenuredGetAllocKind();
     JS_ASSERT(allocKind >= gc::FINALIZE_OBJECT0 && allocKind <= gc::FINALIZE_OBJECT_LAST);
 
-    allocateObject(obj, temp, allocKind, nDynamicSlots, initialHeap, fail);
+    InlineAllocateArgs args(obj, temp, allocKind, initialHeap);
+    allocateObject<SequentialExecution>(args, nDynamicSlots, fail);
     initGCThing(obj, temp, templateObj);
 }
 
@@ -605,30 +655,53 @@ MacroAssembler::createGCObject(Register obj, Register temp, JSObject *templateOb
 // Inlined equivalent of gc::AllocateNonObject, without failure case handling.
 // Non-object allocation does not need to worry about slots, so can take a
 // simpler path.
+template <ExecutionMode mode>
 void
-MacroAssembler::allocateNonObject(Register result, Register temp, gc::AllocKind allocKind, Label *fail)
+MacroAssembler::allocateNonObject(InlineAllocateArgs &args, Label *fail)
 {
     checkAllocatorState(fail);
-    freeSpanAllocate(result, temp, allocKind, fail);
+    freeSpanAllocate<mode>(args, fail);
 }
+
+template void
+MacroAssembler::allocateNonObject<SequentialExecution>(InlineAllocateArgs &args, Label *fail);
+template void
+MacroAssembler::allocateNonObject<ParallelExecution>(InlineAllocateArgs &args, Label *fail);
 
 void
 MacroAssembler::newGCString(Register result, Register temp, Label *fail)
 {
-    allocateNonObject(result, temp, js::gc::FINALIZE_STRING, fail);
+    InlineAllocateArgs args(result, temp, gc::FINALIZE_STRING);
+    allocateNonObject<SequentialExecution>(args, fail);
 }
 
 void
 MacroAssembler::newGCFatInlineString(Register result, Register temp, Label *fail)
 {
-    allocateNonObject(result, temp, js::gc::FINALIZE_FAT_INLINE_STRING, fail);
+    InlineAllocateArgs args(result, temp, gc::FINALIZE_FAT_INLINE_STRING);
+    allocateNonObject<SequentialExecution>(args, fail);
 }
 
 void
-MacroAssembler::newGCThingPar(Register result, Register cx, Register tempReg1, Register tempReg2,
-                              gc::AllocKind allocKind, Label *fail)
+MacroAssembler::newGCThingPar(Register result, Register cx, Register temp1, Register temp2,
+                              JSObject *templateObj, Label *fail)
 {
-    // Similar to ::newGCThing(), except that it allocates from a custom
+    // Like newGCThing(), except that it allocates from a custom Allocator in
+    // the ForkJoinContext*.
+    JS_ASSERT(!templateObj->numDynamicSlots());
+
+    gc::AllocKind allocKind = templateObj->tenuredGetAllocKind();
+    JS_ASSERT(allocKind >= gc::FINALIZE_OBJECT0 && allocKind <= gc::FINALIZE_OBJECT_LAST);
+
+    InlineAllocateArgs args(result, cx, temp1, temp2, allocKind);
+    allocateObject<ParallelExecution>(args, templateObj->numDynamicSlots(), fail);
+}
+
+void
+MacroAssembler::createGCObjectPar(Register obj, Register cx, Register temp1, Register temp2,
+                                  JSObject *templateObj, Label *fail)
+{
+    // Similar to createGCObject(), except that it allocates from a custom
     // Allocator in the ForkJoinContext*, rather than being hardcoded to the
     // compartment allocator.  This requires two temporary registers.
     //
@@ -636,64 +709,28 @@ MacroAssembler::newGCThingPar(Register result, Register cx, Register tempReg1, R
     // register allocator was assigning it to the same register as `cx`.
     // Then we overwrite that register which messed up the OOL code.
 
-    uint32_t thingSize = (uint32_t)gc::Arena::thingSize(allocKind);
-
-    // Load the allocator:
-    // tempReg1 = (Allocator*) forkJoinCx->allocator()
-    loadPtr(Address(cx, ThreadSafeContext::offsetOfAllocator()),
-            tempReg1);
-
-    // Get a pointer to the relevant free list:
-    // tempReg1 = (FreeList*) &tempReg1->arenas.freeLists[(allocKind)]
-    uint32_t offset = (offsetof(Allocator, arenas) +
-                       js::gc::ArenaLists::getFreeListOffset(allocKind));
-    addPtr(Imm32(offset), tempReg1);
-
-    // Load first item on the list
-    // tempReg2 = tempReg1->head.first
-    loadPtr(Address(tempReg1, gc::FreeList::offsetOfFirst()), tempReg2);
-
-    // Check whether bump-allocation is possible.
-    // if tempReg1->head.last <= tempReg2, fail
-    branchPtr(Assembler::BelowOrEqual,
-              Address(tempReg1, gc::FreeList::offsetOfLast()),
-              tempReg2,
-              fail);
-
-    // If so, take |first| and advance pointer by thingSize bytes.
-    // result = tempReg2;
-    // tempReg2 += thingSize;
-    movePtr(tempReg2, result);
-    addPtr(Imm32(thingSize), tempReg2);
-
-    // Update |first|.
-    // tempReg1->head.first = tempReg2;
-    storePtr(tempReg2, Address(tempReg1, gc::FreeList::offsetOfFirst()));
-}
-
-void
-MacroAssembler::newGCThingPar(Register result, Register cx, Register tempReg1, Register tempReg2,
-                              JSObject *templateObject, Label *fail)
-{
-    gc::AllocKind allocKind = templateObject->tenuredGetAllocKind();
+    gc::AllocKind allocKind = templateObj->tenuredGetAllocKind();
     JS_ASSERT(allocKind >= gc::FINALIZE_OBJECT0 && allocKind <= gc::FINALIZE_OBJECT_LAST);
-    JS_ASSERT(!templateObject->numDynamicSlots());
 
-    newGCThingPar(result, cx, tempReg1, tempReg2, allocKind, fail);
+    InlineAllocateArgs args(obj, cx, temp1, temp2, allocKind);
+    allocateObject<ParallelExecution>(args, templateObj->numDynamicSlots(), fail);
+    initGCThing(obj, temp1, templateObj);
 }
 
 void
-MacroAssembler::newGCStringPar(Register result, Register cx, Register tempReg1, Register tempReg2,
+MacroAssembler::newGCStringPar(Register result, Register cx, Register temp1, Register temp2,
                                Label *fail)
 {
-    newGCThingPar(result, cx, tempReg1, tempReg2, js::gc::FINALIZE_STRING, fail);
+    InlineAllocateArgs args(result, cx, temp1, temp2, js::gc::FINALIZE_STRING);
+    allocateNonObject<ParallelExecution>(args, fail);
 }
 
 void
-MacroAssembler::newGCFatInlineStringPar(Register result, Register cx, Register tempReg1,
-                                        Register tempReg2, Label *fail)
+MacroAssembler::newGCFatInlineStringPar(Register result, Register cx, Register temp1,
+                                        Register temp2, Label *fail)
 {
-    newGCThingPar(result, cx, tempReg1, tempReg2, js::gc::FINALIZE_FAT_INLINE_STRING, fail);
+    InlineAllocateArgs args(result, cx, temp1, temp2, js::gc::FINALIZE_FAT_INLINE_STRING);
+    allocateNonObject<ParallelExecution>(args, fail);
 }
 
 void

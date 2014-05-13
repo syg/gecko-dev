@@ -791,14 +791,47 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     // Inline allocation.
   private:
+    struct InlineAllocateArgs
+    {
+        Register result;
+        union {
+            Register slots;
+            Register temp;
+        };
+
+        // The |cx| and |temp2| registers are unused in SequentialMode.
+        Register cx;
+        Register temp2;
+
+        gc::AllocKind allocKind;
+        gc::InitialHeap initialHeap;
+        InlineAllocateArgs(Register result, Register slots, gc::AllocKind allocKind,
+                           gc::InitialHeap initialHeap)
+          : result(result), slots(slots), cx(InvalidReg), temp2(InvalidReg),
+            allocKind(allocKind), initialHeap(initialHeap)
+        { }
+        InlineAllocateArgs(Register result, Register slots, gc::AllocKind allocKind)
+          : result(result), slots(slots), cx(InvalidReg), temp2(InvalidReg),
+            allocKind(allocKind), initialHeap(gc::TenuredHeap)
+        { }
+        InlineAllocateArgs(Register result, Register cx, Register temp1, Register temp2,
+                           gc::AllocKind allocKind)
+          : result(result), temp(temp1), cx(cx), temp2(temp2),
+            allocKind(allocKind), initialHeap(gc::TenuredHeap)
+        { }
+    };
+
     void checkAllocatorState(Label *fail);
     bool shouldNurseryAllocate(gc::AllocKind allocKind, gc::InitialHeap initialHeap);
     void nurseryAllocate(Register result, Register slots, gc::AllocKind allocKind,
                          size_t nDynamicSlots, gc::InitialHeap initialHeap, Label *fail);
-    void freeSpanAllocate(Register result, Register temp, gc::AllocKind allocKind, Label *fail);
-    void allocateObject(Register result, Register slots, gc::AllocKind allocKind,
-                        uint32_t nDynamicSlots, gc::InitialHeap initialHeap, Label *fail);
-    void allocateNonObject(Register result, Register temp, gc::AllocKind allocKind, Label *fail);
+    template <ExecutionMode mode>
+    void freeSpanAllocate(InlineAllocateArgs &args, Label *fail);
+    template <ExecutionMode mode>
+    void allocateObject(InlineAllocateArgs &args, uint32_t nDynamicSlots,
+                        Label *fail);
+    template <ExecutionMode mode>
+    void allocateNonObject(InlineAllocateArgs &args, Label *fail);
     void copySlotsFromTemplate(Register obj, const JSObject *templateObj,
                                uint32_t start, uint32_t end);
     void fillSlotsWithUndefined(Address addr, Register temp, uint32_t start, uint32_t end);
@@ -807,7 +840,7 @@ class MacroAssembler : public MacroAssemblerSpecific
   public:
     void callMallocStub(size_t nbytes, Register result, Label *fail);
     void callFreeStub(Register slots);
-    void createGCObject(Register result, Register temp, JSObject *templateObj,
+    void createGCObject(Register obj, Register temp, JSObject *templateObj,
                         gc::InitialHeap initialHeap, Label *fail);
 
     void newGCThing(Register result, Register temp, JSObject *templateObj,
@@ -817,13 +850,13 @@ class MacroAssembler : public MacroAssemblerSpecific
     void newGCString(Register result, Register temp, Label *fail);
     void newGCFatInlineString(Register result, Register temp, Label *fail);
 
-    void newGCThingPar(Register result, Register cx, Register tempReg1, Register tempReg2,
-                       gc::AllocKind allocKind, Label *fail);
-    void newGCThingPar(Register result, Register cx, Register tempReg1, Register tempReg2,
-                       JSObject *templateObject, Label *fail);
-    void newGCStringPar(Register result, Register cx, Register tempReg1, Register tempReg2,
+    void createGCObjectPar(Register obj, Register cx, Register temp1, Register temp2,
+                           JSObject *templateObj, Label *fail);
+    void newGCThingPar(Register result, Register cx, Register temp1, Register temp2,
+                       JSObject *templateObj, Label *fail);
+    void newGCStringPar(Register result, Register cx, Register temp1, Register temp2,
                         Label *fail);
-    void newGCFatInlineStringPar(Register result, Register cx, Register tempReg1, Register tempReg2,
+    void newGCFatInlineStringPar(Register result, Register cx, Register temp1, Register temp2,
                                  Label *fail);
 
 
