@@ -32,10 +32,11 @@ jit::ForkJoinContextPar()
 // parallel code.  It uses the ArenaLists for the current thread and
 // allocates from there.
 JSObject *
-jit::NewGCThingPar(ForkJoinContext *cx, gc::AllocKind allocKind)
+jit::NewGCThingPar(ForkJoinContext *cx, JSObject *templateObj)
 {
     JS_ASSERT(ForkJoinContext::current() == cx);
-    return js::NewGCObject<NoGC>(cx, allocKind, 0, gc::TenuredHeap);
+    return js::NewGCObject<NoGC>(cx, templateObj->tenuredGetAllocKind(),
+                                 templateObj->numDynamicSlots(), gc::TenuredHeap);
 }
 
 bool

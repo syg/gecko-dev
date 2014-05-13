@@ -536,10 +536,6 @@ ParallelSafetyVisitor::visitCreateThisWithTemplate(MCreateThisWithTemplate *ins)
 bool
 ParallelSafetyVisitor::visitNewCallObject(MNewCallObject *ins)
 {
-    if (ins->templateObject()->hasDynamicSlots()) {
-        SpewMIR(ins, "call with dynamic slots");
-        return markUnsafe();
-    }
     replace(ins, MNewCallObjectPar::New(alloc(), ForkJoinContext(), ins));
     return true;
 }
@@ -547,10 +543,6 @@ ParallelSafetyVisitor::visitNewCallObject(MNewCallObject *ins)
 bool
 ParallelSafetyVisitor::visitNewRunOnceCallObject(MNewRunOnceCallObject *ins)
 {
-    if (ins->templateObject()->hasDynamicSlots()) {
-        SpewMIR(ins, "call with dynamic slots");
-        return markUnsafe();
-    }
     replace(ins, MNewCallObjectPar::New(alloc(), ForkJoinContext(), ins));
     return true;
 }

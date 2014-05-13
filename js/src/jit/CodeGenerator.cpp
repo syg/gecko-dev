@@ -3826,28 +3826,33 @@ CodeGenerator::visitNewPar(LNewPar *lir)
 
 class OutOfLineNewGCThingPar : public OutOfLineCodeBase<CodeGenerator>
 {
-public:
-    LInstruction *lir;
-    gc::AllocKind allocKind;
-    Register objReg;
-    Register cxReg;
+    LInstruction *lir_;
+    Register objReg_;
+    Register cxReg_;
+    JSObject *templateObj_;
 
-    OutOfLineNewGCThingPar(LInstruction *lir, gc::AllocKind allocKind, Register objReg,
-                           Register cxReg)
-      : lir(lir), allocKind(allocKind), objReg(objReg), cxReg(cxReg)
+  public:
+    OutOfLineNewGCThingPar(LInstruction *lir, Register objReg, Register cxReg,
+                           JSObject *templateObj)
+      : lir_(lir), objReg_(objReg), cxReg_(cxReg), templateObj_(templateObj)
     {}
 
     bool accept(CodeGenerator *codegen) {
         return codegen->visitOutOfLineNewGCThingPar(this);
     }
+
+    LInstruction *lir() const { return lir_; }
+    Register objReg() const { return objReg_; }
+    Register cxReg() const { return cxReg_; }
+    JSObject *templateObj() const { return templateObj_; }
 };
 
 bool
 CodeGenerator::emitAllocateGCThingPar(LInstruction *lir, Register objReg, Register cxReg,
                                       Register tempReg1, Register tempReg2, JSObject *templateObj)
 {
-    gc::AllocKind allocKind = templateObj->tenuredGetAllocKind();
-    OutOfLineNewGCThingPar *ool = new(alloc()) OutOfLineNewGCThingPar(lir, allocKind, objReg, cxReg);
+    OutOfLineNewGCThingPar *ool = new(alloc()) OutOfLineNewGCThingPar(lir, objReg, cxReg,
+                                                                      templateObj);
     if (!ool || !addOutOfLineCode(ool))
         return false;
 
@@ -3864,18 +3869,18 @@ CodeGenerator::visitOutOfLineNewGCThingPar(OutOfLineNewGCThingPar *ool)
     // C helper NewGCThingPar(), which calls into the GC code.  If it
     // returns nullptr, we bail.  If returns non-nullptr, we rejoin the
     // original instruction.
-    Register out = ool->objReg;
+    Register out = ool->objReg();
 
     saveVolatile(out);
     masm.setupUnalignedABICall(2, out);
-    masm.passABIArg(ool->cxReg);
-    masm.move32(Imm32(ool->allocKind), out);
+    masm.passABIArg(ool->cxReg());
+    masm.movePtr(ImmGCPtr(ool->templateObj()), out);
     masm.passABIArg(out);
     masm.callWithABI(JS_FUNC_TO_DATA_PTR(void *, NewGCThingPar));
     masm.storeCallResult(out);
     restoreVolatile(out);
 
-    OutOfLineAbortPar *bail = oolAbortPar(ParallelBailoutOutOfMemory, ool->lir);
+    OutOfLineAbortPar *bail = oolAbortPar(ParallelBailoutOutOfMemory, ool->lir());
     if (!bail)
         return false;
     masm.branchTestPtr(Assembler::Zero, out, out, bail->entry());

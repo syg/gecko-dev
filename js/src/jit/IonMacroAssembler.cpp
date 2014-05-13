@@ -688,7 +688,6 @@ MacroAssembler::newGCThingPar(Register result, Register cx, Register temp1, Regi
 {
     // Like newGCThing(), except that it allocates from a custom Allocator in
     // the ForkJoinContext*.
-    JS_ASSERT(!templateObj->numDynamicSlots());
 
     gc::AllocKind allocKind = templateObj->tenuredGetAllocKind();
     JS_ASSERT(allocKind >= gc::FINALIZE_OBJECT0 && allocKind <= gc::FINALIZE_OBJECT_LAST);
@@ -701,9 +700,9 @@ void
 MacroAssembler::createGCObjectPar(Register obj, Register cx, Register temp1, Register temp2,
                                   JSObject *templateObj, Label *fail)
 {
-    // Similar to createGCObject(), except that it allocates from a custom
-    // Allocator in the ForkJoinContext*, rather than being hardcoded to the
-    // compartment allocator.  This requires two temporary registers.
+    // Like createGCObject(), except that it allocates from a custom Allocator
+    // in the ForkJoinContext*, rather than being hardcoded to the compartment
+    // allocator.  This requires two temporary registers.
     //
     // Subtle: I wanted to reuse `result` for one of the temporaries, but the
     // register allocator was assigning it to the same register as `cx`.

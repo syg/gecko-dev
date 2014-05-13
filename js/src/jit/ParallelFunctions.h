@@ -17,7 +17,7 @@ class TypedObject; // subclass of JSObject* defined in builtin/TypedObject.h
 namespace jit {
 
 ForkJoinContext *ForkJoinContextPar();
-JSObject *NewGCThingPar(ForkJoinContext *cx, gc::AllocKind allocKind);
+JSObject *NewGCThingPar(ForkJoinContext *cx, JSObject *templateObj);
 bool ParallelWriteGuard(ForkJoinContext *cx, JSObject *object);
 bool IsInTargetRegion(ForkJoinContext *cx, TypedObject *object);
 bool CheckOverRecursedPar(ForkJoinContext *cx);
