@@ -6118,16 +6118,14 @@ IonBuilder::insertRecompileCheck()
 
     // Get the topmost builder. The topmost script will get recompiled when
     // usecount is high enough to justify a higher optimization level.
-    IonBuilder *topBuilder = this;
-    while (topBuilder->callerBuilder_)
-        topBuilder = topBuilder->callerBuilder_;
+    IonBuilder &topBuilder = topIonBuilder();
 
     // Add recompile check to recompile when the usecount reaches the usecount
     // of the next optimization level.
     OptimizationLevel nextLevel = js_IonOptimizations.nextLevel(curLevel);
     const OptimizationInfo *info = js_IonOptimizations.get(nextLevel);
-    uint32_t useCount = info->usesBeforeCompile(topBuilder->script());
-    current->add(MRecompileCheck::New(alloc(), topBuilder->script(), useCount));
+    uint32_t useCount = info->usesBeforeCompile(topBuilder.script());
+    current->add(MRecompileCheck::New(alloc(), topBuilder.script(), useCount));
 }
 
 JSObject *

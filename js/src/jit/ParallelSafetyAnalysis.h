@@ -23,16 +23,15 @@ class AutoDestroyAllocator;
 // graph and replaces them with MAbortPar blocks.
 class ParallelSafetyAnalysis
 {
-    MIRGenerator *mir_;
+    IonBuilder &builder_;
     MIRGraph &graph_;
 
     bool removeResumePointOperands();
     void replaceOperandsOnResumePoint(MResumePoint *resumePoint, MDefinition *withDef);
 
   public:
-    ParallelSafetyAnalysis(MIRGenerator *mir,
-                           MIRGraph &graph)
-      : mir_(mir),
+    ParallelSafetyAnalysis(IonBuilder &builder, MIRGraph &graph)
+      : builder_(builder),
         graph_(graph)
     {}
 

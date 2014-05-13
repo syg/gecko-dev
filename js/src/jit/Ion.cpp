@@ -547,8 +547,12 @@ jit::FinishOffThreadBuilder(IonBuilder *builder)
         builder->script()->ionScript()->clearRecompiling();
 
     // Clean up if compilation did not succeed.
-    if (CompilingOffThread(builder->script(), executionMode))
-        SetIonScript(builder->script(), executionMode, nullptr);
+    if (CompilingOffThread(builder->script(), executionMode)) {
+        SetIonScript(builder->script(), executionMode,
+                     builder->abortReason() == AbortReason_Disable
+                     ? ION_DISABLED_SCRIPT
+                     : nullptr);
+    }
 
     // The builder is allocated into its LifoAlloc, so destroying that will
     // destroy the builder and all other data accumulated during compilation,
@@ -1355,7 +1359,9 @@ OptimizeMIR(MIRGenerator *mir)
 
     if (graph.entryBlock()->info().executionMode() == ParallelExecution) {
         AutoTraceLog log(logger, TraceLogger::ParallelSafetyAnalysis);
-        ParallelSafetyAnalysis analysis(mir, graph);
+        // Compilation of PJS kernels only happens with IonBuilders.
+        MOZ_ASSERT(!mir->compilingAsmJS());
+        ParallelSafetyAnalysis analysis(*reinterpret_cast<IonBuilder *>(mir), graph);
         if (!analysis.analyze())
             return false;
     }

@@ -341,7 +341,7 @@ ParallelSafetyAnalysis::analyze()
     graph_.entryBlock()->mark();  // Note: in par. exec., we never enter from OSR.
     uint32_t marked = 0;
     for (ReversePostorderIterator block(graph_.rpoBegin()); block != graph_.rpoEnd(); block++) {
-        if (mir_->shouldCancel("ParallelSafetyAnalysis"))
+        if (builder_.shouldCancel("ParallelSafetyAnalysis"))
             return false;
 
         if (block->isMarked()) {
@@ -353,7 +353,7 @@ ParallelSafetyAnalysis::analyze()
             for (MInstructionIterator ins(block->begin());
                  ins != block->end() && !visitor.unsafe();)
             {
-                if (mir_->shouldCancel("ParallelSafetyAnalysis"))
+                if (builder_.shouldCancel("ParallelSafetyAnalysis"))
                     return false;
 
                 // We may be removing or replacing the current
@@ -384,7 +384,11 @@ ParallelSafetyAnalysis::analyze()
                 // always bailout.
                 if (*block == graph_.entryBlock()) {
                     Spew(SpewCompile, "Entry block contains unsafe MIR");
-                    return false;
+
+                    // Set the abort reason on the top IonBuilder disable, so
+                    // that we may propagate the error correctly in case we
+                    // are being compiled off-thread.
+                    return builder_.topIonBuilder().disable();
                 }
 
                 // Otherwise, create a replacement that will.
@@ -399,7 +403,7 @@ ParallelSafetyAnalysis::analyze()
     Spew(SpewCompile, "Safe");
     IonSpewPass("ParallelSafetyAnalysis");
 
-    UnreachableCodeElimination uce(mir_, graph_);
+    UnreachableCodeElimination uce(&builder_, graph_);
     if (!uce.removeUnmarkedBlocks(marked))
         return false;
     IonSpewPass("UCEAfterParallelSafetyAnalysis");

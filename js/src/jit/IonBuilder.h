@@ -820,6 +820,11 @@ class IonBuilder : public MIRGenerator
 
     AbortReason abortReason() { return abortReason_; }
 
+    bool disable() {
+        abortReason_ = AbortReason_Disable;
+        return false;
+    }
+
     TypeDescrSetHash *getOrCreateDescrSetHash(); // fallible
 
     types::CompilerConstraintList *constraints() {
@@ -828,6 +833,13 @@ class IonBuilder : public MIRGenerator
 
     bool isInlineBuilder() const {
         return callerBuilder_ != nullptr;
+    }
+
+    IonBuilder &topIonBuilder() {
+        IonBuilder *top = this;
+        while (top->callerBuilder_)
+            top = top->callerBuilder_;
+        return *top;
     }
 
     const JSAtomState &names() { return compartment->runtime()->names(); }
