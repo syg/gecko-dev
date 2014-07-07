@@ -4725,18 +4725,17 @@ js::LookupNameNoGC(JSContext *cx, PropertyName *name, JSObject *scopeChain,
 
 bool
 js::LookupNameWithGlobalDefault(JSContext *cx, HandlePropertyName name, HandleObject scopeChain,
-                                MutableHandleObject objp)
+                                MutableHandleObject objp, MutableHandleShape propp)
 {
     RootedId id(cx, NameToId(name));
 
     RootedObject pobj(cx);
-    RootedShape prop(cx);
 
     RootedObject scope(cx, scopeChain);
     for (; !scope->is<GlobalObject>(); scope = scope->enclosingScope()) {
-        if (!JSObject::lookupGeneric(cx, scope, id, &pobj, &prop))
+        if (!JSObject::lookupGeneric(cx, scope, id, &pobj, propp))
             return false;
-        if (prop)
+        if (propp)
             break;
     }
 
@@ -4746,18 +4745,17 @@ js::LookupNameWithGlobalDefault(JSContext *cx, HandlePropertyName name, HandleOb
 
 bool
 js::LookupNameUnqualified(JSContext *cx, HandlePropertyName name, HandleObject scopeChain,
-                          MutableHandleObject objp)
+                          MutableHandleObject objp, MutableHandleShape propp)
 {
     RootedId id(cx, NameToId(name));
 
     RootedObject pobj(cx);
-    RootedShape prop(cx);
 
     RootedObject scope(cx, scopeChain);
     for (; !scope->isUnqualifiedVarObj(); scope = scope->enclosingScope()) {
-        if (!JSObject::lookupGeneric(cx, scope, id, &pobj, &prop))
+        if (!JSObject::lookupGeneric(cx, scope, id, &pobj, propp))
             return false;
-        if (prop)
+        if (propp)
             break;
     }
 
@@ -4850,8 +4848,8 @@ NativeGetInline(JSContext *cx,
 
     if (shape->hasSlot()) {
         vp.set(pobj->nativeGetSlot(shape->slot()));
-        JS_ASSERT(!vp.isMagic());
-        JS_ASSERT_IF(!pobj->hasSingletonType() &&
+        JS_ASSERT_IF(!vp.isMagic(JS_UNINITIALIZED_LET) &&
+                     !pobj->hasSingletonType() &&
                      !pobj->template is<ScopeObject>() &&
                      shape->hasDefaultGetter(),
                      js::types::TypeHasProperty(cx, pobj->type(), shape->propid(), vp));

@@ -22,6 +22,7 @@
 #include "jsinferinlines.h"
 #include "jsobjinlines.h"
 
+#include "vm/ScopeObject-inl.h"
 #include "vm/Stack-inl.h"
 #include "vm/String-inl.h"
 
@@ -103,6 +104,51 @@ GuardFunApplyArgumentsOptimization(JSContext *cx, AbstractFramePtr frame, Handle
         }
     }
 
+    return true;
+}
+
+/*
+ * Per ES6, 'let' declarations may not be accessed in any fashion until they
+ * are initialized (i.e., until the actual declaring statement is
+ * executed). The various LET opcodes need to check if the slot is an
+ * uninitialized let declaration, represented by the magic value
+ * JS_UNINITIALIZED_LET.
+ */
+static inline bool
+IsUninitializedLet(const Value &val)
+{
+    // Use whyMagic here because JS_OPTIMIZED_ARGUMENTS could flow into here.
+    return val.isMagic() && val.whyMagic() == JS_UNINITIALIZED_LET;
+}
+
+static inline bool
+IsUninitializedLetSlot(HandleObject obj, HandleShape shape)
+{
+    if (obj->is<DynamicWithObject>())
+        return false;
+    if (!shape || IsImplicitDenseOrTypedArrayElement(shape) || !shape->hasSlot())
+        return false;
+    return IsUninitializedLet(obj->nativeGetSlot(shape->slot()));
+}
+
+static inline bool
+CheckUninitializedLet(JSContext *cx, PropertyName *name_, HandleValue val)
+{
+    if (IsUninitializedLet(val)) {
+        RootedPropertyName name(cx, name_);
+        ReportUninitializedLet(cx, name);
+        return false;
+    }
+    return true;
+}
+
+static inline bool
+CheckUninitializedLet(JSContext *cx, HandleScript script, jsbytecode *pc, HandleValue val)
+{
+    if (IsUninitializedLet(val)) {
+        ReportUninitializedLet(cx, script, pc);
+        return false;
+    }
     return true;
 }
 
@@ -223,6 +269,22 @@ SetIntrinsicOperation(JSContext *cx, JSScript *script, jsbytecode *pc, HandleVal
 {
     RootedPropertyName name(cx, script->getName(pc));
     return cx->global()->setIntrinsicValue(cx, name, val);
+}
+
+inline void
+SetAliasedVarOperation(JSContext *cx, JSScript *script, jsbytecode *pc,
+                       ScopeObject &obj, ScopeCoordinate sc, const Value &val,
+                       bool checkUninitializedLet)
+{
+    MOZ_ASSERT_IF(checkUninitializedLet, !IsUninitializedLet(obj.aliasedVar(sc)));
+
+    // Avoid computing the name if no type updates are needed, as this may be
+    // expensive on scopes with large numbers of variables.
+    PropertyName *name = obj.hasSingletonType()
+                         ? ScopeCoordinateName(cx->runtime()->scopeCoordinateNameCache, script, pc)
+                         : nullptr;
+
+    obj.setAliasedVar(cx, sc, name, val);
 }
 
 inline bool

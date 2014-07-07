@@ -53,6 +53,15 @@ CallObject::setAliasedVarFromArguments(JSContext *cx, const Value &argsValue, js
         types::AddTypePropertyId(cx, this, id, v);
 }
 
+inline void
+CallObject::setAliasedLetsToThrowOnTouch(JSScript *script)
+{
+    uint32_t aliasedLetStart = script->bindings.aliasedBodyLevelLetStart();
+    uint32_t aliasedLetEnd = numFixedSlots();
+    for (uint32_t slot = aliasedLetStart; slot < aliasedLetEnd; slot++)
+        initFixedSlot(slot, MagicValue(JS_UNINITIALIZED_LET));
+}
+
 template <AllowGC allowGC>
 inline bool
 StaticScopeIter<allowGC>::done() const

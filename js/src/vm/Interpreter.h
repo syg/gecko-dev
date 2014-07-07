@@ -476,6 +476,12 @@ SetConstOperation(JSContext *cx, HandleObject varobj, HandlePropertyName name, H
                                     JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_READONLY);
 }
 
+void
+ReportUninitializedLet(JSContext *cx, HandlePropertyName name);
+
+void
+ReportUninitializedLet(JSContext *cx, HandleScript script, jsbytecode *pc);
+
 }  /* namespace js */
 
 #endif /* vm_Interpreter_h */

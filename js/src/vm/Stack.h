@@ -425,6 +425,7 @@ class InterpreterFrame
 
     /* Initialize local variables of newly-pushed frame. */
     void initVarsToUndefined();
+    void setLetsToThrowOnTouch();
 
     /*
      * Stack frame type

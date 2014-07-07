@@ -243,6 +243,8 @@ typedef enum JSWhyMagic
     JS_ION_ERROR,                /* error while running Ion code */
     JS_ION_BAILOUT,              /* missing recover instruction result */
     JS_OPTIMIZED_OUT,            /* optimized out slot */
+    JS_UNINITIALIZED_LET,        /* uninitialized let bindings that produce ReferenceError on
+                                  * touch. */
     JS_GENERIC_MAGIC             /* for local use */
 } JSWhyMagic;
 

@@ -89,12 +89,22 @@ InterpreterFrame::initCallFrame(JSContext *cx, InterpreterFrame *prev, jsbytecod
     prevsp_ = prevsp;
 
     initVarsToUndefined();
+    setLetsToThrowOnTouch();
 }
 
 inline void
 InterpreterFrame::initVarsToUndefined()
 {
     SetValueRangeToUndefined(slots(), script()->nfixed());
+}
+
+inline void
+InterpreterFrame::setLetsToThrowOnTouch()
+{
+    // 'let' declaration throw ReferenceErrors if they are used before
+    // initialization. See ES6 8.1.1.1.6.
+    for (size_t slot = script()->fixedLetBegin(), end = script()->fixedLetEnd(); slot < end; slot++)
+        slots()[slot].setMagic(JS_UNINITIALIZED_LET);
 }
 
 inline Value &
