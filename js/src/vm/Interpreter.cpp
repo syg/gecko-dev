@@ -4116,3 +4116,11 @@ js::ReportUninitializedLet(JSContext *cx, HandleScript script, jsbytecode *pc)
 
     ReportUninitializedLet(cx, name);
 }
+
+void
+js::ReportUninitializedLet(JSContext *cx, HandleScript script, jsbytecode *pc, ScopeCoordinate sc)
+{
+    RootedPropertyName name(cx, ScopeCoordinateName(cx->runtime()->scopeCoordinateNameCache,
+                                                    script, pc));
+    ReportUninitializedLet(cx, name);
+}

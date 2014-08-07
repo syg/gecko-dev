@@ -1257,5 +1257,14 @@ MarkTypeObjectFromIon(JSRuntime *rt, types::TypeObject **typep)
     gc::MarkTypeObjectUnbarriered(&rt->gc.marker, typep, "write barrier");
 }
 
+bool
+ThrowUninitializedLet(JSContext *cx)
+{
+    ScriptFrameIter iter(cx);
+    RootedScript script(cx, iter.script());
+    ReportUninitializedLet(cx, script, iter.pc());
+    return false;
+}
+
 } // namespace jit
 } // namespace js

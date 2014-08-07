@@ -482,6 +482,9 @@ ReportUninitializedLet(JSContext *cx, HandlePropertyName name);
 void
 ReportUninitializedLet(JSContext *cx, HandleScript script, jsbytecode *pc);
 
+void
+ReportUninitializedLet(JSContext *cx, HandleScript script, jsbytecode *pc, ScopeCoordinate sc);
+
 }  /* namespace js */
 
 #endif /* vm_Interpreter_h */

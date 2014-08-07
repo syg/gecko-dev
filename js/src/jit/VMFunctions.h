@@ -747,6 +747,8 @@ IonMarkFunction(MIRType type)
     }
 }
 
+bool ThrowUninitializedLet(JSContext *cx);
+
 } // namespace jit
 } // namespace js
 
