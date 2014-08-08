@@ -49,6 +49,8 @@ MIRType MIRTypeFromValue(const js::Value &vp)
             return MIRType_MagicHole;
           case JS_IS_CONSTRUCTING:
             return MIRType_MagicIsConstructing;
+          case JS_UNINITIALIZED_LET:
+            return MIRType_MagicUninitializedLet;
           default:
             MOZ_ASSERT(!"Unexpected magic constant");
         }
@@ -6191,6 +6193,55 @@ class MAsmJSInterruptCheck : public MNullaryInstruction
     }
     const CallSiteDesc &funcDesc() const {
         return funcDesc_;
+    }
+};
+
+// Checks if a value is an uninitialized let, throwing if so.
+class MLetCheck
+  : public MUnaryInstruction,
+    public BoxPolicy<0>
+{
+    explicit MLetCheck(MDefinition *input)
+      : MUnaryInstruction(input)
+    {
+        setGuard();
+        setResultType(MIRType_Value);
+        setResultTypeSet(input->resultTypeSet());
+    }
+
+  public:
+    INSTRUCTION_HEADER(LetCheck)
+
+    static MLetCheck *New(TempAllocator &alloc, MDefinition *input) {
+        return new(alloc) MLetCheck(input);
+    }
+
+    AliasSet getAliasSet() const {
+        return AliasSet::None();
+    }
+
+    MDefinition *input() const {
+        return getOperand(0);
+    }
+};
+
+// Unconditionally throw an uninitialized let error.
+class MThrowUninitializedLet : public MNullaryInstruction
+{
+    MThrowUninitializedLet() {
+        setGuard();
+        setResultType(MIRType_None);
+    }
+
+  public:
+    INSTRUCTION_HEADER(ThrowUninitializedLet)
+
+    static MThrowUninitializedLet *New(TempAllocator &alloc) {
+        return new(alloc) MThrowUninitializedLet();
+    }
+
+    AliasSet getAliasSet() const {
+        return AliasSet::None();
     }
 };
 

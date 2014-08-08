@@ -279,6 +279,8 @@ class LIRGenerator : public LIRGeneratorSpecific
     bool visitBeta(MBeta *ins);
     bool visitObjectState(MObjectState *ins);
     bool visitArrayState(MArrayState *ins);
+    bool visitLetCheck(MLetCheck *ins);
+    bool visitThrowUninitializedLet(MThrowUninitializedLet *ins);
 };
 
 } // namespace jit

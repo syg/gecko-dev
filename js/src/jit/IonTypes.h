@@ -356,6 +356,7 @@ enum MIRType
     MIRType_MagicOptimizedOut,       // JS_OPTIMIZED_OUT magic value.
     MIRType_MagicHole,               // JS_ELEMENTS_HOLE magic value.
     MIRType_MagicIsConstructing,     // JS_IS_CONSTRUCTING magic value.
+    MIRType_MagicUninitializedLet,   // JS_UNINITIALIZED_LET magic value.
     MIRType_Value,
     MIRType_None,                    // Invalid, used as a placeholder.
     MIRType_Slots,                   // A slots vector
@@ -435,6 +436,7 @@ ValueTypeFromMIRType(MIRType type)
     case MIRType_MagicOptimizedOut:
     case MIRType_MagicHole:
     case MIRType_MagicIsConstructing:
+    case MIRType_MagicUninitializedLet:
       return JSVAL_TYPE_MAGIC;
     default:
       JS_ASSERT(type == MIRType_Object);
@@ -478,6 +480,8 @@ StringFromMIRType(MIRType type)
       return "MagicHole";
     case MIRType_MagicIsConstructing:
       return "MagicIsConstructing";
+    case MIRType_MagicUninitializedLet:
+      return "MagicUninitializedLet";
     case MIRType_Value:
       return "Value";
     case MIRType_None:

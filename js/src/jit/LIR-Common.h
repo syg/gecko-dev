@@ -6497,6 +6497,28 @@ class LRecompileCheck : public LInstructionHelper<0, 0, 1>
     }
 };
 
+class LLetCheck : public LInstructionHelper<0, BOX_PIECES, 0>
+{
+  public:
+    LIR_HEADER(LetCheck)
+
+    MLetCheck *mir() {
+        return mir_->toLetCheck();
+    }
+
+    static const size_t Input = 0;
+};
+
+class LThrowUninitializedLet : public LCallInstructionHelper<0, 0, 0>
+{
+  public:
+    LIR_HEADER(ThrowUninitializedLet)
+
+    MLetCheck *mir() {
+        return mir_->toLetCheck();
+    }
+};
+
 } // namespace jit
 } // namespace js
 

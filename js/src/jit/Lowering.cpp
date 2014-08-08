@@ -3801,6 +3801,23 @@ LIRGenerator::visitSimdBinaryBitwise(MSimdBinaryBitwise *ins)
     return false;
 }
 
+bool
+LIRGenerator::visitLetCheck(MLetCheck *ins)
+{
+    MDefinition *input = ins->input();
+    MOZ_ASSERT(input->type() == MIRType_Value);
+    LLetCheck *lir = new(alloc()) LLetCheck();
+    return redefine(ins, input) && useBox(lir, LLetCheck::Input, input) &&
+           add(lir, ins) && assignSafepoint(lir, ins);
+}
+
+bool
+LIRGenerator::visitThrowUninitializedLet(MThrowUninitializedLet *ins)
+{
+    LThrowUninitializedLet *lir = new(alloc()) LThrowUninitializedLet();
+    return add(lir, ins) && assignSafepoint(lir, ins);
+}
+
 static void
 SpewResumePoint(MBasicBlock *block, MInstruction *ins, MResumePoint *resumePoint)
 {

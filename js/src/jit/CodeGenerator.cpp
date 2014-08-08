@@ -9125,5 +9125,27 @@ CodeGenerator::visitRecompileCheck(LRecompileCheck *ins)
     return true;
 }
 
+typedef bool (*ThrowUninitializedLetFn)(JSContext *);
+static const VMFunction ThrowUninitializedLetInfo =
+    FunctionInfo<ThrowUninitializedLetFn>(ThrowUninitializedLet);
+
+bool
+CodeGenerator::visitLetCheck(LLetCheck *ins)
+{
+    OutOfLineCode *ool = oolCallVM(ThrowUninitializedLetInfo, ins, (ArgList()), StoreNothing());
+    if (!ool)
+        return false;
+    ValueOperand inputValue = ToValue(ins, LLetCheck::Input);
+    masm.branchTestMagicValue(Assembler::Equal, inputValue, JS_UNINITIALIZED_LET, ool->entry());
+    masm.bind(ool->rejoin());
+    return true;
+}
+
+bool
+CodeGenerator::visitThrowUninitializedLet(LThrowUninitializedLet *ins)
+{
+    return callVM(ThrowUninitializedLetInfo, ins);
+}
+
 } // namespace jit
 } // namespace js

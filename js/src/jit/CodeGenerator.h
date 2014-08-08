@@ -303,6 +303,8 @@ class CodeGenerator : public CodeGeneratorSpecific
     bool visitAsmJSParameter(LAsmJSParameter *lir);
     bool visitAsmJSReturn(LAsmJSReturn *ret);
     bool visitAsmJSVoidReturn(LAsmJSVoidReturn *ret);
+    bool visitLetCheck(LLetCheck *ins);
+    bool visitThrowUninitializedLet(LThrowUninitializedLet *ins);
 
     bool visitCheckOverRecursed(LCheckOverRecursed *lir);
     bool visitCheckOverRecursedFailure(CheckOverRecursedFailure *ool);

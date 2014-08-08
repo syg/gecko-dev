@@ -67,7 +67,7 @@ jit::NewBaselineFrameInspector(TempAllocator *temp, BaselineFrame *frame, Compil
     // during compilation could capture nursery pointers, so the values' types
     // are recorded instead.
 
-    inspector->thisType = types::GetMaybeOptimizedOutValueType(frame->thisValue());
+    inspector->thisType = types::GetMaybeUntrackedValueType(frame->thisValue());
 
     if (frame->scopeChain()->hasSingletonType())
         inspector->singletonScopeChain = frame->scopeChain();
@@ -81,10 +81,10 @@ jit::NewBaselineFrameInspector(TempAllocator *temp, BaselineFrame *frame, Compil
             if (script->formalIsAliased(i)) {
                 inspector->argTypes.infallibleAppend(types::Type::UndefinedType());
             } else if (!script->argsObjAliasesFormals()) {
-                types::Type type = types::GetMaybeOptimizedOutValueType(frame->unaliasedFormal(i));
+                types::Type type = types::GetMaybeUntrackedValueType(frame->unaliasedFormal(i));
                 inspector->argTypes.infallibleAppend(type);
             } else if (frame->hasArgsObj()) {
-                types::Type type = types::GetMaybeOptimizedOutValueType(frame->argsObj().arg(i));
+                types::Type type = types::GetMaybeUntrackedValueType(frame->argsObj().arg(i));
                 inspector->argTypes.infallibleAppend(type);
             } else {
                 inspector->argTypes.infallibleAppend(types::Type::UndefinedType());
@@ -98,7 +98,7 @@ jit::NewBaselineFrameInspector(TempAllocator *temp, BaselineFrame *frame, Compil
         if (info->isSlotAliasedAtOsr(i + info->firstLocalSlot())) {
             inspector->varTypes.infallibleAppend(types::Type::UndefinedType());
         } else {
-            types::Type type = types::GetMaybeOptimizedOutValueType(frame->unaliasedLocal(i));
+            types::Type type = types::GetMaybeUntrackedValueType(frame->unaliasedLocal(i));
             inspector->varTypes.infallibleAppend(type);
         }
     }
@@ -125,6 +125,7 @@ IonBuilder::IonBuilder(JSContext *analysisContext, CompileCompartment *comp,
     typeArrayHint(0),
     bytecodeTypeMap(nullptr),
     loopDepth_(loopDepth),
+    letCheck_(nullptr),
     callerResumePoint_(nullptr),
     callerBuilder_(nullptr),
     cfgStack_(*temp),
@@ -664,13 +665,7 @@ IonBuilder::build()
 #endif
 
     initParameters();
-
-    // Initialize local variables.
-    for (uint32_t i = 0; i < info().nlocals(); i++) {
-        MConstant *undef = MConstant::New(alloc(), UndefinedValue());
-        current->add(undef);
-        current->initSlot(info().localSlot(i), undef);
-    }
+    initLocals();
 
     // Initialize something for the scope chain. We can bail out before the
     // start instruction, but the snapshot is encoded *at* the start
@@ -880,14 +875,10 @@ IonBuilder::buildInline(IonBuilder *callerBuilder, MResumePoint *callerResumePoi
     if (!initScopeChain(callInfo.fun()))
         return false;
 
-    JitSpew(JitSpew_Inlining, "Initializing %u local slots", info().nlocals());
+    JitSpew(JitSpew_Inlining, "Initializing %u local slots; fixed lets begin at %u",
+            info().nlocals(), info().fixedLetBegin());
 
-    // Initialize local variables.
-    for (uint32_t i = 0; i < info().nlocals(); i++) {
-        MConstant *undef = MConstant::New(alloc(), UndefinedValue());
-        current->add(undef);
-        current->initSlot(info().localSlot(i), undef);
-    }
+    initLocals();
 
     JitSpew(JitSpew_Inlining, "Inline entry block MResumePoint %p, %u operands",
             (void *) current->entryResumePoint(), current->entryResumePoint()->numOperands());
@@ -976,6 +967,28 @@ IonBuilder::initParameters()
         current->add(param);
         current->initSlot(info().argSlotUnchecked(i), param);
     }
+}
+
+void
+IonBuilder::initLocals()
+{
+    if (info().nlocals() == 0)
+        return;
+
+    MConstant *undef = nullptr;
+    if (info().fixedLetBegin() > 0) {
+        undef = MConstant::New(alloc(), UndefinedValue());
+        current->add(undef);
+    }
+
+    MConstant *uninitLet = nullptr;
+    if (info().fixedLetBegin() < info().nlocals()) {
+        uninitLet = MConstant::New(alloc(), MagicValue(JS_UNINITIALIZED_LET));
+        current->add(uninitLet);
+    }
+
+    for (uint32_t i = 0; i < info().nlocals(); i++)
+        current->initSlot(info().localSlot(i), i < info().fixedLetBegin() ? undef : uninitLet);
 }
 
 bool
@@ -1300,6 +1313,7 @@ IonBuilder::traverseBytecode()
               case JSOP_SWAP:
               case JSOP_SETARG:
               case JSOP_SETLOCAL:
+              case JSOP_INITLET:
               case JSOP_SETRVAL:
               case JSOP_VOID:
                 // Don't require SSA uses for values popped by these ops.
@@ -1524,6 +1538,22 @@ IonBuilder::inspectOpcode(JSOp op)
       case JSOP_SETLOCAL:
         current->setLocal(GET_LOCALNO(pc));
         return true;
+
+      case JSOP_CHECKLET:
+        return jsop_checklet();
+
+      case JSOP_INITLET:
+        current->setLocal(GET_LOCALNO(pc));
+        return true;
+
+      case JSOP_CHECKALIASEDLET:
+        return jsop_checkaliasedlet(ScopeCoordinate(pc));
+
+      case JSOP_INITALIASEDLET:
+        return jsop_setaliasedvar(ScopeCoordinate(pc));
+
+      case JSOP_UNINITIALIZED:
+        return pushConstant(MagicValue(JS_UNINITIALIZED_LET));
 
       case JSOP_POP:
         current->pop();
@@ -6516,7 +6546,8 @@ NumFixedSlots(JSObject *object)
 }
 
 bool
-IonBuilder::getStaticName(JSObject *staticObject, PropertyName *name, bool *psucceeded)
+IonBuilder::getStaticName(JSObject *staticObject, PropertyName *name, MDefinition *letCheck,
+                          bool *psucceeded)
 {
     jsid id = NameToId(name);
 
@@ -6526,6 +6557,10 @@ IonBuilder::getStaticName(JSObject *staticObject, PropertyName *name, bool *psuc
     *psucceeded = true;
 
     if (staticObject->is<GlobalObject>()) {
+        // Known values on the global definitely don't need TDZ checks.
+        if (letCheck)
+            letCheck->setNotGuardUnchecked();
+
         // Optimize undefined, NaN, and Infinity.
         if (name == names().undefined)
             return pushConstant(UndefinedValue());
@@ -6533,6 +6568,14 @@ IonBuilder::getStaticName(JSObject *staticObject, PropertyName *name, bool *psuc
             return pushConstant(compartment->runtime()->NaNValue());
         if (name == names().Infinity)
             return pushConstant(compartment->runtime()->positiveInfinityValue());
+    }
+
+    // When not loading a known value on the global with a let check, always
+    // emit the let check. This could be optimized, but is currently not for
+    // simplicity's sake.
+    if (letCheck) {
+        *psucceeded = false;
+        return true;
     }
 
     types::TypeObjectKey *staticType = types::TypeObjectKey::get(staticObject);
@@ -6685,7 +6728,7 @@ IonBuilder::jsop_getgname(PropertyName *name)
 {
     JSObject *obj = &script()->global();
     bool succeeded;
-    if (!getStaticName(obj, name, &succeeded))
+    if (!getStaticName(obj, name, /* letCheck = */ nullptr, &succeeded))
         return false;
     if (succeeded)
         return true;
@@ -9416,7 +9459,7 @@ IonBuilder::getPropTryInnerize(bool *emitted, MDefinition *obj, PropertyName *na
     if (!getPropTryConstant(emitted, inner, name, types) || *emitted)
         return *emitted;
 
-    if (!getStaticName(&script()->global(), name, emitted) || *emitted)
+    if (!getStaticName(&script()->global(), name, /* letCheck = */ nullptr, emitted) || *emitted)
         return *emitted;
 
     // Passing the inner object to GetProperty IC is safe, see the
@@ -10048,6 +10091,36 @@ IonBuilder::jsop_deffun(uint32_t index)
 }
 
 bool
+IonBuilder::jsop_checklet()
+{
+    uint32_t slot = info().localSlot(GET_LOCALNO(pc));
+    MDefinition *let = addLetCheck(current->getSlot(slot));
+    if (!let)
+        return false;
+    current->setSlot(slot, let);
+    return true;
+}
+
+bool
+IonBuilder::jsop_checkaliasedlet(ScopeCoordinate sc)
+{
+    MDefinition *let = addLetCheck(getAliasedVar(sc));
+    if (!let)
+        return false;
+
+    jsbytecode *nextPc = pc + JSOP_CHECKALIASEDLET_LENGTH;
+    MOZ_ASSERT(JSOp(*nextPc) == JSOP_GETALIASEDVAR || JSOp(*nextPc) == JSOP_SETALIASEDVAR);
+    MOZ_ASSERT(sc == ScopeCoordinate(nextPc));
+
+    // If we are checking for a load, push the checked let so that the load
+    // can use it.
+    if (JSOp(*nextPc) == JSOP_GETALIASEDVAR)
+        setLetCheck(let);
+
+    return true;
+}
+
+bool
 IonBuilder::jsop_this()
 {
     if (!info().funMaybeLazy())
@@ -10267,19 +10340,9 @@ IonBuilder::hasStaticScopeObject(ScopeCoordinate sc, JSObject **pcall)
     return true;
 }
 
-bool
-IonBuilder::jsop_getaliasedvar(ScopeCoordinate sc)
+MDefinition *
+IonBuilder::getAliasedVar(ScopeCoordinate sc)
 {
-    JSObject *call = nullptr;
-    if (hasStaticScopeObject(sc, &call) && call) {
-        PropertyName *name = ScopeCoordinateName(scopeCoordinateNameCache, script(), pc);
-        bool succeeded;
-        if (!getStaticName(call, name, &succeeded))
-            return false;
-        if (succeeded)
-            return true;
-    }
-
     MDefinition *obj = walkScopeChain(sc.hops());
 
     Shape *shape = ScopeCoordinateToStaticScopeShape(script(), pc);
@@ -10295,6 +10358,26 @@ IonBuilder::jsop_getaliasedvar(ScopeCoordinate sc)
     }
 
     current->add(load);
+    return load;
+}
+
+bool
+IonBuilder::jsop_getaliasedvar(ScopeCoordinate sc)
+{
+    JSObject *call = nullptr;
+    if (hasStaticScopeObject(sc, &call) && call) {
+        PropertyName *name = ScopeCoordinateName(scopeCoordinateNameCache, script(), pc);
+        bool succeeded;
+        if (!getStaticName(call, name, takeLetCheck(), &succeeded))
+            return false;
+        if (succeeded)
+            return true;
+    }
+
+    // See jsop_checkaliasedlet.
+    MDefinition *load = takeLetCheck();
+    if (!load)
+        load = getAliasedVar(sc);
     current->push(load);
 
     types::TemporaryTypeSet *types = bytecodeTypes(pc);
@@ -10767,4 +10850,24 @@ IonBuilder::getCallee()
     }
 
     return inlineCallInfo_->fun();
+}
+
+MDefinition *
+IonBuilder::addLetCheck(MDefinition *input)
+{
+    MOZ_ASSERT(JSOp(*pc) == JSOP_CHECKLET || JSOp(*pc) == JSOP_CHECKALIASEDLET);
+
+    // If we're guaranteed to not be JS_UNINITIALIZED_MAGIC, no need to check.
+    MInstruction *letCheck;
+    if (input->type() == MIRType_MagicUninitializedLet)
+        letCheck = MThrowUninitializedLet::New(alloc());
+    else if (input->type() == MIRType_Value)
+        letCheck = MLetCheck::New(alloc(), input);
+    else
+        return input;
+
+    current->add(letCheck);
+    if (!resumeAfter(letCheck))
+        return nullptr;
+    return letCheck->isLetCheck() ? letCheck : constant(UndefinedValue());
 }
