@@ -442,3 +442,4 @@ MSG_DEF(JSMSG_PROXY_CONSTRUCT_OBJECT,   387, 0, JSEXN_TYPEERR, "proxy [[Construc
 MSG_DEF(JSMSG_PROXY_GETOWN_OBJORUNDEF,  388, 0, JSEXN_TYPEERR, "proxy [[GetOwnProperty]] must return an object or undefined")
 MSG_DEF(JSMSG_CANT_REPORT_C_AS_NC,      389, 0, JSEXN_TYPEERR, "proxy can't report existing configurable property as non-configurable")
 MSG_DEF(JSMSG_COMP_PROP_UNTERM_EXPR,    390, 0, JSEXN_SYNTAXERR, "missing ] in computed property name")
+MSG_DEF(JSMSG_DEPRECATED_GENEXPR,       391, 0, JSEXN_SYNTAXERR, "parenthesized generator expressions are deprecated; use yield instead")

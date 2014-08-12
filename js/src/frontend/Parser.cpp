@@ -6587,6 +6587,10 @@ Parser<FullParseHandler>::legacyGeneratorExpr(ParseNode *expr)
     result->setOp(JSOP_CALL);
     result->pn_pos.begin = genfn->pn_pos.begin;
     result->initList(genfn);
+
+    if (!report(ParseWarning, pc->sc->strict, expr, JSMSG_DEPRECATED_GENEXPR))
+        return null();
+
     return result;
 }
 
