@@ -2109,7 +2109,7 @@ static bool
 CheckFrame(BaselineFrame *frame)
 {
     JS_ASSERT(!frame->isGeneratorFrame());
-    JS_ASSERT(!frame->isDebuggerFrame());
+    JS_ASSERT(!frame->isDebuggerEvalFrame());
 
     // This check is to not overrun the stack.
     if (frame->isFunctionFrame()) {

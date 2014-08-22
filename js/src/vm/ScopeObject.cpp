@@ -1221,7 +1221,7 @@ ScopeIter::settle()
         JS_ASSERT_IF(type_ == Call, callobj.callee().nonLazyScript() == frame_.script());
     } else {
         JS_ASSERT(!cur_->is<ScopeObject>());
-        JS_ASSERT(frame_.isGlobalFrame() || frame_.isDebuggerFrame());
+        JS_ASSERT(frame_.isGlobalFrame() || frame_.isDebuggerEvalFrame());
         frame_ = NullFramePtr();
     }
 }

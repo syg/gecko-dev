@@ -362,7 +362,7 @@ class BaselineFrame
     bool isNonEvalFunctionFrame() const {
         return isFunctionFrame() && !isEvalFrame();
     }
-    bool isDebuggerFrame() const {
+    bool isDebuggerEvalFrame() const {
         return false;
     }
     bool isGeneratorFrame() const {
