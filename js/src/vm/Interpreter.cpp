@@ -866,7 +866,7 @@ PopScope(JSContext *cx, ScopeIter &si)
 {
     switch (si.type()) {
       case ScopeIter::Block:
-        if (cx->compartment()->debugMode())
+        if (si.frame().isDebuggee())
             DebugScopes::onPopBlock(cx, si);
         if (si.staticBlock().needsClone())
             si.frame().popBlock(cx);
@@ -1027,7 +1027,7 @@ HandleError(JSContext *cx, InterpreterRegs &regs)
   again:
     if (cx->isExceptionPending()) {
         /* Call debugger throw hooks. */
-        if (MOZ_UNLIKELY(cx->compartment()->debugMode())) {
+        if (MOZ_UNLIKELY(regs.fp()->isDebuggee())) {
             JSTrapStatus status = DebugExceptionUnwind(cx, regs.fp(), regs.pc);
             switch (status) {
               case JSTRAP_ERROR:
@@ -1507,7 +1507,7 @@ Interpret(JSContext *cx, RunState &state)
             goto error;
         }
     }
-    if (MOZ_UNLIKELY(cx->compartment()->debugMode())) {
+    if (MOZ_UNLIKELY(activation.entryFrame()->isDebuggee())) {
         JSTrapStatus status = ScriptDebugPrologue(cx, activation.entryFrame(), REGS.pc);
         switch (status) {
           case JSTRAP_CONTINUE:
@@ -1548,7 +1548,7 @@ CASE(EnableInterruptsPseudoOpcode)
         moreInterrupts = true;
     }
 
-    if (cx->compartment()->debugMode()) {
+    if (script->isDebuggee()) {
         if (script->stepModeEnabled()) {
             RootedValue rval(cx);
             JSTrapStatus status = JSTRAP_CONTINUE;
@@ -1789,7 +1789,7 @@ CASE(JSOP_RETRVAL)
         // Stop the script. (Again no details about which script exactly.)
         TraceLogStopEvent(logger);
 
-        if (MOZ_UNLIKELY(cx->compartment()->debugMode()))
+        if (MOZ_UNLIKELY(REGS.fp()->isDebuggee()))
             interpReturnOK = ScriptDebugEpilogue(cx, REGS.fp(), REGS.pc, interpReturnOK);
 
         if (!REGS.fp()->isYielding())
@@ -2611,7 +2611,7 @@ CASE(JSOP_FUNCALL)
 
     if (!REGS.fp()->prologue(cx))
         goto error;
-    if (MOZ_UNLIKELY(cx->compartment()->debugMode())) {
+    if (MOZ_UNLIKELY(REGS.fp()->isDebuggee())) {
         switch (ScriptDebugPrologue(cx, REGS.fp(), REGS.pc)) {
           case JSTRAP_CONTINUE:
             break;
@@ -3328,7 +3328,7 @@ END_CASE(JSOP_INSTANCEOF)
 CASE(JSOP_DEBUGGER)
 {
     RootedValue rval(cx);
-    switch (Debugger::onDebuggerStatement(cx, &rval)) {
+    switch (Debugger::onDebuggerStatement(cx, REGS.fp(), &rval)) {
       case JSTRAP_ERROR:
         goto error;
       case JSTRAP_CONTINUE:
@@ -3380,7 +3380,7 @@ CASE(JSOP_DEBUGLEAVEBLOCK)
     // FIXME: This opcode should not be necessary.  The debugger shouldn't need
     // help from bytecode to do its job.  See bug 927782.
 
-    if (MOZ_UNLIKELY(cx->compartment()->debugMode()))
+    if (MOZ_UNLIKELY(REGS.fp()->isDebuggee()))
         DebugScopes::onPopBlock(cx, REGS.fp(), REGS.pc);
 }
 END_CASE(JSOP_DEBUGLEAVEBLOCK)
@@ -3470,7 +3470,7 @@ DEFAULT()
     MOZ_CRASH("Invalid HandleError continuation");
 
   exit:
-    if (MOZ_UNLIKELY(cx->compartment()->debugMode()))
+    if (MOZ_UNLIKELY(REGS.fp()->isDebuggee()))
         interpReturnOK = ScriptDebugEpilogue(cx, REGS.fp(), REGS.pc, interpReturnOK);
     if (!REGS.fp()->isYielding())
         REGS.fp()->epilogue(cx);

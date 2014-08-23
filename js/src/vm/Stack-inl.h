@@ -12,12 +12,14 @@
 #include "mozilla/PodOperations.h"
 
 #include "jscntxt.h"
+#include "jsscript.h"
 
 #include "jit/BaselineFrame.h"
 #include "jit/RematerializedFrame.h"
 #include "vm/ScopeObject.h"
 
 #include "jsobjinlines.h"
+#include "jsscriptinlines.h"
 
 #include "jit/BaselineFrame-inl.h"
 
@@ -87,6 +89,9 @@ InterpreterFrame::initCallFrame(JSContext *cx, InterpreterFrame *prev, jsbytecod
     prev_ = prev;
     prevpc_ = prevpc;
     prevsp_ = prevsp;
+
+    if (script->isDebuggee())
+        setIsDebuggee();
 
     initLocals();
 }
@@ -228,6 +233,13 @@ InterpreterFrame::callObj() const
     while (MOZ_UNLIKELY(!pobj->is<CallObject>()))
         pobj = pobj->enclosingScope();
     return pobj->as<CallObject>();
+}
+
+inline void
+InterpreterFrame::unsetIsDebuggee()
+{
+    MOZ_ASSERT(!script()->isDebuggee());
+    flags_ &= ~DEBUGGEE;
 }
 
 /*****************************************************************************/
@@ -546,6 +558,7 @@ AbstractFramePtr::isEvalFrame() const
     MOZ_ASSERT(isRematerializedFrame());
     return false;
 }
+
 inline bool
 AbstractFramePtr::isDebuggerEvalFrame() const
 {
@@ -555,6 +568,38 @@ AbstractFramePtr::isDebuggerEvalFrame() const
         return asBaselineFrame()->isDebuggerEvalFrame();
     MOZ_ASSERT(isRematerializedFrame());
     return false;
+}
+
+inline bool
+AbstractFramePtr::isDebuggee() const
+{
+    if (isInterpreterFrame())
+        return asInterpreterFrame()->isDebuggee();
+    if (isBaselineFrame())
+        return asBaselineFrame()->isDebuggee();
+    return asRematerializedFrame()->isDebuggee();
+}
+
+inline void
+AbstractFramePtr::setIsDebuggee()
+{
+    if (isInterpreterFrame())
+        asInterpreterFrame()->setIsDebuggee();
+    else if (isBaselineFrame())
+        asBaselineFrame()->setIsDebuggee();
+    else
+        asRematerializedFrame()->setIsDebuggee();
+}
+
+inline void
+AbstractFramePtr::unsetIsDebuggee()
+{
+    if (isInterpreterFrame())
+        asInterpreterFrame()->unsetIsDebuggee();
+    else if (isBaselineFrame())
+        asBaselineFrame()->unsetIsDebuggee();
+    else
+        asRematerializedFrame()->unsetIsDebuggee();
 }
 
 inline bool

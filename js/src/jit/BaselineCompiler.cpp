@@ -242,7 +242,7 @@ BaselineCompiler::compile()
     // searches for the sought entry when queries are in linear order.
     bytecodeMap[script->nTypeSets()] = 0;
 
-    if (script->compartment()->debugMode())
+    if (debugMode_)
         baselineScript->setDebugMode();
 
     // Register a native => bytecode mapping entry for this script if needed.

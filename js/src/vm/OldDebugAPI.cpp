@@ -77,11 +77,11 @@ js::ScriptDebugEpilogue(JSContext *cx, AbstractFramePtr frame, jsbytecode *pc, b
 JSTrapStatus
 js::DebugExceptionUnwind(JSContext *cx, AbstractFramePtr frame, jsbytecode *pc)
 {
-    JS_ASSERT(cx->compartment()->debugMode());
+    JS_ASSERT(frame.isDebuggee());
 
     /* Call debugger throw hook if set. */
     RootedValue rval(cx);
-    JSTrapStatus status = Debugger::onExceptionUnwind(cx, &rval);
+    JSTrapStatus status = Debugger::onExceptionUnwind(cx, frame, &rval);
 
     switch (status) {
       case JSTRAP_ERROR:

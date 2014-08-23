@@ -573,7 +573,7 @@ JSCompartment::sweep(FreeOp *fop, bool releaseTypes)
     savedStacks_.sweep(rt);
 
     if (global_ && IsObjectAboutToBeFinalized(global_.unsafeGet())) {
-        if (debugMode())
+        if (isDebuggee())
             Debugger::detachAllDebuggersFromGlobal(fop, global_);
         global_.set(nullptr);
     }
@@ -734,17 +734,6 @@ JSCompartment::setObjectMetadataCallback(js::ObjectMetadataCallback callback)
     objectMetadataCallback = callback;
 }
 
-bool
-JSCompartment::hasScriptsOnStack()
-{
-    for (ActivationIterator iter(runtimeFromMainThread()); !iter.done(); ++iter) {
-        if (iter->compartment() == this)
-            return true;
-    }
-
-    return false;
-}
-
 static bool
 AddInnerLazyFunctionsFromScript(JSScript *script, AutoObjectVector &lazyFunctions)
 {
@@ -817,6 +806,22 @@ JSCompartment::ensureDelazifyScriptsForDebugMode(JSContext *cx)
     return true;
 }
 
+void
+JSCompartment::updateInterpreterForDebugMode(JSContext *cx)
+{
+    for (ActivationIterator iter(cx->runtime()); !iter.done(); ++iter) {
+        Activation *act = iter.activation();
+        if (act->compartment() == this && act->isInterpreter()) {
+            for (InterpreterFrameIterator frames(act->asInterpreter()); !frames.done(); ++frames) {
+                if (debugObservesAllExecution())
+                    frames.frame()->setIsDebuggee();
+                else
+                    frames.frame()->unsetIsDebuggee();
+            }
+        }
+    }
+}
+
 bool
 JSCompartment::updateJITForDebugMode(JSContext *maybecx, AutoDebugModeInvalidation &invalidate)
 {
@@ -827,49 +832,39 @@ JSCompartment::updateJITForDebugMode(JSContext *maybecx, AutoDebugModeInvalidati
     return jit::UpdateForDebugMode(maybecx, this, invalidate);
 }
 
-bool
-JSCompartment::enterDebugMode(JSContext *cx)
-{
-    AutoDebugModeInvalidation invalidate(this);
-    return enterDebugMode(cx, invalidate);
-}
-
-bool
-JSCompartment::enterDebugMode(JSContext *cx, AutoDebugModeInvalidation &invalidate)
-{
-    if (!debugMode()) {
-        debugModeBits |= DebugMode;
-        if (!updateJITForDebugMode(cx, invalidate))
-            return false;
-    }
-    return true;
-}
-
-bool
-JSCompartment::leaveDebugMode(JSContext *cx)
-{
-    AutoDebugModeInvalidation invalidate(this);
-    return leaveDebugMode(cx, invalidate);
-}
-
-bool
-JSCompartment::leaveDebugMode(JSContext *cx, AutoDebugModeInvalidation &invalidate)
-{
-    if (debugMode()) {
-        leaveDebugModeUnderGC();
-        if (!updateJITForDebugMode(cx, invalidate))
-            return false;
-    }
-    return true;
-}
-
 void
-JSCompartment::leaveDebugModeUnderGC()
+JSCompartment::unsetIsDebuggee()
 {
-    if (debugMode()) {
-        debugModeBits &= ~DebugMode;
-        DebugScopes::onCompartmentLeaveDebugMode(this);
+    if (isDebuggee()) {
+        debugModeBits &= ~DebugExecutionMask;
+        DebugScopes::onCompartmentUnsetIsDebuggee(this);
     }
+}
+
+bool
+JSCompartment::setDebugObservesAllExecution(JSContext *cx, AutoDebugModeInvalidation &invalidate)
+{
+    MOZ_ASSERT(isDebuggee());
+    if (!debugObservesAllExecution()) {
+        debugModeBits |= DebugObservesAllExecution;
+        updateInterpreterForDebugMode(cx);
+        if (!updateJITForDebugMode(cx, invalidate))
+            return false;
+    }
+    return true;
+}
+
+bool
+JSCompartment::unsetDebugObservesAllExecution(JSContext *cx, AutoDebugModeInvalidation &invalidate)
+{
+    MOZ_ASSERT(isDebuggee());
+    if (debugObservesAllExecution()) {
+        debugModeBits &= ~DebugObservesAllExecution;
+        updateInterpreterForDebugMode(cx);
+        if (!updateJITForDebugMode(cx, invalidate))
+            return false;
+    }
+    return true;
 }
 
 void

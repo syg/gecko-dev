@@ -22,6 +22,7 @@
 
 #include "jit/BaselineFrame-inl.h"
 #include "jit/IonFrames-inl.h"
+#include "vm/Debugger-inl.h"
 #include "vm/Interpreter-inl.h"
 #include "vm/StringObject-inl.h"
 
@@ -762,6 +763,11 @@ GetIndexFromString(JSString *str)
 bool
 DebugPrologue(JSContext *cx, BaselineFrame *frame, jsbytecode *pc, bool *mustReturn)
 {
+    // Mark the BaselineFrame as a debuggee frame if necessary. This must be
+    // done dynamically, so we might as well do it here.
+    if (frame->script()->isDebuggee())
+        frame->setIsDebuggee();
+
     *mustReturn = false;
 
     JSTrapStatus status = ScriptDebugPrologue(cx, frame, pc);
@@ -904,7 +910,7 @@ HandleDebugTrap(JSContext *cx, BaselineFrame *frame, uint8_t *retAddr, bool *mus
     RootedScript script(cx, frame->script());
     jsbytecode *pc = script->baselineScript()->icEntryFromReturnAddress(retAddr).pc(script);
 
-    JS_ASSERT(cx->compartment()->debugMode());
+    JS_ASSERT(frame->isDebuggee());
     JS_ASSERT(script->stepModeEnabled() || script->hasBreakpointsAt(pc));
 
     RootedValue rval(cx);
@@ -947,7 +953,7 @@ OnDebuggerStatement(JSContext *cx, BaselineFrame *frame, jsbytecode *pc, bool *m
     RootedScript script(cx, frame->script());
     RootedValue rval(cx);
 
-    switch (Debugger::onDebuggerStatement(cx, &rval)) {
+    switch (Debugger::onDebuggerStatement(cx, frame, &rval)) {
       case JSTRAP_ERROR:
         return false;
 
@@ -984,10 +990,8 @@ PopBlockScope(JSContext *cx, BaselineFrame *frame)
 bool
 DebugLeaveBlock(JSContext *cx, BaselineFrame *frame, jsbytecode *pc)
 {
-    JS_ASSERT(frame->script()->baselineScript()->debugMode());
-
+    JS_ASSERT(frame->isDebuggee());
     DebugScopes::onPopBlock(cx, frame, pc);
-
     return true;
 }
 

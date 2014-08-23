@@ -402,7 +402,7 @@ HandleExceptionIon(JSContext *cx, const InlineFrameIterator &frame, ResumeFromEx
     jsbytecode *pc = frame.pc();
 
     bool bailedOutForDebugMode = false;
-    if (cx->compartment()->debugMode()) {
+    if (cx->compartment()->debugObservesAllExecution()) {
         // If we have an exception from within Ion and the debugger is active,
         // we do the following:
         //
@@ -509,8 +509,8 @@ HandleExceptionBaseline(JSContext *cx, const JitFrameIterator &frame, ResumeFrom
         return;
     }
 
-    if (cx->isExceptionPending() && cx->compartment()->debugMode()) {
-        BaselineFrame *baselineFrame = frame.baselineFrame();
+    BaselineFrame *baselineFrame = frame.baselineFrame();
+    if (cx->isExceptionPending() && baselineFrame->isDebuggee()) {
         JSTrapStatus status = DebugExceptionUnwind(cx, baselineFrame, pc);
         switch (status) {
           case JSTRAP_ERROR:
@@ -722,7 +722,7 @@ HandleException(ResumeFromException *rfe)
             // it doesn't try to pop the SPS frame again.
             iter.baselineFrame()->unsetPushedSPSFrame();
 
-            if (cx->compartment()->debugMode() && !calledDebugEpilogue) {
+            if (iter.baselineFrame()->isDebuggee() && !calledDebugEpilogue) {
                 // If we still need to call the DebugEpilogue, we must
                 // remember the pc we unwound the scope chain to, as it will
                 // be out of sync with the frame's actual pc.

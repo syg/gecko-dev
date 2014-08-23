@@ -312,7 +312,6 @@ PatchBaselineFramesForDebugMode(JSContext *cx, const JitActivationIterator &acti
 
     IonCommonFrameLayout *prev = nullptr;
     size_t entryIndex = *start;
-    DebugOnly<bool> expectedDebugMode = cx->compartment()->debugMode();
 
     for (JitFrameIterator iter(activation); !iter.done(); ++iter) {
         DebugModeOSREntry &entry = entries[entryIndex];
@@ -331,10 +330,15 @@ PatchBaselineFramesForDebugMode(JSContext *cx, const JitActivationIterator &acti
 
             MOZ_ASSERT(script == iter.script());
             MOZ_ASSERT(pcOffset < script->length());
-            MOZ_ASSERT(script->baselineScript()->debugMode() == expectedDebugMode);
+            MOZ_ASSERT(script->baselineScript()->debugMode() == script->isDebuggee());
 
             BaselineScript *bl = script->baselineScript();
             ICEntry::Kind kind = entry.frameKind;
+
+            if (script->isDebuggee())
+                iter.baselineFrame()->setIsDebuggee();
+            else
+                iter.baselineFrame()->unsetIsDebuggee();
 
             if (kind == ICEntry::Kind_Op) {
                 // Case A above.
@@ -363,12 +367,12 @@ PatchBaselineFramesForDebugMode(JSContext *cx, const JitActivationIterator &acti
                 MOZ_ASSERT(info->frameKind == kind);
 
                 // Case G, might need to undo B, C, D, or E.
-                MOZ_ASSERT_IF(expectedDebugMode, (kind == ICEntry::Kind_CallVM ||
-                                                  kind == ICEntry::Kind_DebugTrap ||
-                                                  kind == ICEntry::Kind_DebugPrologue ||
-                                                  kind == ICEntry::Kind_DebugEpilogue));
+                MOZ_ASSERT_IF(script->isDebuggee(), (kind == ICEntry::Kind_CallVM ||
+                                                     kind == ICEntry::Kind_DebugTrap ||
+                                                     kind == ICEntry::Kind_DebugPrologue ||
+                                                     kind == ICEntry::Kind_DebugEpilogue));
                 // Case F, should only need to undo case B.
-                MOZ_ASSERT_IF(!expectedDebugMode, kind == ICEntry::Kind_CallVM);
+                MOZ_ASSERT_IF(!script->isDebuggee(), kind == ICEntry::Kind_CallVM);
 
                 // We will have allocated a new recompile info, so delete the
                 // existing one.
@@ -447,7 +451,7 @@ PatchBaselineFramesForDebugMode(JSContext *cx, const JitActivationIterator &acti
 
             IonBaselineStubFrameLayout *layout =
                 reinterpret_cast<IonBaselineStubFrameLayout *>(iter.fp());
-            MOZ_ASSERT(entry.script->baselineScript()->debugMode() == expectedDebugMode);
+            MOZ_ASSERT(entry.script->baselineScript()->debugMode() == entry.script->isDebuggee());
             MOZ_ASSERT(layout->maybeStubPtr() == entry.oldStub);
 
             // Patch baseline stub frames for case A above.
@@ -499,12 +503,11 @@ RecompileBaselineScriptForDebugMode(JSContext *cx, JSScript *script)
 
     // If a script is on the stack multiple times, it may have already
     // been recompiled.
-    bool expectedDebugMode = cx->compartment()->debugMode();
-    if (oldBaselineScript->debugMode() == expectedDebugMode)
+    if (oldBaselineScript->debugMode() == script->isDebuggee())
         return true;
 
     JitSpew(JitSpew_BaselineDebugModeOSR, "Recompiling (%s:%d) for debug mode %s",
-            script->filename(), script->lineno(), expectedDebugMode ? "ON" : "OFF");
+            script->filename(), script->lineno(), script->isDebuggee() ? "ON" : "OFF");
 
     CancelOffThreadIonCompile(cx->compartment(), script);
 
@@ -525,7 +528,7 @@ RecompileBaselineScriptForDebugMode(JSContext *cx, JSScript *script)
 
     // Don't destroy the old baseline script yet, since if we fail any of the
     // recompiles we need to rollback all the old baseline scripts.
-    MOZ_ASSERT(script->baselineScript()->debugMode() == expectedDebugMode);
+    MOZ_ASSERT(script->baselineScript()->debugMode() == script->isDebuggee());
     return true;
 }
 

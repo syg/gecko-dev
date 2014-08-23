@@ -2203,7 +2203,7 @@ Compile(JSContext *cx, HandleScript script, BaselineFrame *osrFrame, jsbytecode 
     if (!script->hasBaselineScript())
         return Method_Skipped;
 
-    if (cx->compartment()->debugMode()) {
+    if (script->isDebuggee()) {
         JitSpew(JitSpew_IonAbort, "debugging");
         return Method_CantCompile;
     }
@@ -3280,7 +3280,7 @@ jit::UpdateForDebugMode(JSContext *maybecx, JSCompartment *comp,
 
     // Schedule invalidation of all optimized JIT code since debug mode
     // invalidates assumptions.
-    invalidate.scheduleInvalidation(comp->debugMode());
+    invalidate.scheduleInvalidation(comp->debugObservesAllExecution());
 
     // Recompile on-stack baseline scripts if we have a cx.
     if (maybecx) {

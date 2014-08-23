@@ -736,7 +736,7 @@ JSFunction::trace(JSTracer *trc)
             // self-hosted function which can be cloned over again. The latter
             // is stored in the first extended slot.
             if (IS_GC_MARKING_TRACER(trc) && !compartment()->hasBeenEntered() &&
-                !compartment()->debugMode() && !compartment()->isSelfHosting &&
+                !compartment()->isDebuggee() && !compartment()->isSelfHosting &&
                 u.i.s.script_->isRelazifiable() && (!isSelfHostedBuiltin() || isExtended()))
             {
                 relazify(trc);
@@ -1489,7 +1489,7 @@ JSFunction::relazify(JSTracer *trc)
     JSScript *script = nonLazyScript();
     JS_ASSERT(script->isRelazifiable());
     JS_ASSERT(!compartment()->hasBeenEntered());
-    JS_ASSERT(!compartment()->debugMode());
+    JS_ASSERT(!compartment()->isDebuggee());
 
     // If the script's canonical function isn't lazy, we have to mark the
     // script. Otherwise, the following scenario would leave it unmarked

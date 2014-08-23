@@ -87,6 +87,9 @@ InterpreterFrame::initExecuteFrame(JSContext *cx, JSScript *script, AbstractFram
     JS_ASSERT_IF(evalInFramePrev, isDebuggerEvalFrame());
     evalInFramePrev_ = evalInFramePrev;
 
+    if (script->isDebuggee())
+        setIsDebuggee();
+
 #ifdef DEBUG
     Debug_SetValueRangeToCrashOnTouch(&rval_, 1);
 #endif
@@ -273,7 +276,7 @@ InterpreterFrame::epilogue(JSContext *cx)
     if (isEvalFrame()) {
         if (isStrictEvalFrame()) {
             JS_ASSERT_IF(hasCallObj(), scopeChain()->as<CallObject>().isForEval());
-            if (MOZ_UNLIKELY(cx->compartment()->debugMode()))
+            if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
                 DebugScopes::onPopStrictEvalScope(this);
         } else if (isDirectEvalFrame()) {
             if (isDebuggerEvalFrame())
@@ -309,7 +312,7 @@ InterpreterFrame::epilogue(JSContext *cx)
     else
         AssertDynamicScopeMatchesStaticScope(cx, script, scopeChain());
 
-    if (MOZ_UNLIKELY(cx->compartment()->debugMode()))
+    if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
         DebugScopes::onPopCall(this, cx);
 
     if (isConstructing() && thisValue().isObject() && returnValue().isPrimitive())
@@ -341,7 +344,7 @@ InterpreterFrame::popBlock(JSContext *cx)
 void
 InterpreterFrame::popWith(JSContext *cx)
 {
-    if (MOZ_UNLIKELY(cx->compartment()->debugMode()))
+    if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
         DebugScopes::onPopWith(this);
 
     JS_ASSERT(scopeChain()->is<DynamicWithObject>());

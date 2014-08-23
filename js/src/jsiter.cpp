@@ -1814,6 +1814,9 @@ SendToGenerator(JSContext *cx, JSGeneratorOp op, HandleObject obj,
         break;
     }
 
+    if (gen->fp->script()->isDebuggee())
+        gen->fp->setIsDebuggee();
+
     bool ok;
     {
         GeneratorState state(cx, gen, futureState);

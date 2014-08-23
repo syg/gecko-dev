@@ -25,6 +25,9 @@ class RematerializedFrame
     // See DebugScopes::updateLiveScopes.
     bool prevUpToDate_;
 
+    // Propagated to the Baseline frame once this is popped.
+    bool isDebuggee_;
+
     // The fp of the top frame associated with this possibly inlined frame.
     uint8_t *top_;
 
@@ -67,6 +70,17 @@ class RematerializedFrame
     }
     void setPrevUpToDate() {
         prevUpToDate_ = true;
+    }
+
+    bool isDebuggee() const {
+        return isDebuggee_;
+    }
+    void setIsDebuggee() {
+        isDebuggee_ = true;
+    }
+    void unsetIsDebuggee() {
+        MOZ_ASSERT(!script()->isDebuggee());
+        isDebuggee_ = false;
     }
 
     uint8_t *top() const {

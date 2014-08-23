@@ -2632,7 +2632,7 @@ EvalInFrame(JSContext *cx, unsigned argc, jsval *vp)
     RootedString str(cx, args[1].toString());
     bool saveCurrent = args.get(2).isBoolean() ? args[2].toBoolean() : false;
 
-    if (!cx->compartment()->debugMode()) {
+    if (!cx->compartment()->isDebuggee()) {
         JS_ReportErrorFlagsAndNumber(cx, JSREPORT_ERROR, js_GetErrorMessage,
                                      nullptr, JSMSG_NEED_DEBUG_MODE);
         return false;

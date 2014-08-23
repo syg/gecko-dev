@@ -2029,14 +2029,14 @@ DebugScopes::checkHashTablesAfterMovingGC(JSRuntime *runtime)
 /*
  * Unfortunately, GetDebugScopeForFrame needs to work even outside debug mode
  * (in particular, JS_GetFrameScopeChain does not require debug mode). Since
- * DebugScopes::onPop* are only called in debug mode, this means we cannot
- * use any of the maps in DebugScopes. This will produce debug scope chains
- * that do not obey the debugger invariants but that is just fine.
+ * DebugScopes::onPop* are only called in debuggee frames, this means we
+ * cannot use any of the maps in DebugScopes. This will produce debug scope
+ * chains that do not obey the debugger invariants but that is just fine.
  */
 static bool
 CanUseDebugScopeMaps(JSContext *cx)
 {
-    return cx->compartment()->debugMode();
+    return cx->compartment()->isDebuggee();
 }
 
 DebugScopes *
@@ -2281,7 +2281,7 @@ DebugScopes::onPopStrictEvalScope(AbstractFramePtr frame)
 }
 
 void
-DebugScopes::onCompartmentLeaveDebugMode(JSCompartment *c)
+DebugScopes::onCompartmentUnsetIsDebuggee(JSCompartment *c)
 {
     DebugScopes *scopes = c->debugScopes;
     if (scopes) {
@@ -2332,7 +2332,7 @@ DebugScopes::updateLiveScopes(JSContext *cx)
 
         if (frame.prevUpToDate())
             return true;
-        JS_ASSERT(frame.scopeChain()->compartment()->debugMode());
+        JS_ASSERT(frame.scopeChain()->compartment()->isDebuggee());
         frame.setPrevUpToDate();
     }
 
@@ -2499,7 +2499,7 @@ JSObject *
 js::GetDebugScopeForFunction(JSContext *cx, HandleFunction fun)
 {
     assertSameCompartment(cx, fun);
-    JS_ASSERT(cx->compartment()->debugMode());
+    MOZ_ASSERT(CanUseDebugScopeMaps(cx));
     if (!DebugScopes::updateLiveScopes(cx))
         return nullptr;
     return GetDebugScope(cx, *fun->environment());

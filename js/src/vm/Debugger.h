@@ -456,8 +456,10 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     static inline JSTrapStatus onEnterFrame(JSContext *cx, AbstractFramePtr frame,
                                             MutableHandleValue vp);
     static inline bool onLeaveFrame(JSContext *cx, AbstractFramePtr frame, bool ok);
-    static inline JSTrapStatus onDebuggerStatement(JSContext *cx, MutableHandleValue vp);
-    static inline JSTrapStatus onExceptionUnwind(JSContext *cx, MutableHandleValue vp);
+    static inline JSTrapStatus onDebuggerStatement(JSContext *cx, AbstractFramePtr frame,
+                                                   MutableHandleValue vp);
+    static inline JSTrapStatus onExceptionUnwind(JSContext *cx, AbstractFramePtr frame,
+                                                 MutableHandleValue vp);
     static inline void onNewScript(JSContext *cx, HandleScript script,
                                    GlobalObject *compileAndGoGlobal);
     static inline void onNewGlobalObject(JSContext *cx, Handle<GlobalObject *> global);
@@ -733,30 +735,6 @@ Debugger::observesGlobal(GlobalObject *global) const
     return debuggees.has(global);
 }
 
-JSTrapStatus
-Debugger::onEnterFrame(JSContext *cx, AbstractFramePtr frame, MutableHandleValue vp)
-{
-    if (!cx->compartment()->debugMode())
-        return JSTRAP_CONTINUE;
-    return slowPathOnEnterFrame(cx, frame, vp);
-}
-
-JSTrapStatus
-Debugger::onDebuggerStatement(JSContext *cx, MutableHandleValue vp)
-{
-    return cx->compartment()->debugMode()
-           ? dispatchHook(cx, vp, OnDebuggerStatement)
-           : JSTRAP_CONTINUE;
-}
-
-JSTrapStatus
-Debugger::onExceptionUnwind(JSContext *cx, MutableHandleValue vp)
-{
-    return cx->compartment()->debugMode()
-           ? dispatchHook(cx, vp, OnExceptionUnwind)
-           : JSTRAP_CONTINUE;
-}
-
 void
 Debugger::onNewScript(JSContext *cx, HandleScript script, GlobalObject *compileAndGoGlobal)
 {
@@ -768,7 +746,7 @@ Debugger::onNewScript(JSContext *cx, HandleScript script, GlobalObject *compileA
                  !script->selfHosted(),
                  script->compartment()->firedOnNewGlobalObject);
     JS_ASSERT_IF(!script->compileAndGo(), !compileAndGoGlobal);
-    if (script->compartment()->debugMode())
+    if (script->compartment()->isDebuggee())
         slowPathOnNewScript(cx, script, compileAndGoGlobal);
 }
 

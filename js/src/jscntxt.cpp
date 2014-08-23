@@ -1011,7 +1011,7 @@ js::InvokeInterruptCallback(JSContext *cx)
     if (cb(cx)) {
         // Debugger treats invoking the interrupt callback as a "step", so
         // invoke the onStep handler.
-        if (cx->compartment()->debugMode()) {
+        if (cx->compartment()->isDebuggee()) {
             ScriptFrameIter iter(cx);
             if (iter.script()->stepModeEnabled()) {
                 RootedValue rval(cx);

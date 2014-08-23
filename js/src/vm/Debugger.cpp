@@ -1221,10 +1221,9 @@ Debugger::slowPathOnNewScript(JSContext *cx, HandleScript script, GlobalObject *
 JSTrapStatus
 Debugger::onTrap(JSContext *cx, MutableHandleValue vp)
 {
-    MOZ_ASSERT(cx->compartment()->debugMode());
-
     ScriptFrameIter iter(cx);
     RootedScript script(cx, iter.script());
+    MOZ_ASSERT(script->isDebuggee());
     Rooted<GlobalObject*> scriptGlobal(cx, &script->global());
     jsbytecode *pc = iter.pc();
     BreakpointSite *site = script->getBreakpointSite(pc);
@@ -1511,7 +1510,6 @@ Debugger::emptyAllocationsLog()
     allocationsLogLength = 0;
 }
 
-
 
 /*** Debugger JSObjects **************************************************************************/
 
@@ -1587,7 +1585,7 @@ Debugger::markAllIteratively(GCMarker *trc)
      */
     JSRuntime *rt = trc->runtime();
     for (CompartmentsIter c(rt, SkipAtoms); !c.done(); c.next()) {
-        if (c->debugMode()) {
+        if (c->isDebuggee()) {
             GlobalObject *global = c->maybeGlobal();
             if (!IsObjectMarked(&global))
                 continue;
@@ -2325,7 +2323,7 @@ Debugger::addDebuggeeGlobal(JSContext *cx,
          * Find all compartments containing debuggers debugging c's global
          * object. Add those compartments to visited.
          */
-        if (c->debugMode()) {
+        if (c->isDebuggee()) {
             GlobalObject::DebuggerVector *v = c->maybeGlobal()->getDebuggers();
             for (Debugger **p = v->begin(); p != v->end(); p++) {
                 JSCompartment *next = (*p)->object->compartment();
@@ -2360,17 +2358,12 @@ Debugger::addDebuggeeGlobal(JSContext *cx,
     if (!v || !v->append(this)) {
         js_ReportOutOfMemory(cx);
     } else {
-        if (!debuggees.put(global)) {
-            js_ReportOutOfMemory(cx);
-        } else {
-            if (global->getDebuggers()->length() > 1)
-                return true;
-            if (debuggeeCompartment->enterDebugMode(cx, invalidate))
-                return true;
-
-            /* Maintain consistency on error. */
-            debuggees.remove(global);
+        if (debuggees.put(global)) {
+            debuggeeCompartment->setIsDebuggee();
+            // TODOshu Refine.
+            return debuggeeCompartment->setDebugObservesAllExecution(cx, invalidate);
         }
+        js_ReportOutOfMemory(cx);
         JS_ASSERT(v->back() == this);
         v->popBack();
     }
@@ -2464,8 +2457,12 @@ Debugger::removeDebuggeeGlobal(JSContext *cx, Handle<GlobalObject *> global,
     cleanupDebuggeeGlobalBeforeRemoval(cx->runtime()->defaultFreeOp(), global, debugEnum);
 
     // The debuggee needs to be removed from the compartment last to save a root.
-    if (global->getDebuggers()->empty())
-        return global->compartment()->leaveDebugMode(cx, invalidate);
+    if (global->getDebuggers()->empty()) {
+        // TODOshu Refine.
+        if (!global->compartment()->unsetDebugObservesAllExecution(cx, invalidate))
+            return false;
+        global->compartment()->unsetIsDebuggee();
+    }
 
     return true;
 }
@@ -2482,7 +2479,7 @@ Debugger::removeDebuggeeGlobalUnderGC(FreeOp *fop, GlobalObject *global,
      * global cannot be rooted on the stack without a cx.
      */
     if (global->getDebuggers()->empty())
-        global->compartment()->leaveDebugModeUnderGC();
+        global->compartment()->unsetIsDebuggee();
 }
 
 static inline ScriptSourceObject *GetSourceReferent(JSObject *obj);
