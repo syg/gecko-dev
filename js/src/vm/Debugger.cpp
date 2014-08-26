@@ -17,6 +17,7 @@
 
 #include "frontend/BytecodeCompiler.h"
 #include "gc/Marking.h"
+#include "jit/BaselineDebugModeOSR.h"
 #include "jit/BaselineJIT.h"
 #include "js/Debug.h"
 #include "js/GCAPI.h"
@@ -454,6 +455,9 @@ Debugger::getScriptFrameWithIter(JSContext *cx, AbstractFramePtr frame,
             js_ReportOutOfMemory(cx);
             return false;
         }
+
+        if (!ensureExecutionObservabilityOfFrame(cx, frame))
+            return false;
     }
     vp.setObject(*p->value());
     return true;
@@ -1511,6 +1515,319 @@ Debugger::emptyAllocationsLog()
 }
 
 
+/*** Debugger code invalidation for observing execution ******************************************/
+
+class MOZ_STACK_CLASS ExecutionObservableCompartments : public Debugger::ExecutionObservableSet
+{
+    HashSet<JSCompartment *> compartments_;
+    HashSet<Zone *> zones_;
+
+  public:
+    explicit ExecutionObservableCompartments(JSContext *cx
+                                             MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+      : compartments_(cx),
+        zones_(cx)
+    {
+        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+    }
+
+    bool init() { return compartments_.init() && zones_.init(); }
+    bool add(JSCompartment *comp) { return compartments_.put(comp) && zones_.put(comp->zone()); }
+
+    const HashSet<Zone *> *zones() const { return &zones_; }
+    bool has(JSScript *script) const { return compartments_.has(script->compartment()); }
+    bool has(ScriptFrameIter &iter) const {
+        // We cannot act on frames that are in Ion and have not been
+        // rematerialized. They get the correct frame flags at bailout time.
+        return iter.hasUsableAbstractFramePtr() && compartments_.has(iter.compartment());
+    }
+
+    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
+};
+
+class MOZ_STACK_CLASS ExecutionObservableFrame : public Debugger::ExecutionObservableSet
+{
+    AbstractFramePtr frame_;
+
+  public:
+    explicit ExecutionObservableFrame(AbstractFramePtr frame
+                                      MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+      : frame_(frame)
+    {
+        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+    }
+
+    Zone *singleZone() const { return frame_.script()->compartment()->zone(); }
+    JSScript *singleScript() const {
+        // See note below. We cannot consider inline Ion frames to have a
+        // single script.
+        if (frame_.isRematerializedFrame() && frame_.asRematerializedFrame()->inlined())
+            return nullptr;
+        return frame_.script();
+    }
+    bool has(JSScript *script) const {
+        if (script == frame_.script())
+            return true;
+        // If we are trying to ensure observability of an inline Ion frame, we
+        // need to also match the unlined script which pushed the Ion frame so
+        // that we may invalidate it.
+        return frame_.isRematerializedFrame() &&
+               script == frame_.asRematerializedFrame()->outerScript();
+    }
+    bool has(ScriptFrameIter &iter) const {
+        // We cannot act on frames that are in Ion and have not been
+        // rematerialized. They get the correct frame flags at bailout time.
+        return iter.hasUsableAbstractFramePtr() && iter.abstractFramePtr() == frame_;
+    }
+
+    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
+};
+
+/* static */ bool
+Debugger::updateExecutionObservabilityOfFrames(JSContext *cx, const ExecutionObservableSet &obs,
+                                               IsObserving observing)
+{
+    AutoSuppressProfilerSampling suppressProfilerSampling(cx);
+
+    {
+        jit::IonContext ictx(cx, nullptr);
+        if (!jit::RecompileOnStackBaselineScriptsForDebugMode(cx, obs, observing)) {
+            js_ReportOutOfMemory(cx);
+            return false;
+        }
+    }
+
+    for (ScriptFrameIter iter(cx); !iter.done(); ++iter) {
+        if (obs.has(iter)) {
+            if (observing) {
+                iter.abstractFramePtr().setIsDebuggee();
+            } else {
+#ifdef DEBUG
+                // Debugger.Frame lifetimes are managed by the debug epilogue,
+                // so in general it's unsafe to unmark a frame if it has a
+                // Debugger.Frame associated with it.
+                FrameRange r(iter.abstractFramePtr());
+                MOZ_ASSERT(r.empty());
+#endif
+                iter.abstractFramePtr().unsetIsDebuggee();
+            }
+        }
+    }
+    return true;
+}
+
+static inline void
+MarkBaselineScriptActiveIfObservable(JSScript *script, const Debugger::ExecutionObservableSet &obs)
+{
+    if (obs.has(script))
+        script->baselineScript()->setActive();
+}
+
+static inline bool
+AppendScriptIfObservable(JSScript *script, const Debugger::ExecutionObservableSet &obs,
+                         Vector<JSScript *> &scripts, Vector<types::RecompileInfo> &invalid)
+{
+    if (obs.has(script)) {
+        if (!scripts.append(script))
+            return false;
+        if (script->hasIonScript() && !invalid.append(script->ionScript()->recompileInfo()))
+            return false;
+    }
+    return true;
+}
+
+static bool
+UpdateExecutionObservabilityOfScriptsInZone(JSContext *cx, Zone *zone,
+                                            const Debugger::ExecutionObservableSet &obs,
+                                            Debugger::IsObserving observing)
+{
+    using namespace js::jit;
+
+#ifdef JSGC_GENERATIONAL
+    // See note in js::ReleaseAllJITCode.
+    cx->runtime()->gc.evictNursery();
+#endif
+
+    AutoSuppressProfilerSampling suppressProfilerSampling(cx);
+
+    JSRuntime *rt = cx->runtime();
+    FreeOp *fop = cx->runtime()->defaultFreeOp();
+
+    // Collect all scripts we observe and the RecompileInfos of those that
+    // have IonScripts in the observable set into a vector.
+    Vector<JSScript *> scripts(cx);
+    Vector<types::RecompileInfo> invalid(cx);
+    if (JSScript *script = obs.singleScript()) {
+        if (!AppendScriptIfObservable(script, obs, scripts, invalid))
+            return false;
+    } else {
+        for (gc::ZoneCellIter iter(zone, gc::FINALIZE_SCRIPT); !iter.done(); iter.next()) {
+            JSScript *script = iter.get<JSScript>();
+            if (!AppendScriptIfObservable(script, obs, scripts, invalid))
+                return false;
+        }
+    }
+
+    // Don't discard active baseline scripts in the observable set. They will
+    // be recompiled.
+    for (JitActivationIterator actIter(rt); !actIter.done(); ++actIter) {
+        if (actIter->compartment()->zone() != zone)
+            continue;
+
+        for (JitFrameIterator iter(actIter); !iter.done(); ++iter) {
+            switch (iter.type()) {
+              case JitFrame_BaselineJS:
+                MarkBaselineScriptActiveIfObservable(iter.script(), obs);
+                break;
+              case JitFrame_IonJS:
+                MarkBaselineScriptActiveIfObservable(iter.script(), obs);
+                for (InlineFrameIterator inlineIter(rt, &iter); inlineIter.more(); ++inlineIter)
+                    MarkBaselineScriptActiveIfObservable(inlineIter.script(), obs);
+                break;
+              default:;
+            }
+        }
+    }
+
+    // Invalidate the scripts we care about.
+    Invalidate(zone->types, cx->runtime()->defaultFreeOp(), invalid);
+
+    // Iterate through all the scripts again and finish invalidation.
+    for (size_t i = 0; i < scripts.length(); i++) {
+        MOZ_ASSERT_IF(scripts[i]->isDebuggee(), observing);
+        FinishInvalidation<SequentialExecution>(fop, scripts[i]);
+        FinishDiscardBaselineScript(fop, scripts[i]);
+    }
+
+    return true;
+}
+
+/* static */ bool
+Debugger::updateExecutionObservabilityOfScripts(JSContext *cx, const ExecutionObservableSet &obs,
+                                                IsObserving observing)
+{
+    if (Zone *zone = obs.singleZone())
+        return UpdateExecutionObservabilityOfScriptsInZone(cx, zone, obs, observing);
+
+    typedef ExecutionObservableSet::ZoneRange ZoneRange;
+    for (ZoneRange r = obs.zones()->all(); !r.empty(); r.popFront()) {
+        if (!UpdateExecutionObservabilityOfScriptsInZone(cx, r.front(), obs, observing))
+            return false;
+    }
+
+    return true;
+}
+
+/* static */ bool
+Debugger::updateExecutionObservability(JSContext *cx, ExecutionObservableSet &obs,
+                                       IsObserving observing)
+{
+    if (!obs.singleZone() && obs.zones()->empty())
+        return true;
+
+    // Invalidate scripts first so we can set the needsArgsObj flag on scripts
+    // before patching frames.
+    return updateExecutionObservabilityOfScripts(cx, obs, observing) &&
+           updateExecutionObservabilityOfFrames(cx, obs, observing);
+}
+
+/* static */ bool
+Debugger::ensureExecutionObservabilityOfFrame(JSContext *cx, AbstractFramePtr frame)
+{
+    MOZ_ASSERT_IF(frame.script()->isDebuggee(), frame.isDebuggee());
+    if (frame.isDebuggee())
+        return true;
+    ExecutionObservableFrame obs(frame);
+    return updateExecutionObservabilityOfFrames(cx, obs, Observing);
+}
+
+/* static */ bool
+Debugger::ensureExecutionObservabilityOfCompartment(JSContext *cx, JSCompartment *comp)
+{
+    if (comp->debugObservesAllExecution())
+        return true;
+    ExecutionObservableCompartments obs(cx);
+    if (!obs.init() || !obs.add(comp))
+        return false;
+    comp->setDebugObservesAllExecution();
+    return updateExecutionObservability(cx, obs, Observing);
+}
+
+static const Debugger::Hook ObserveAllExecutionHooks[] = { Debugger::OnDebuggerStatement,
+                                                           Debugger::OnExceptionUnwind,
+                                                           Debugger::OnEnterFrame,
+                                                           Debugger::HookCount };
+
+/* static */ bool
+Debugger::hookObservesAllExecution(Hook which)
+{
+    for (const Hook *hook = ObserveAllExecutionHooks; *hook != HookCount; hook++) {
+        if (*hook == which)
+            return true;
+    }
+    return false;
+}
+
+bool
+Debugger::hasAnyLiveHooksThatObserveAllExecution() const
+{
+    if (!enabled)
+        return false;
+
+    for (const Hook *hook = ObserveAllExecutionHooks; *hook != HookCount; hook++) {
+        if (getHook(*hook))
+            return true;
+    }
+    return false;
+}
+
+/* static */ bool
+Debugger::anyOtherDebuggerObservingAllExecution(GlobalObject *global) const
+{
+    // If we are toggling from Observing to NotObserving, add the
+    // compartment to the observable set only if none of its other
+    // debuggers are observing all execution.
+    GlobalObject::DebuggerVector *debuggers = global->getDebuggers();
+    for (Debugger **p = debuggers->begin(); p != debuggers->end(); p++) {
+        Debugger *dbg = *p;
+        if (dbg != this && dbg->hasAnyLiveHooksThatObserveAllExecution())
+            return true;
+    }
+    return false;
+}
+
+// Toggle whether this Debugger's debuggees observe all execution. This is
+// called when a hook that observes all execution is set or unset. See
+// hookObservesAllExecution.
+bool
+Debugger::setObservesAllExecution(JSContext *cx, IsObserving observing)
+{
+    ExecutionObservableCompartments obs(cx);
+    if (!obs.init())
+        return false;
+
+    for (GlobalObjectSet::Range r = debuggees.all(); !r.empty(); r.popFront()) {
+        GlobalObject * global = r.front();
+        JSCompartment *comp = global->compartment();
+
+        if (comp->debugObservesAllExecution() == observing)
+            continue;
+
+        if (observing) {
+            if (!obs.add(comp))
+                return false;
+            comp->setDebugObservesAllExecution();
+        } else if (!anyOtherDebuggerObservingAllExecution(global)) {
+            // It's expensive to eagerly invalidate and recompile a
+            // compartment, so don't add the compartment to the set.
+            comp->unsetDebugObservesAllExecution();
+        }
+    }
+
+    return updateExecutionObservability(cx, obs, observing);
+}
+
+
 /*** Debugger JSObjects **************************************************************************/
 
 void
@@ -1735,12 +2052,8 @@ Debugger::sweepAll(FreeOp *fop)
              * might be GC'd too. Since detaching requires access to both
              * objects, this must be done before finalize time.
              */
-            for (GlobalObjectSet::Enum e(dbg->debuggees); !e.empty(); e.popFront()) {
-                // We can't recompile on-stack scripts here, and we
-                // can only toggle debug mode to off, so we use an
-                // infallible variant of removeDebuggeeGlobal.
-                dbg->removeDebuggeeGlobalUnderGC(fop, e.front(), &e);
-            }
+            for (GlobalObjectSet::Enum e(dbg->debuggees); !e.empty(); e.popFront())
+                dbg->removeDebuggeeGlobal(fop, e.front(), &e);
         }
     }
 }
@@ -1751,7 +2064,7 @@ Debugger::detachAllDebuggersFromGlobal(FreeOp *fop, GlobalObject *global)
     const GlobalObject::DebuggerVector *debuggers = global->getDebuggers();
     JS_ASSERT(!debuggers->empty());
     while (!debuggers->empty())
-        debuggers->back()->removeDebuggeeGlobalUnderGC(fop, global, nullptr);
+        debuggers->back()->removeDebuggeeGlobal(fop, global, nullptr);
 }
 
 /* static */ void
@@ -1904,6 +2217,11 @@ Debugger::setHookImpl(JSContext *cx, unsigned argc, Value *vp, Hook which)
     } else if (!args[0].isUndefined()) {
         JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_NOT_CALLABLE_OR_UNDEFINED);
         return false;
+    }
+    if (hookObservesAllExecution(which)) {
+        IsObserving observing = args[0].isUndefined() ? NotObserving : Observing;
+        if (!dbg->setObservesAllExecution(cx, observing))
+            return false;
     }
     dbg->object->setReservedSlot(JSSLOT_DEBUG_HOOK_START + which, args[0]);
     args.rval().setUndefined();
@@ -2101,10 +2419,6 @@ Debugger::addAllGlobalsAsDebuggees(JSContext *cx, unsigned argc, Value *vp)
 {
     THIS_DEBUGGER(cx, argc, vp, "addAllGlobalsAsDebuggees", args, dbg);
     for (ZonesIter zone(cx->runtime(), SkipAtoms); !zone.done(); zone.next()) {
-        // Invalidate a zone at a time to avoid doing a ZoneCellIter
-        // per compartment.
-        AutoDebugModeInvalidation invalidate(zone);
-
         for (CompartmentsInZoneIter c(zone); !c.done(); c.next()) {
             if (c == dbg->object->compartment() || c->options().invisibleToDebugger())
                 continue;
@@ -2112,7 +2426,7 @@ Debugger::addAllGlobalsAsDebuggees(JSContext *cx, unsigned argc, Value *vp)
             GlobalObject *global = c->maybeGlobal();
             if (global) {
                 Rooted<GlobalObject*> rg(cx, global);
-                if (!dbg->addDebuggeeGlobal(cx, rg, invalidate))
+                if (!dbg->addDebuggeeGlobal(cx, rg))
                     return false;
             }
         }
@@ -2126,15 +2440,29 @@ bool
 Debugger::removeDebuggee(JSContext *cx, unsigned argc, Value *vp)
 {
     THIS_DEBUGGER(cx, argc, vp, "removeDebuggee", args, dbg);
+
     if (!args.requireAtLeast(cx, "Debugger.removeDebuggee", 1))
         return false;
     Rooted<GlobalObject *> global(cx, dbg->unwrapDebuggeeArgument(cx, args[0]));
     if (!global)
         return false;
+
+    ExecutionObservableCompartments obs(cx);
+    if (!obs.init())
+        return false;
+
     if (dbg->debuggees.has(global)) {
-        if (!dbg->removeDebuggeeGlobal(cx, global, nullptr))
+        dbg->removeDebuggeeGlobal(cx->runtime()->defaultFreeOp(), global, nullptr);
+
+        // Only update the compartment if there are no Debuggers left, as it's
+        // expensive to check if no other Debugger has a live script or frame hook
+        // on any of the current on-stack debuggee frames.
+        if (global->getDebuggers()->empty() && !obs.add(global->compartment()))
+            return false;
+        if (!updateExecutionObservability(cx, obs, NotObserving))
             return false;
     }
+
     args.rval().setUndefined();
     return true;
 }
@@ -2144,11 +2472,21 @@ Debugger::removeAllDebuggees(JSContext *cx, unsigned argc, Value *vp)
 {
     THIS_DEBUGGER(cx, argc, vp, "removeAllDebuggees", args, dbg);
 
+    ExecutionObservableCompartments obs(cx);
+    if (!obs.init())
+        return false;
+
     for (GlobalObjectSet::Enum e(dbg->debuggees); !e.empty(); e.popFront()) {
         Rooted<GlobalObject *> global(cx, e.front());
-        if (!dbg->removeDebuggeeGlobal(cx, global, &e))
+        dbg->removeDebuggeeGlobal(cx->runtime()->defaultFreeOp(), global, &e);
+
+        // See note about adding to the observable set in removeDebuggee.
+        if (global->getDebuggers()->empty() && !obs.add(global->compartment()))
             return false;
     }
+
+    if (!updateExecutionObservability(cx, obs, NotObserving))
+        return false;
 
     args.rval().setUndefined();
     return true;
@@ -2279,16 +2617,6 @@ Debugger::construct(JSContext *cx, unsigned argc, Value *vp)
 bool
 Debugger::addDebuggeeGlobal(JSContext *cx, Handle<GlobalObject*> global)
 {
-    AutoSuppressProfilerSampling suppressProfilerSampling(cx);
-    AutoDebugModeInvalidation invalidate(global->compartment());
-    return addDebuggeeGlobal(cx, global, invalidate);
-}
-
-bool
-Debugger::addDebuggeeGlobal(JSContext *cx,
-                            Handle<GlobalObject*> global,
-                            AutoDebugModeInvalidation &invalidate)
-{
     if (debuggees.has(global))
         return true;
 
@@ -2360,8 +2688,14 @@ Debugger::addDebuggeeGlobal(JSContext *cx,
     } else {
         if (debuggees.put(global)) {
             debuggeeCompartment->setIsDebuggee();
-            // TODOshu Refine.
-            return debuggeeCompartment->setDebugObservesAllExecution(cx, invalidate);
+            if (hasAnyLiveHooksThatObserveAllExecution() &&
+                !ensureExecutionObservabilityOfCompartment(cx, debuggeeCompartment))
+            {
+                /* Maintain consistency on error. */
+                debuggees.remove(global);
+                return false;
+            }
+            return true;
         }
         js_ReportOutOfMemory(cx);
         JS_ASSERT(v->back() == this);
@@ -2376,8 +2710,7 @@ Debugger::addDebuggeeGlobal(JSContext *cx,
 }
 
 void
-Debugger::cleanupDebuggeeGlobalBeforeRemoval(FreeOp *fop, GlobalObject *global,
-                                             GlobalObjectSet::Enum *debugEnum)
+Debugger::removeDebuggeeGlobal(FreeOp *fop, GlobalObject *global, GlobalObjectSet::Enum *debugEnum)
 {
     /*
      * The caller might have found global by enumerating this->debuggees; if
@@ -2439,39 +2772,6 @@ Debugger::cleanupDebuggeeGlobalBeforeRemoval(FreeOp *fop, GlobalObject *global,
      */
     if (trackingAllocationSites)
         global->compartment()->forgetObjectMetadataCallback();
-}
-
-bool
-Debugger::removeDebuggeeGlobal(JSContext *cx, Handle<GlobalObject *> global,
-                               GlobalObjectSet::Enum *debugEnum)
-{
-    AutoDebugModeInvalidation invalidate(global->compartment());
-    return removeDebuggeeGlobal(cx, global, invalidate, debugEnum);
-}
-
-bool
-Debugger::removeDebuggeeGlobal(JSContext *cx, Handle<GlobalObject *> global,
-                               AutoDebugModeInvalidation &invalidate,
-                               GlobalObjectSet::Enum *debugEnum)
-{
-    cleanupDebuggeeGlobalBeforeRemoval(cx->runtime()->defaultFreeOp(), global, debugEnum);
-
-    // The debuggee needs to be removed from the compartment last to save a root.
-    if (global->getDebuggers()->empty()) {
-        // TODOshu Refine.
-        if (!global->compartment()->unsetDebugObservesAllExecution(cx, invalidate))
-            return false;
-        global->compartment()->unsetIsDebuggee();
-    }
-
-    return true;
-}
-
-void
-Debugger::removeDebuggeeGlobalUnderGC(FreeOp *fop, GlobalObject *global,
-                                      GlobalObjectSet::Enum *debugEnum)
-{
-    cleanupDebuggeeGlobalBeforeRemoval(fop, global, debugEnum);
 
     /*
      * The debuggee needs to be removed from the compartment last, as this can
@@ -4382,7 +4682,7 @@ CheckThisFrame(JSContext *cx, const CallArgs &args, const char *fnname, bool che
             maybeIter.emplace(cx, ScriptFrameIter::ALL_CONTEXTS,               \
                               ScriptFrameIter::GO_THROUGH_SAVED);              \
             ScriptFrameIter &iter = *maybeIter;                                \
-            while (iter.isIon() || iter.abstractFramePtr() != f)               \
+            while (!iter.hasUsableAbstractFramePtr() || iter.abstractFramePtr() != f) \
                 ++iter;                                                        \
             AbstractFramePtr data = iter.copyDataAsAbstractFramePtr();         \
             if (!data)                                                         \
@@ -4758,7 +5058,6 @@ DebuggerFrame_setOnPop(JSContext *cx, unsigned argc, Value *vp)
         JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_NOT_CALLABLE_OR_UNDEFINED);
         return false;
     }
-
     thisobj->setReservedSlot(JSSLOT_DEBUGFRAME_ONPOP_HANDLER, args[0]);
     args.rval().setUndefined();
     return true;

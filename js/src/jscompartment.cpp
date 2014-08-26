@@ -807,64 +807,12 @@ JSCompartment::ensureDelazifyScriptsForDebugMode(JSContext *cx)
 }
 
 void
-JSCompartment::updateInterpreterForDebugMode(JSContext *cx)
-{
-    for (ActivationIterator iter(cx->runtime()); !iter.done(); ++iter) {
-        Activation *act = iter.activation();
-        if (act->compartment() == this && act->isInterpreter()) {
-            for (InterpreterFrameIterator frames(act->asInterpreter()); !frames.done(); ++frames) {
-                if (debugObservesAllExecution())
-                    frames.frame()->setIsDebuggee();
-                else
-                    frames.frame()->unsetIsDebuggee();
-            }
-        }
-    }
-}
-
-bool
-JSCompartment::updateJITForDebugMode(JSContext *maybecx, AutoDebugModeInvalidation &invalidate)
-{
-    // The AutoDebugModeInvalidation argument makes sure we can't forget to
-    // invalidate, but it is also important not to run any scripts in this
-    // compartment until the invalidate is destroyed.  That is the caller's
-    // responsibility.
-    return jit::UpdateForDebugMode(maybecx, this, invalidate);
-}
-
-void
 JSCompartment::unsetIsDebuggee()
 {
     if (isDebuggee()) {
         debugModeBits &= ~DebugExecutionMask;
         DebugScopes::onCompartmentUnsetIsDebuggee(this);
     }
-}
-
-bool
-JSCompartment::setDebugObservesAllExecution(JSContext *cx, AutoDebugModeInvalidation &invalidate)
-{
-    MOZ_ASSERT(isDebuggee());
-    if (!debugObservesAllExecution()) {
-        debugModeBits |= DebugObservesAllExecution;
-        updateInterpreterForDebugMode(cx);
-        if (!updateJITForDebugMode(cx, invalidate))
-            return false;
-    }
-    return true;
-}
-
-bool
-JSCompartment::unsetDebugObservesAllExecution(JSContext *cx, AutoDebugModeInvalidation &invalidate)
-{
-    MOZ_ASSERT(isDebuggee());
-    if (debugObservesAllExecution()) {
-        debugModeBits &= ~DebugObservesAllExecution;
-        updateInterpreterForDebugMode(cx);
-        if (!updateJITForDebugMode(cx, invalidate))
-            return false;
-    }
-    return true;
 }
 
 void

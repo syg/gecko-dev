@@ -112,7 +112,6 @@ struct TypeInferenceSizes;
 }
 
 namespace js {
-class AutoDebugModeInvalidation;
 class DebugScopes;
 class WeakMapBase;
 }
@@ -387,10 +386,6 @@ struct JSCompartment
   private:
     JSCompartment *thisForCtor() { return this; }
 
-    // Only called from {enter,leave}DebugMode.
-    void updateInterpreterForDebugMode(JSContext *cx);
-    bool updateJITForDebugMode(JSContext *maybecx, js::AutoDebugModeInvalidation &invalidate);
-
   public:
     //
     // The Debugger observes execution on a frame-by-frame basis. The
@@ -437,9 +432,14 @@ struct JSCompartment
     bool debugObservesAllExecution() const {
         return (debugModeBits & DebugExecutionMask) == DebugExecutionMask;
     }
-
-    bool setDebugObservesAllExecution(JSContext *cx, js::AutoDebugModeInvalidation &invalidate);
-    bool unsetDebugObservesAllExecution(JSContext *cx, js::AutoDebugModeInvalidation &invalidate);
+    void setDebugObservesAllExecution() {
+        MOZ_ASSERT(isDebuggee());
+        debugModeBits |= DebugObservesAllExecution;
+    }
+    void unsetDebugObservesAllExecution() {
+        MOZ_ASSERT(isDebuggee());
+        debugModeBits &= ~DebugObservesAllExecution;
+    }
 
     /*
      * Schedule the compartment to be delazified. Called from
@@ -497,60 +497,6 @@ JSRuntime::isAtomsZone(JS::Zone *zone)
 {
     return zone == atomsCompartment_->zone();
 }
-
-// For use when changing the debug mode flag on one or more compartments.
-// Invalidate and discard JIT code since debug mode breaks JIT assumptions.
-//
-// AutoDebugModeInvalidation has two modes: compartment or zone
-// invalidation. While it is correct to always use compartment invalidation,
-// if you know ahead of time you need to invalidate a whole zone, it is faster
-// to invalidate the zone.
-//
-// Compartment invalidation only invalidates scripts belonging to that
-// compartment.
-//
-// Zone invalidation invalidates all scripts belonging to non-special
-// (i.e. those with principals) compartments of the zone.
-//
-// FIXME: Remove entirely once bug 716647 lands.
-//
-class js::AutoDebugModeInvalidation
-{
-    JSCompartment *comp_;
-    JS::Zone *zone_;
-
-    enum {
-        NoNeed = 0,
-        ToggledOn = 1,
-        ToggledOff = 2
-    } needInvalidation_;
-
-  public:
-    explicit AutoDebugModeInvalidation(JSCompartment *comp)
-      : comp_(comp), zone_(nullptr), needInvalidation_(NoNeed)
-    { }
-
-    explicit AutoDebugModeInvalidation(JS::Zone *zone)
-      : comp_(nullptr), zone_(zone), needInvalidation_(NoNeed)
-    { }
-
-    ~AutoDebugModeInvalidation();
-
-    bool isFor(JSCompartment *comp) {
-        if (comp_)
-            return comp == comp_;
-        return comp->zone() == zone_;
-    }
-
-    void scheduleInvalidation(bool debugMode) {
-        // If we are scheduling invalidation for multiple compartments, they
-        // must all agree on the toggle. This is so we can decide if we need
-        // to invalidate on-stack scripts.
-        MOZ_ASSERT_IF(needInvalidation_ != NoNeed,
-                      needInvalidation_ == (debugMode ? ToggledOn : ToggledOff));
-        needInvalidation_ = debugMode ? ToggledOn : ToggledOff;
-    }
-};
 
 namespace js {
 

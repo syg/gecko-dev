@@ -141,6 +141,10 @@ class BaselineCompilerShared
     BytecodeAnalysis &analysis() {
         return analysis_;
     }
+
+    void setDebugMode() {
+        debugMode_ = true;
+    }
 };
 
 } // namespace jit

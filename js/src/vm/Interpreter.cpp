@@ -47,6 +47,7 @@
 #include "jsscriptinlines.h"
 
 #include "jit/IonFrames-inl.h"
+#include "vm/Debugger-inl.h"
 #include "vm/Probes-inl.h"
 #include "vm/ScopeObject-inl.h"
 #include "vm/Stack-inl.h"

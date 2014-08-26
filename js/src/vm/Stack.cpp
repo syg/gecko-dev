@@ -752,7 +752,6 @@ FrameIter::operator++()
       case INTERP:
         if (interpFrame()->isDebuggerEvalFrame() && interpFrame()->evalInFramePrev()) {
             AbstractFramePtr eifPrev = interpFrame()->evalInFramePrev();
-            MOZ_ASSERT(!eifPrev.isRematerializedFrame());
 
             // Eval-in-frame can cross contexts and works across saved frame
             // chains.
@@ -763,7 +762,7 @@ FrameIter::operator++()
 
             popInterpreterFrame();
 
-            while (isIon() || abstractFramePtr() != eifPrev) {
+            while (!hasUsableAbstractFramePtr() || abstractFramePtr() != eifPrev) {
                 if (data_.state_ == JIT)
                     popJitFrame();
                 else

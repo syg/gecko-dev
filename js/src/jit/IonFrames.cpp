@@ -402,23 +402,37 @@ HandleExceptionIon(JSContext *cx, const InlineFrameIterator &frame, ResumeFromEx
     jsbytecode *pc = frame.pc();
 
     bool bailedOutForDebugMode = false;
-    if (cx->compartment()->debugObservesAllExecution()) {
-        // If we have an exception from within Ion and the debugger is active,
-        // we do the following:
-        //
-        //   1. Bailout to baseline to reconstruct a baseline frame.
-        //   2. Resume immediately into the exception tail afterwards, and
-        //   handle the exception again with the top frame now a baseline
-        //   frame.
-        //
-        // An empty exception info denotes that we're propagating an Ion
-        // exception due to debug mode, which BailoutIonToBaseline needs to
-        // know. This is because we might not be able to fully reconstruct up
-        // to the stack depth at the snapshot, as we could've thrown in the
-        // middle of a call.
-        ExceptionBailoutInfo propagateInfo;
-        uint32_t retval = ExceptionHandlerBailout(cx, frame, rfe, propagateInfo, overrecursed);
-        bailedOutForDebugMode = retval == BAILOUT_RETURN_OK;
+    if (cx->compartment()->isDebuggee()) {
+        // We need to bail when debug mode is active to observe the Debugger's
+        // exception unwinding handler if either a Debugger is observing all
+        // execution in the compartment, or it has observed this frame, i.e.,
+        // by there being a debuggee RematerializedFrame.
+        bool shouldBail = cx->compartment()->debugObservesAllExecution();
+        if (!shouldBail) {
+            JitActivation *act = cx->mainThread().activation()->asJit();
+            RematerializedFrame *rematFrame =
+                act->lookupRematerializedFrame(frame.frame().fp(), frame.frameNo());
+            shouldBail = rematFrame && rematFrame->isDebuggee();
+        }
+
+        if (shouldBail) {
+            // If we have an exception from within Ion and the debugger is active,
+            // we do the following:
+            //
+            //   1. Bailout to baseline to reconstruct a baseline frame.
+            //   2. Resume immediately into the exception tail afterwards, and
+            //      handle the exception again with the top frame now a baseline
+            //      frame.
+            //
+            // An empty exception info denotes that we're propagating an Ion
+            // exception due to debug mode, which BailoutIonToBaseline needs to
+            // know. This is because we might not be able to fully reconstruct up
+            // to the stack depth at the snapshot, as we could've thrown in the
+            // middle of a call.
+            ExceptionBailoutInfo propagateInfo;
+            uint32_t retval = ExceptionHandlerBailout(cx, frame, rfe, propagateInfo, overrecursed);
+            bailedOutForDebugMode = retval == BAILOUT_RETURN_OK;
+        }
     }
 
     if (!script->hasTrynotes())

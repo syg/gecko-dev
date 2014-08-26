@@ -204,10 +204,6 @@ void TraceIonScripts(JSTracer* trc, JSScript *script);
 
 void RequestInterruptForIonCode(JSRuntime *rt, JSRuntime::InterruptMode mode);
 
-bool RematerializeAllFrames(JSContext *cx, JSCompartment *comp);
-bool UpdateForDebugMode(JSContext *maybecx, JSCompartment *comp,
-                        AutoDebugModeInvalidation &invalidate);
-
 bool JitSupportsFloatingPoint();
 bool JitSupportsSimd();
 

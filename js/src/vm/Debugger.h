@@ -193,6 +193,25 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
         JSSLOT_DEBUG_MEMORY_INSTANCE = JSSLOT_DEBUG_HOOK_STOP,
         JSSLOT_DEBUG_COUNT
     };
+
+    class ExecutionObservableSet
+    {
+      public:
+        typedef HashSet<Zone *>::Range ZoneRange;
+
+        virtual Zone *singleZone() const { return nullptr; }
+        virtual JSScript *singleScript() const { return nullptr; }
+        virtual const HashSet<Zone *> *zones() const { return nullptr; }
+
+        virtual bool has(JSScript *script) const = 0;
+        virtual bool has(ScriptFrameIter &iter) const = 0;
+    };
+
+    enum IsObserving {
+        NotObserving = 0,
+        Observing = 1
+    };
+
   private:
     HeapPtrObject object;               /* The Debugger object. Strong reference. */
     GlobalObjectSet debuggees;          /* Debuggee globals. Cross-compartment weak references. */
@@ -264,17 +283,7 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     class ScriptQuery;
 
     bool addDebuggeeGlobal(JSContext *cx, Handle<GlobalObject*> obj);
-    bool addDebuggeeGlobal(JSContext *cx, Handle<GlobalObject*> obj,
-                           AutoDebugModeInvalidation &invalidate);
-    void cleanupDebuggeeGlobalBeforeRemoval(FreeOp *fop, GlobalObject *global,
-                                            GlobalObjectSet::Enum *debugEnum);
-    bool removeDebuggeeGlobal(JSContext *cx, Handle<GlobalObject *> global,
-                              GlobalObjectSet::Enum *debugEnum);
-    bool removeDebuggeeGlobal(JSContext *cx, Handle<GlobalObject *> global,
-                              AutoDebugModeInvalidation &invalidate,
-                              GlobalObjectSet::Enum *debugEnum);
-    void removeDebuggeeGlobalUnderGC(FreeOp *fop, GlobalObject *global,
-                                     GlobalObjectSet::Enum *debugEnum);
+    void removeDebuggeeGlobal(FreeOp *fop, GlobalObject *global, GlobalObjectSet::Enum *debugEnum);
 
     /*
      * Cope with an error or exception in a debugger hook.
@@ -365,6 +374,20 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     static bool construct(JSContext *cx, unsigned argc, Value *vp);
     static const JSPropertySpec properties[];
     static const JSFunctionSpec methods[];
+
+    static bool updateExecutionObservabilityOfFrames(JSContext *cx, const ExecutionObservableSet &obs,
+                                                     IsObserving observing);
+    static bool updateExecutionObservabilityOfScripts(JSContext *cx, const ExecutionObservableSet &obs,
+                                                      IsObserving observing);
+    static bool updateExecutionObservability(JSContext *cx, ExecutionObservableSet &obs,
+                                             IsObserving observing);
+    static bool ensureExecutionObservabilityOfFrame(JSContext *cx, AbstractFramePtr frame);
+    static bool ensureExecutionObservabilityOfCompartment(JSContext *cx, JSCompartment *comp);
+
+    static bool hookObservesAllExecution(Hook which);
+    bool anyOtherDebuggerObservingAllExecution(GlobalObject *global) const;
+    bool hasAnyLiveHooksThatObserveAllExecution() const;
+    bool setObservesAllExecution(JSContext *cx, IsObserving observing);
 
     JSObject *getHook(Hook hook) const;
     bool hasAnyLiveHooks() const;

@@ -86,6 +86,10 @@ class RematerializedFrame
     uint8_t *top() const {
         return top_;
     }
+    JSScript *outerScript() const {
+        IonJSFrameLayout *jsFrame = (IonJSFrameLayout *)top_;
+        return ScriptFromCalleeToken(jsFrame->calleeToken());
+    }
     jsbytecode *pc() const {
         return pc_;
     }

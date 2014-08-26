@@ -447,7 +447,7 @@ void
 MarkActiveBaselineScripts(Zone *zone);
 
 MethodStatus
-BaselineCompile(JSContext *cx, JSScript *script);
+BaselineCompile(JSContext *cx, JSScript *script, bool forceDebugMode = false);
 
 } // namespace jit
 } // namespace js
