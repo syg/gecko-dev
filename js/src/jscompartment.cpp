@@ -573,7 +573,12 @@ JSCompartment::sweep(FreeOp *fop, bool releaseTypes)
     savedStacks_.sweep(rt);
 
     if (global_ && IsObjectAboutToBeFinalized(global_.unsafeGet())) {
-        if (isDebuggee())
+        // For main thread compartments, the invariant is that debug mode
+        // implies having at least one Debugger still attached. However, for
+        // off-thread compartments, which are used in off-thread parsing, they
+        // may be isDebuggee() without there being any Debuggers to prohibit
+        // asm.js.
+        if (isDebuggee() && !global_->compartment()->options().invisibleToDebugger())
             Debugger::detachAllDebuggersFromGlobal(fop, global_);
         global_.set(nullptr);
     }
