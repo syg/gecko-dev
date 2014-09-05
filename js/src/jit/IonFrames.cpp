@@ -401,7 +401,6 @@ HandleExceptionIon(JSContext *cx, const InlineFrameIterator &frame, ResumeFromEx
     RootedScript script(cx, frame.script());
     jsbytecode *pc = frame.pc();
 
-    bool bailedOutForDebugMode = false;
     if (cx->compartment()->isDebuggee()) {
         // We need to bail when debug mode is active to observe the Debugger's
         // exception unwinding handler if either a Debugger is observing all
@@ -431,7 +430,8 @@ HandleExceptionIon(JSContext *cx, const InlineFrameIterator &frame, ResumeFromEx
             // middle of a call.
             ExceptionBailoutInfo propagateInfo;
             uint32_t retval = ExceptionHandlerBailout(cx, frame, rfe, propagateInfo, overrecursed);
-            bailedOutForDebugMode = retval == BAILOUT_RETURN_OK;
+            if (retval == BAILOUT_RETURN_OK)
+                return;
         }
     }
 
@@ -462,7 +462,7 @@ HandleExceptionIon(JSContext *cx, const InlineFrameIterator &frame, ResumeFromEx
             break;
 
           case JSTRY_CATCH:
-            if (cx->isExceptionPending() && !bailedOutForDebugMode) {
+            if (cx->isExceptionPending()) {
                 // Ion can compile try-catch, but bailing out to catch
                 // exceptions is slow. Reset the warm-up counter so that if we
                 // catch many exceptions we won't Ion-compile the script.
