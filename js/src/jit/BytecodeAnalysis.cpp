@@ -18,7 +18,8 @@ BytecodeAnalysis::BytecodeAnalysis(TempAllocator &alloc, JSScript *script)
     infos_(alloc),
     usesScopeChain_(false),
     hasTryFinally_(false),
-    hasSetArg_(false)
+    hasSetArg_(false),
+    debugMode_(script->isDebuggee())
 {
 }
 
@@ -194,8 +195,10 @@ BytecodeAnalysis::init(TempAllocator &alloc, GSNCache &gsn)
                 nextpc = script_->offsetToPC(targetOffset);
         }
 
-        // Handle any fallthrough from this opcode.
-        if (BytecodeFallsThrough(op)) {
+        // Handle any fallthrough from this opcode. When compiling for debug
+        // mode, consider throws fall-through, as thrown exceptions may be
+        // "caught" by onExceptionUnwind and discarded.
+        if (BytecodeFallsThrough(op) || (op == JSOP_THROW && debugMode_)) {
             jsbytecode *fallthrough = pc + GetBytecodeLength(pc);
             JS_ASSERT(fallthrough < end);
             unsigned fallthroughOffset = script_->pcToOffset(fallthrough);

@@ -1028,7 +1028,7 @@ HandleError(JSContext *cx, InterpreterRegs &regs)
   again:
     if (cx->isExceptionPending()) {
         /* Call debugger throw hooks. */
-        if (MOZ_UNLIKELY(regs.fp()->isDebuggee())) {
+        if (MOZ_UNLIKELY(cx->compartment()->isDebuggee())) {
             JSTrapStatus status = DebugExceptionUnwind(cx, regs.fp(), regs.pc);
             switch (status) {
               case JSTRAP_ERROR:

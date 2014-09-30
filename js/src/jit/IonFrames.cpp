@@ -404,9 +404,10 @@ HandleExceptionIon(JSContext *cx, const InlineFrameIterator &frame, ResumeFromEx
     if (cx->compartment()->isDebuggee()) {
         // We need to bail when debug mode is active to observe the Debugger's
         // exception unwinding handler if either a Debugger is observing all
-        // execution in the compartment, or it has observed this frame, i.e.,
-        // by there being a debuggee RematerializedFrame.
-        bool shouldBail = cx->compartment()->debugObservesAllExecution();
+        // execution in the compartment, or it has a live onExceptionUnwind
+        // hook, or it has observed this frame (e.g., for onPop).
+        bool shouldBail = cx->compartment()->debugObservesAllExecution() ||
+                          Debugger::hasLiveOnExceptionUnwind(cx->global());
         if (!shouldBail) {
             JitActivation *act = cx->mainThread().activation()->asJit();
             RematerializedFrame *rematFrame =
@@ -524,7 +525,7 @@ HandleExceptionBaseline(JSContext *cx, const JitFrameIterator &frame, ResumeFrom
     }
 
     BaselineFrame *baselineFrame = frame.baselineFrame();
-    if (cx->isExceptionPending() && baselineFrame->isDebuggee()) {
+    if (cx->isExceptionPending() && cx->compartment()->isDebuggee()) {
         JSTrapStatus status = DebugExceptionUnwind(cx, baselineFrame, pc);
         switch (status) {
           case JSTRAP_ERROR:

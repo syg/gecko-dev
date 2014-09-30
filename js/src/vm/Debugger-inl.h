@@ -52,8 +52,7 @@ js::Debugger::onDebuggerStatement(JSContext *cx, AbstractFramePtr frame, Mutable
 JSTrapStatus
 js::Debugger::onExceptionUnwind(JSContext *cx, AbstractFramePtr frame, MutableHandleValue vp)
 {
-    MOZ_ASSERT_IF(frame.script()->isDebuggee(), frame.isDebuggee());
-    return frame.isDebuggee()
+    return cx->compartment()->isDebuggee()
            ? dispatchHook(cx, vp, OnExceptionUnwind)
            : JSTRAP_CONTINUE;
 }

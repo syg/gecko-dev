@@ -225,10 +225,10 @@ jit::BaselineCompile(JSContext *cx, JSScript *script, bool forceDebugMode)
     IonContext ictx(cx, temp);
 
     BaselineCompiler compiler(cx, *temp, script);
-    if (!compiler.init())
-        return Method_Error;
     if (forceDebugMode)
         compiler.setDebugMode();
+    if (!compiler.init())
+        return Method_Error;
 
     MethodStatus status = compiler.compile();
 

@@ -144,6 +144,7 @@ class BaselineCompilerShared
 
     void setDebugMode() {
         debugMode_ = true;
+        analysis_.setDebugMode();
     }
 };
 

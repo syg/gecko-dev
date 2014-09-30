@@ -77,7 +77,7 @@ js::ScriptDebugEpilogue(JSContext *cx, AbstractFramePtr frame, jsbytecode *pc, b
 JSTrapStatus
 js::DebugExceptionUnwind(JSContext *cx, AbstractFramePtr frame, jsbytecode *pc)
 {
-    JS_ASSERT(frame.isDebuggee());
+    MOZ_ASSERT(cx->compartment()->isDebuggee());
 
     /* Call debugger throw hook if set. */
     RootedValue rval(cx);

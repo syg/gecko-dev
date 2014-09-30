@@ -42,6 +42,8 @@ class BytecodeAnalysis
     bool hasTryFinally_;
     bool hasSetArg_;
 
+    bool debugMode_;
+
   public:
     explicit BytecodeAnalysis(TempAllocator &alloc, JSScript *script);
 
@@ -68,6 +70,11 @@ class BytecodeAnalysis
 
     bool hasSetArg() const {
         return hasSetArg_;
+    }
+
+    void setDebugMode() {
+        MOZ_ASSERT(infos_.length() == 0, "debugMode must be set before init");
+        debugMode_ = true;
     }
 };
 
