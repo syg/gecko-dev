@@ -555,6 +555,9 @@ HandleExceptionBaseline(JSContext *cx, const JitFrameIterator &frame, ResumeFrom
     MOZ_ASSERT(frame.isBaselineJS());
     MOZ_ASSERT(!*calledDebugEpilogue);
 
+    // Set for debug mode OSR. See comment in CollectJitStackScripts.
+    frame.baselineFrame()->setIsHandlingException();
+
     RootedScript script(cx);
     jsbytecode *pc;
     frame.baselineScriptAndPc(script.address(), &pc);

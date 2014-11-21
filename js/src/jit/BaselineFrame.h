@@ -73,7 +73,12 @@ class BaselineFrame
         // the only way to clear it is to pop the frame. Do *not* set this if
         // we will resume execution on the frame, such as in a catch or
         // finally block.
-        HAS_UNWOUND_SCOPE_OVERRIDE_PC = 1 << 11
+        HAS_UNWOUND_SCOPE_OVERRIDE_PC = 1 << 11,
+
+        // Frame is currently handling an exception. This is marked for the
+        // benefit of debug mode OSR. Once it is set, the only way to clear it
+        // is to pop the frame.
+        HANDLING_EXCEPTION = 1 << 12
     };
 
   protected: // Silence Clang warning about unused private fields.
@@ -283,6 +288,13 @@ class BaselineFrame
     void unsetIsDebuggee() {
         MOZ_ASSERT(!script()->isDebuggee());
         flags_ &= ~DEBUGGEE;
+    }
+
+    bool isHandlingException() const {
+        return flags_ & HANDLING_EXCEPTION;
+    }
+    void setIsHandlingException() {
+        flags_ |= HANDLING_EXCEPTION;
     }
 
     JSScript *evalScript() const {
