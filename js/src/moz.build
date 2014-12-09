@@ -165,7 +165,6 @@ UNIFIED_SOURCES += [
     'jit/JitcodeMap.cpp',
     'jit/JitFrames.cpp',
     'jit/JitOptions.cpp',
-    'jit/JitSpewer.cpp',
     'jit/JSONSpewer.cpp',
     'jit/LICM.cpp',
     'jit/LinearScan.cpp',
@@ -294,6 +293,7 @@ UNIFIED_SOURCES += [
 SOURCES += [
     'builtin/RegExp.cpp',
     'frontend/Parser.cpp',
+    'jit/JitSpewer.cpp',
     'jsarray.cpp',
     'jsatom.cpp',
     'jsmath.cpp',

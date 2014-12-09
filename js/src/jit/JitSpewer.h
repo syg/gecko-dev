@@ -99,8 +99,6 @@ enum JitSpewChannel {
 // None of the global functions have effect on non-debug builds.
 static const int NULL_ID = -1;
 
-#ifdef DEBUG
-
 class IonSpewer
 {
   private:
@@ -139,7 +137,7 @@ void IonSpewEndFunction();
 
 void CheckLogging();
 extern FILE *JitSpewFile;
-void JitSpew(JitSpewChannel channel, const char *fmt, ...);
+void JitSpewSlow(JitSpewChannel channel, const char *fmt, ...);
 void JitSpewStart(JitSpewChannel channel, const char *fmt, ...);
 void JitSpewCont(JitSpewChannel channel, const char *fmt, ...);
 void JitSpewFin(JitSpewChannel channel);
@@ -154,46 +152,12 @@ void EnableChannel(JitSpewChannel channel);
 void DisableChannel(JitSpewChannel channel);
 void EnableIonDebugLogging();
 
-#else
-
-static inline void IonSpewNewFunction(MIRGraph *graph, JS::HandleScript function)
-{ }
-static inline void IonSpewPass(const char *pass)
-{ }
-static inline void IonSpewPass(const char *pass, LinearScanAllocator *ra)
-{ }
-static inline void IonSpewEndFunction()
-{ }
-
-static inline void CheckLogging()
-{ }
-static FILE *const JitSpewFile = nullptr;
-static inline void JitSpew(JitSpewChannel, const char *fmt, ...)
-{ }
-static inline void JitSpewStart(JitSpewChannel channel, const char *fmt, ...)
-{ }
-static inline void JitSpewCont(JitSpewChannel channel, const char *fmt, ...)
-{ }
-static inline void JitSpewFin(JitSpewChannel channel)
-{ }
-
-static inline void JitSpewHeader(JitSpewChannel channel)
-{ }
-static inline bool JitSpewEnabled(JitSpewChannel channel)
-{ return false; }
-static inline void JitSpewVA(JitSpewChannel channel, const char *fmt, va_list ap)
-{ }
-static inline void JitSpewDef(JitSpewChannel channel, const char *str, MDefinition *def)
-{ }
-
-static inline void EnableChannel(JitSpewChannel)
-{ }
-static inline void DisableChannel(JitSpewChannel)
-{ }
-static inline void EnableIonDebugLogging()
-{ }
-
-#endif /* DEBUG */
+extern uint32_t LoggingBits;
+#define JitSpew(...)                            \
+    JS_BEGIN_MACRO                              \
+    if (LoggingBits != 0)                       \
+        JitSpewSlow(__VA_ARGS__);               \
+    JS_END_MACRO
 
 template <JitSpewChannel Channel>
 class AutoDisableSpew
@@ -209,10 +173,8 @@ class AutoDisableSpew
 
     ~AutoDisableSpew()
     {
-#ifdef DEBUG
         if (enabled_)
             EnableChannel(Channel);
-#endif
     }
 };
 

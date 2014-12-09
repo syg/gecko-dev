@@ -7,8 +7,6 @@
 #ifndef jit_C1Spewer_h
 #define jit_C1Spewer_h
 
-#ifdef DEBUG
-
 #include "NamespaceImports.h"
 
 #include "js/RootingAPI.h"
@@ -48,7 +46,5 @@ class C1Spewer
 
 } // namespace jit
 } // namespace js
-
-#endif /* DEBUG */
 
 #endif /* jit_C1Spewer_h */

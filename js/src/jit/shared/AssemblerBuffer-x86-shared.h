@@ -300,7 +300,7 @@ namespace jit {
                 if (i > -1) {
                     if (printer)
                         printer->printf("%s\n", buf);
-                    js::jit::JitSpew(js::jit::JitSpew_Codegen, "%s", buf);
+                    JitSpew(js::jit::JitSpew_Codegen, "%s", buf);
                 }
             }
         }
@@ -319,7 +319,7 @@ namespace jit {
                 va_end(va);
 
                 if (i > -1)
-                    js::jit::JitSpew(js::jit::JitSpew_Codegen, "%s", buf);
+                    JitSpew(js::jit::JitSpew_Codegen, "%s", buf);
             }
         }
     };

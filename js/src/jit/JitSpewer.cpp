@@ -4,8 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifdef DEBUG
-
 #include "jit/JitSpewer.h"
 
 #include "jit/Ion.h"
@@ -29,8 +27,12 @@ using namespace js::jit;
 // IonSpewer singleton.
 static IonSpewer ionspewer;
 
+// External linkage, since JitSpew is enabled everywhere and is a variadic
+// macro that checks if any channels before doing the slower, variadic
+// argument unpacking.
+namespace js { namespace jit { uint32_t LoggingBits = 0; } }
+
 static bool LoggingChecked = false;
-static uint32_t LoggingBits = 0;
 static uint32_t filteredOutCompilations = 0;
 
 static const char * const ChannelNames[] =
@@ -384,7 +386,7 @@ jit::JitSpewVA(JitSpewChannel channel, const char *fmt, va_list ap)
 }
 
 void
-jit::JitSpew(JitSpewChannel channel, const char *fmt, ...)
+jit::JitSpewSlow(JitSpewChannel channel, const char *fmt, ...)
 {
     va_list ap;
     va_start(ap, fmt);
@@ -460,6 +462,3 @@ IonSpewFunction::~IonSpewFunction()
 {
     IonSpewEndFunction();
 }
-
-#endif /* DEBUG */
-

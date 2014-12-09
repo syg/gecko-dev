@@ -642,7 +642,6 @@ class MDefinition : public MNode
         uses_.remove(use);
     }
 
-#ifdef DEBUG
     // Number of uses of this instruction. This function is only available
     // in DEBUG mode since it requires traversing the list. Most users should
     // use hasUses() or hasOneUse() instead.
@@ -653,7 +652,6 @@ class MDefinition : public MNode
     // requires traversing the list. Most users should use hasUses() or
     // hasOneUse() instead.
     size_t defUseCount() const;
-#endif
 
     // Test whether this MDefinition has exactly one use.
     bool hasOneUse() const;

@@ -4,8 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifdef DEBUG
-
 #include "jit/C1Spewer.h"
 
 #include <time.h>
@@ -216,6 +214,4 @@ C1Spewer::spewPass(FILE *fp, MBasicBlock *block)
 
     fprintf(fp, "  end_block\n");
 }
-
-#endif /* DEBUG */
 
