@@ -8,6 +8,7 @@
 #include "jswrapper.h"
 
 #include "proxy/DeadObjectProxy.h"
+#include "vm/Debugger.h"
 #include "vm/WrapperObject.h"
 
 #include "jscompartmentinlines.h"
@@ -438,13 +439,21 @@ js::NukeCrossCompartmentWrapper(JSContext* cx, JSObject* wrapper)
     MOZ_ASSERT(IsDeadProxyObject(wrapper));
 }
 
+bool
+js::ShouldNotNuke(JSObject* wrapped, js::NukeReferencesToWindow nukeReferencesToWindow)
+{
+    // Don't nuke references to the outer window when navigating.
+    return nukeReferencesToWindow == DontNukeWindowReferences &&
+           IsWindowProxy(wrapped);
+}
+
 /*
- * NukeChromeCrossCompartmentWrappersForGlobal reaches into chrome and cuts
- * all of the cross-compartment wrappers that point to objects parented to
- * obj's global.  The snag here is that we need to avoid cutting wrappers that
- * point to the window object on page navigation (inner window destruction)
- * and only do that on tab close (outer window destruction).  Thus the
- * option of how to handle the global object.
+ * NukeCrossCompartmentWrappers reaches into chrome and cuts all of the
+ * cross-compartment wrappers that point to objects parented to obj's global.
+ * The snag here is that we need to avoid cutting wrappers that point to the
+ * window object on page navigation (inner window destruction) and only do
+ * that on tab close (outer window destruction).  Thus the option of how to
+ * handle the global object.
  */
 JS_FRIEND_API(bool)
 js::NukeCrossCompartmentWrappers(JSContext* cx,
@@ -467,17 +476,23 @@ js::NukeCrossCompartmentWrappers(JSContext* cx,
             // Some cross-compartment wrappers are for strings.  We're not
             // interested in those.
             const CrossCompartmentKey& k = e.front().key();
-            if (k.kind != CrossCompartmentKey::ObjectWrapper)
+            if (k.kind == CrossCompartmentKey::StringWrapper)
                 continue;
+
+            // We might have Debugger.Object, Debugger.Environment,
+            // Debugger.Source, or Debugger.Script wrappers to unwrap. This
+            // should only happen when devtools are open.
+            if (MOZ_UNLIKELY(k.kind != CrossCompartmentKey::ObjectWrapper)) {
+                Debugger::nukeCrossCompartmentWrapper(cx, e, targetFilter,
+                                                      nukeReferencesToWindow);
+                continue;
+            }
 
             AutoWrapperRooter wobj(cx, WrapperValue(e));
             JSObject* wrapped = UncheckedUnwrap(wobj);
 
-            if (nukeReferencesToWindow == DontNukeWindowReferences &&
-                IsWindowProxy(wrapped))
-            {
+            if (ShouldNotNuke(wrapped, nukeReferencesToWindow))
                 continue;
-            }
 
             if (targetFilter.match(wrapped->compartment())) {
                 // We found a wrapper to nuke.

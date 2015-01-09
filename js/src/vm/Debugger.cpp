@@ -106,6 +106,11 @@ void DebuggerEnv_trace(JSTracer* trc, JSObject* obj);
 void DebuggerScript_trace(JSTracer* trc, JSObject* obj);
 void DebuggerSource_trace(JSTracer* trc, JSObject* obj);
 
+static inline JSObject* GetObjectReferent(JSObject* obj);
+static inline Env* GetEnvReferent(JSObject* obj);
+static inline JSScript* GetScriptReferent(JSObject* obj);
+static inline ScriptSourceObject* GetSourceReferent(JSObject* obj);
+
 
 /*** Utils ***************************************************************************************/
 
@@ -812,36 +817,34 @@ Debugger::wrapDebuggeeValue(JSContext* cx, MutableHandleValue vp)
     assertSameCompartment(cx, object.get());
 
     if (vp.isObject()) {
-        RootedObject obj(cx, &vp.toObject());
+        RootedObject referentObj(cx, &vp.toObject());
 
-        if (obj->is<JSFunction>()) {
-            MOZ_ASSERT(!IsInternalFunctionObject(*obj));
-            RootedFunction fun(cx, &obj->as<JSFunction>());
+        if (referentObj->is<JSFunction>()) {
+            RootedFunction fun(cx, &referentObj->as<JSFunction>());
             if (!EnsureFunctionHasScript(cx, fun))
                 return false;
         }
 
-        DependentAddPtr<ObjectWeakMap> p(cx, objects, obj);
+        DependentAddPtr<ObjectWeakMap> p(cx, objects, referentObj);
         if (p) {
             vp.setObject(*p->value());
         } else {
             /* Create a new Debugger.Object for obj. */
             RootedObject proto(cx, &object->getReservedSlot(JSSLOT_DEBUG_OBJECT_PROTO).toObject());
             NativeObject* dobj =
-                NewNativeObjectWithGivenProto(cx, &DebuggerObject_class, proto,
-                                              TenuredObject);
+                NewNativeObjectWithGivenProto(cx, &DebuggerObject_class, proto, TenuredObject);
             if (!dobj)
                 return false;
-            dobj->setPrivateGCThing(obj);
+            dobj->setPrivateGCThing(referentObj);
             dobj->setReservedSlot(JSSLOT_DEBUGOBJECT_OWNER, ObjectValue(*object));
 
-            if (!p.add(cx, objects, obj, dobj))
+            if (!p.add(cx, objects, referentObj, dobj))
                 return false;
 
-            if (obj->compartment() != object->compartment()) {
-                CrossCompartmentKey key(CrossCompartmentKey::DebuggerObject, object, obj);
+            if (referentObj->compartment() != object->compartment()) {
+                CrossCompartmentKey key(CrossCompartmentKey::DebuggerObject, object, referentObj);
                 if (!object->compartment()->putWrapper(cx, key, ObjectValue(*dobj))) {
-                    objects.remove(obj);
+                    objects.remove(referentObj);
                     ReportOutOfMemory(cx);
                     return false;
                 }
@@ -899,7 +902,7 @@ Debugger::unwrapDebuggeeObject(JSContext* cx, MutableHandleObject obj)
         return false;
     }
 
-    obj.set(static_cast<JSObject*>(ndobj->getPrivate()));
+    obj.set(GetObjectReferent(ndobj));
     return true;
 }
 
@@ -2694,6 +2697,130 @@ Debugger::findZoneEdges(Zone* zone, js::gc::ComponentFinder<Zone>& finder)
     }
 }
 
+// Referents that have been nuked.
+#define DEAD_OBJECT_REFERENT ((void *)0x1)
+
+static inline bool
+HasDeadReferent(JSObject* obj)
+{
+    return obj->as<NativeObject>().getPrivate() == DEAD_OBJECT_REFERENT;
+}
+
+static inline void
+KillReferent(JSObject* obj)
+{
+    // Debugger.{Object,Environment,Script,Source} are all NativeObjects
+    // that hold their referents in the private slot.
+    NotifyGCNukeWrapper(obj);
+    obj->as<NativeObject>().setPrivate(DEAD_OBJECT_REFERENT);
+}
+
+#undef DEAD_OBJECT_REFERENT
+
+static inline bool
+CheckDeadReferent(JSContext *cx, JSObject* obj)
+{
+    if (HasDeadReferent(obj)) {
+        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_DEAD_OBJECT);
+        return false;
+    }
+    return true;
+}
+
+// The NukeCrossCompartmentX functions below return true on having nuked the
+// referent, and false otherwise.
+
+/* static */ bool
+Debugger::nukeCrossCompartmentScript(JSObject* obj, const CompartmentFilter& targetFilter)
+{
+    JSScript* script = GetScriptReferent(obj);
+    if (targetFilter.match(script->compartment())) {
+        Debugger* dbg = fromChildJSObject(obj);
+        dbg->scripts.remove(script);
+        KillReferent(obj);
+        return true;
+    }
+    return false;
+}
+
+/* static */ bool
+Debugger::nukeCrossCompartmentSource(JSObject* obj, const CompartmentFilter& targetFilter,
+                                     NukeReferencesToWindow nukeReferencesToWindow)
+{
+    ScriptSourceObject* source = GetSourceReferent(obj);
+    if (ShouldNotNuke(source, nukeReferencesToWindow))
+        return false;
+    if (targetFilter.match(source->compartment())) {
+        Debugger* dbg = fromChildJSObject(obj);
+        dbg->sources.remove(source);
+        KillReferent(obj);
+        return true;
+    }
+    return false;
+}
+
+/* static */ bool
+Debugger::nukeCrossCompartmentObject(JSObject* obj, const CompartmentFilter& targetFilter,
+                                     NukeReferencesToWindow nukeReferencesToWindow)
+{
+    JSObject* wrapped = GetObjectReferent(obj);
+    if (ShouldNotNuke(wrapped, nukeReferencesToWindow))
+        return false;
+    if (targetFilter.match(wrapped->compartment())) {
+        Debugger* dbg = fromChildJSObject(obj);
+        dbg->objects.remove(wrapped);
+        KillReferent(obj);
+        return true;
+    }
+    return false;
+}
+
+/* static */ bool
+Debugger::nukeCrossCompartmentEnv(JSObject* obj, const CompartmentFilter& targetFilter,
+                                  NukeReferencesToWindow nukeReferencesToWindow)
+{
+    Env* env = GetEnvReferent(obj);
+    if (ShouldNotNuke(env, nukeReferencesToWindow))
+        return false;
+    if (targetFilter.match(env->compartment())) {
+        Debugger* dbg = fromChildJSObject(obj);
+        dbg->environments.remove(env);
+        KillReferent(obj);
+        return true;
+    }
+    return false;
+}
+
+/* static */ void
+Debugger::nukeCrossCompartmentWrapper(JSContext* cx, JSCompartment::WrapperEnum& e,
+                                      const CompartmentFilter& targetFilter,
+                                      js::NukeReferencesToWindow nukeReferencesToWindow)
+{
+    const CrossCompartmentKey& k = e.front().key();
+    AutoWrapperRooter wobj(cx, WrapperValue(e));
+
+    bool nuked = false;
+    switch (k.kind) {
+      case CrossCompartmentKey::DebuggerScript:
+        nuked = nukeCrossCompartmentScript(wobj, targetFilter);
+        break;
+      case CrossCompartmentKey::DebuggerSource:
+        nuked = nukeCrossCompartmentSource(wobj, targetFilter, nukeReferencesToWindow);
+        break;
+      case CrossCompartmentKey::DebuggerObject:
+        nuked = nukeCrossCompartmentObject(wobj, targetFilter, nukeReferencesToWindow);
+        break;
+      case CrossCompartmentKey::DebuggerEnvironment:
+        nuked = nukeCrossCompartmentEnv(wobj, targetFilter, nukeReferencesToWindow);
+        break;
+      default:
+        MOZ_CRASH("Bad Debugger CCW kind");
+    }
+
+    if (nuked)
+        e.removeFront();
+}
+
 /* static */ void
 Debugger::finalize(FreeOp* fop, JSObject* obj)
 {
@@ -3594,7 +3721,6 @@ Debugger::removeDebuggeeGlobal(FreeOp* fop, GlobalObject* global,
         global->compartment()->updateDebuggerObservesCoverage();
     }
 }
-
 
 static inline ScriptSourceObject* GetSourceReferent(JSObject* obj);
 
@@ -4615,6 +4741,8 @@ static inline JSScript*
 GetScriptReferent(JSObject* obj)
 {
     MOZ_ASSERT(obj->getClass() == &DebuggerScript_class);
+    if (HasDeadReferent(obj))
+        return nullptr;
     return static_cast<JSScript*>(obj->as<NativeObject>().getPrivate());
 }
 
@@ -4700,9 +4828,12 @@ DebuggerScript_check(JSContext* cx, const Value& v, const char* clsname, const c
      * but whose script is null.
      */
     if (!GetScriptReferent(thisobj)) {
-        MOZ_ASSERT(!GetScriptReferent(thisobj));
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_PROTO,
-                             clsname, fnname, "prototype object");
+        if (HasDeadReferent(thisobj)) {
+            JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_DEAD_OBJECT);
+        } else {
+            JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_PROTO,
+                                 clsname, fnname, "prototype object");
+        }
         return nullptr;
     }
 
@@ -5757,6 +5888,8 @@ static inline ScriptSourceObject*
 GetSourceReferent(JSObject* obj)
 {
     MOZ_ASSERT(obj->getClass() == &DebuggerSource_class);
+    if (HasDeadReferent(obj))
+        return nullptr;
     return static_cast<ScriptSourceObject*>(obj->as<NativeObject>().getPrivate());
 }
 
@@ -5849,7 +5982,8 @@ DebuggerSource_checkThis(JSContext* cx, const CallArgs& args, const char* fnname
         return nullptr;
     }
 
-    NativeObject* nthisobj = &thisobj->as<NativeObject>();
+    if (!CheckDeadReferent(cx, thisobj))
+        return nullptr;
 
     if (!GetSourceReferent(thisobj)) {
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_PROTO,
@@ -5857,7 +5991,7 @@ DebuggerSource_checkThis(JSContext* cx, const CallArgs& args, const char* fnname
         return nullptr;
     }
 
-    return nthisobj;
+    return &thisobj->as<NativeObject>();
 }
 
 #define THIS_DEBUGSOURCE_REFERENT(cx, argc, vp, fnname, args, obj, sourceObject)    \
@@ -6907,14 +7041,23 @@ static const JSFunctionSpec DebuggerFrame_methods[] = {
 
 /*** Debugger.Object *****************************************************************************/
 
+static inline JSObject*
+GetObjectReferent(JSObject* obj)
+{
+    MOZ_ASSERT(obj->getClass() == &DebuggerObject_class);
+    if (HasDeadReferent(obj))
+        return nullptr;
+    return static_cast<JSObject*>(obj->as<NativeObject>().getPrivate());
+}
+
 void
 DebuggerObject_trace(JSTracer* trc, JSObject* obj)
 {
     /*
-     * There is a barrier on private pointers, so the Unbarriered marking
-     * is okay.
+     * There is a barrier on private pointers, so the ManuallyBarriered
+     * marking is okay.
      */
-    if (JSObject* referent = (JSObject*) obj->as<NativeObject>().getPrivate()) {
+    if (JSObject* referent = GetObjectReferent(obj)) {
         TraceManuallyBarrieredCrossCompartmentEdge(trc, obj, &referent,
                                                    "Debugger.Object referent");
         obj->as<NativeObject>().setPrivateUnbarriered(referent);
@@ -6945,18 +7088,20 @@ DebuggerObject_checkThis(JSContext* cx, const CallArgs& args, const char* fnname
         return nullptr;
     }
 
+    if (!CheckDeadReferent(cx, thisobj))
+        return nullptr;
+
     /*
      * Forbid Debugger.Object.prototype, which is of class DebuggerObject_class
      * but isn't a real working Debugger.Object. The prototype object is
      * distinguished by having no referent.
      */
-    NativeObject* nthisobj = &thisobj->as<NativeObject>();
-    if (!nthisobj->getPrivate()) {
+    if (!GetObjectReferent(thisobj)) {
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_PROTO,
                              "Debugger.Object", fnname, "prototype object");
         return nullptr;
     }
-    return nthisobj;
+    return &thisobj->as<NativeObject>();
 }
 
 #define THIS_DEBUGOBJECT_REFERENT(cx, argc, vp, fnname, args, obj)            \
@@ -6964,7 +7109,7 @@ DebuggerObject_checkThis(JSContext* cx, const CallArgs& args, const char* fnname
     RootedObject obj(cx, DebuggerObject_checkThis(cx, args, fnname));         \
     if (!obj)                                                                 \
         return false;                                                         \
-    obj = (JSObject*) obj->as<NativeObject>().getPrivate();                   \
+    obj = GetObjectReferent(obj);                                             \
     MOZ_ASSERT(obj)
 
 #define THIS_DEBUGOBJECT_OWNER_REFERENT(cx, argc, vp, fnname, args, dbg, obj) \
@@ -6973,7 +7118,7 @@ DebuggerObject_checkThis(JSContext* cx, const CallArgs& args, const char* fnname
    if (!obj)                                                                  \
        return false;                                                          \
    Debugger* dbg = Debugger::fromChildJSObject(obj);                          \
-   obj = (JSObject*) obj->as<NativeObject>().getPrivate();                    \
+   obj = GetObjectReferent(obj);                                              \
    MOZ_ASSERT(obj)
 
 static bool
@@ -7874,14 +8019,24 @@ static const JSFunctionSpec DebuggerObject_methods[] = {
 
 /*** Debugger.Environment ************************************************************************/
 
+static inline Env*
+GetEnvReferent(JSObject* obj)
+{
+    MOZ_ASSERT(obj->getClass() == &DebuggerEnv_class);
+    if (HasDeadReferent(obj))
+        return nullptr;
+    return static_cast<Env*>(obj->as<NativeObject>().getPrivate());
+}
+
 void
 DebuggerEnv_trace(JSTracer* trc, JSObject* obj)
 {
     /*
-     * There is a barrier on private pointers, so the Unbarriered marking
-     * is okay.
+     * There is a barrier on private pointers, so the ManuallyBarriered
+     * marking is okay.
      */
-    if (Env* referent = (JSObject*) obj->as<NativeObject>().getPrivate()) {
+
+    if (Env* referent = GetEnvReferent(obj)) {
         TraceManuallyBarrieredCrossCompartmentEdge(trc, obj, &referent,
                                                    "Debugger.Environment referent");
         obj->as<NativeObject>().setPrivateUnbarriered(referent);
@@ -7913,13 +8068,15 @@ DebuggerEnv_checkThis(JSContext* cx, const CallArgs& args, const char* fnname,
         return nullptr;
     }
 
+    if (!CheckDeadReferent(cx, thisobj))
+        return nullptr;
+
     /*
      * Forbid Debugger.Environment.prototype, which is of class DebuggerEnv_class
      * but isn't a real working Debugger.Environment. The prototype object is
      * distinguished by having no referent.
      */
-    NativeObject* nthisobj = &thisobj->as<NativeObject>();
-    if (!nthisobj->getPrivate()) {
+    if (!GetEnvReferent(thisobj)) {
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_PROTO,
                              "Debugger.Environment", fnname, "prototype object");
         return nullptr;
@@ -7930,15 +8087,15 @@ DebuggerEnv_checkThis(JSContext* cx, const CallArgs& args, const char* fnname,
      * environments.
      */
     if (requireDebuggee) {
-        Rooted<Env*> env(cx, static_cast<Env*>(nthisobj->getPrivate()));
-        if (!Debugger::fromChildJSObject(nthisobj)->observesGlobal(&env->global())) {
+        Rooted<Env*> env(cx, GetEnvReferent(thisobj));
+        if (!Debugger::fromChildJSObject(thisobj)->observesGlobal(&env->global())) {
             JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_DEBUG_NOT_DEBUGGEE,
                                  "Debugger.Environment", "environment");
             return nullptr;
         }
     }
 
-    return nthisobj;
+    return &thisobj->as<NativeObject>();
 }
 
 #define THIS_DEBUGENV(cx, argc, vp, fnname, args, envobj, env)                \
@@ -7946,12 +8103,12 @@ DebuggerEnv_checkThis(JSContext* cx, const CallArgs& args, const char* fnname,
     NativeObject* envobj = DebuggerEnv_checkThis(cx, args, fnname);           \
     if (!envobj)                                                              \
         return false;                                                         \
-    Rooted<Env*> env(cx, static_cast<Env*>(envobj->getPrivate()));            \
+    Rooted<Env*> env(cx, GetEnvReferent(envobj));                             \
     MOZ_ASSERT(env);                                                          \
     MOZ_ASSERT(!IsSyntacticScope(env));
 
  #define THIS_DEBUGENV_OWNER(cx, argc, vp, fnname, args, envobj, env, dbg)    \
-     THIS_DEBUGENV(cx, argc, vp, fnname, args, envobj, env);                  \
+    THIS_DEBUGENV(cx, argc, vp, fnname, args, envobj, env);                   \
     Debugger* dbg = Debugger::fromChildJSObject(envobj)
 
 static bool
@@ -8069,7 +8226,7 @@ DebuggerEnv_getInspectable(JSContext* cx, unsigned argc, Value* vp)
     NativeObject* envobj = DebuggerEnv_checkThis(cx, args, "get inspectable", false);
     if (!envobj)
         return false;
-    Rooted<Env*> env(cx, static_cast<Env*>(envobj->getPrivate()));
+    Rooted<Env*> env(cx, GetEnvReferent(envobj));
     MOZ_ASSERT(env);
     MOZ_ASSERT(!env->is<ScopeObject>());
 

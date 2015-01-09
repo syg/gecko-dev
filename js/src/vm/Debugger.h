@@ -719,6 +719,17 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     static void detachAllDebuggersFromGlobal(FreeOp* fop, GlobalObject* global);
     static void findZoneEdges(JS::Zone* v, gc::ComponentFinder<JS::Zone>& finder);
 
+    static bool nukeCrossCompartmentScript(JSObject* obj, const CompartmentFilter& targetFilter);
+    static bool nukeCrossCompartmentSource(JSObject* obj, const CompartmentFilter& targetFilter,
+                                           NukeReferencesToWindow nukeReferencesToWindow);
+    static bool nukeCrossCompartmentObject(JSObject* obj, const CompartmentFilter& targetFilter,
+                                           NukeReferencesToWindow nukeReferencesToWindow);
+    static bool nukeCrossCompartmentEnv(JSObject* obj, const CompartmentFilter& targetFilter,
+                                        NukeReferencesToWindow nukeReferencesToWindow);
+    static void nukeCrossCompartmentWrapper(JSContext* cx, JSCompartment::WrapperEnum& e,
+                                            const CompartmentFilter& targetFilter,
+                                            js::NukeReferencesToWindow nukeReferencesToWindow);
+
     /*
      * JSTrapStatus Overview
      * ---------------------

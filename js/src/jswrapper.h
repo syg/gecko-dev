@@ -303,6 +303,9 @@ NukeCrossCompartmentWrapper(JSContext* cx, JSObject* wrapper);
 bool
 RemapWrapper(JSContext* cx, JSObject* wobj, JSObject* newTarget);
 
+bool
+ShouldNotNuke(JSObject* wrapped, NukeReferencesToWindow nukeReferencesToWindow);
+
 JS_FRIEND_API(bool)
 RemapAllWrappersForObject(JSContext* cx, JSObject* oldTarget,
                           JSObject* newTarget);
