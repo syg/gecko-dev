@@ -317,16 +317,19 @@ struct JSCompartment
     bool                         gcPreserveJitCode;
 
     enum {
-        DebugMode = 1 << 0,
-        DebugObservesAllExecution = 1 << 1,
-        DebugNeedsDelazification = 1 << 2
+        IsDebuggee = 1 << 0,
+        DebuggerObservesAllExecution = 1 << 1,
+        DebuggerObservesAsmJS = 1 << 2,
+        DebuggerNeedsDelazification = 1 << 3
     };
 
-    // DebugObservesAllExecution is a submode of DebugMode, and is only valid
-    // when DebugMode is also set.
-    static const unsigned DebugExecutionMask = DebugMode | DebugObservesAllExecution;
-
     unsigned                     debugModeBits;
+
+    static const unsigned DebuggerObservesMask = IsDebuggee |
+                                                 DebuggerObservesAllExecution |
+                                                 DebuggerObservesAsmJS;
+
+    void updateDebuggerObservesFlag(unsigned flag);
 
   public:
     JSCompartment(JS::Zone *zone, const JS::CompartmentOptions &options);
@@ -451,32 +454,44 @@ struct JSCompartment
 
     // True if this compartment's global is a debuggee of some Debugger
     // object.
-    bool isDebuggee() const { return !!(debugModeBits & DebugMode); }
-    void setIsDebuggee() { debugModeBits |= DebugMode; }
+    bool isDebuggee() const { return !!(debugModeBits & IsDebuggee); }
+    void setIsDebuggee() { debugModeBits |= IsDebuggee; }
     void unsetIsDebuggee();
 
-    // True if an this compartment's global is a debuggee of some Debugger
+    // True if this compartment's global is a debuggee of some Debugger
     // object with a live hook that observes all execution; e.g.,
     // onEnterFrame.
-    bool debugObservesAllExecution() const {
-        return (debugModeBits & DebugExecutionMask) == DebugExecutionMask;
+    bool debuggerObservesAllExecution() const {
+        static const unsigned Mask = IsDebuggee | DebuggerObservesAllExecution;
+        return (debugModeBits & Mask) == Mask;
     }
-    void setDebugObservesAllExecution() {
-        MOZ_ASSERT(isDebuggee());
-        debugModeBits |= DebugObservesAllExecution;
-    }
-    void unsetDebugObservesAllExecution() {
-        MOZ_ASSERT(isDebuggee());
-        debugModeBits &= ~DebugObservesAllExecution;
+    void updateDebuggerObservesAllExecution() {
+        updateDebuggerObservesFlag(DebuggerObservesAllExecution);
     }
 
-    bool needsDelazificationForDebugger() const { return debugModeBits & DebugNeedsDelazification; }
+    // True if this compartment's global is a debuggee of some Debugger object
+    // whose allowUnobservedAsmJS flag is true.
+    //
+    // Note that since AOT asm.js functions cannot bail out, this flag really
+    // means "observe asm.js from this point forward". We cannot make
+    // already-compiled asm.js code observable to Debugger.
+    bool debuggerObservesAsmJS() const {
+        static const unsigned Mask = IsDebuggee | DebuggerObservesAsmJS;
+        return (debugModeBits & Mask) == Mask;
+    }
+    void updateDebuggerObservesAsmJS() {
+        updateDebuggerObservesFlag(DebuggerObservesAsmJS);
+    }
+
+    bool needsDelazificationForDebugger() const {
+        return debugModeBits & DebuggerNeedsDelazification;
+    }
 
     /*
      * Schedule the compartment to be delazified. Called from
      * LazyScript::Create.
      */
-    void scheduleDelazificationForDebugger() { debugModeBits |= DebugNeedsDelazification; }
+    void scheduleDelazificationForDebugger() { debugModeBits |= DebuggerNeedsDelazification; }
 
     /*
      * If we scheduled delazification for turning on debug mode, delazify all

@@ -25,6 +25,18 @@ its prototype:
     disentangling itself from the debuggee, regardless of what sort of
     events or handlers or "points" we add to the interface.
 
+`allowUnobservedAsmJS`
+:   A boolean value indicating whether this `Debugger` instance's debuggee
+    globals allows asm.js functions are invisible to this instance's handlers,
+    and breakpoints. In other words, setting this to `false` inhibits the
+    ahead-of-time asm.js compiler and forces asm.js code to run as normal
+    JavaScript. This is an cacessor property with a getter and setter. It is
+    initially `false` in a freshly created `Debugger` instance.
+
+    This flag is intended to be used when one wishes to use the subsystems of
+    the Debugger API (e.g, [`Debugger.Source`]) for other purposes than step
+    debugging a target JavaScript program.
+
 `uncaughtExceptionHook`
 :   Either `null` or a function that SpiderMonkey calls when a call to a
     debug event handler, breakpoint handler, watchpoint handler, or similar
