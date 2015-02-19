@@ -1447,8 +1447,8 @@ Interpret(JSContext *cx, RunState &state)
      * When Debugger puts a script in single-step mode, all js::Interpret
      * invocations that might be presently running that script must have
      * interrupts enabled. It's not practical to simply check
-     * script->stepModeEnabled() at each point some callee could have changed
-     * it, because there are so many places js::Interpret could possibly cause
+     * fp.singleStepMode() at each point some callee could have changed it,
+     * because there are so many places js::Interpret could possibly cause
      * JavaScript to run: each place an object might be coerced to a primitive
      * or a number, for example. So instead, we expose a simple mechanism to
      * let Debugger tweak the affected js::Interpret frames when an onStep
@@ -1497,7 +1497,7 @@ Interpret(JSContext *cx, RunState &state)
 #define SET_SCRIPT(s)                                                         \
     JS_BEGIN_MACRO                                                            \
         script = (s);                                                         \
-        if (script->hasAnyBreakpointsOrStepMode() || script->hasScriptCounts()) \
+        if (REGS.fp()->singleStepMode() || script->hasScriptCounts())         \
             activation.enableInterruptsUnconditionally();                     \
     JS_END_MACRO
 
@@ -1589,7 +1589,7 @@ CASE(EnableInterruptsPseudoOpcode)
     }
 
     if (script->isDebuggee()) {
-        if (script->stepModeEnabled()) {
+        if (REGS.fp()->singleStepMode()) {
             RootedValue rval(cx);
             JSTrapStatus status = JSTRAP_CONTINUE;
             status = Debugger::onSingleStep(cx, &rval);
@@ -1610,7 +1610,7 @@ CASE(EnableInterruptsPseudoOpcode)
             moreInterrupts = true;
         }
 
-        if (script->hasAnyBreakpointsOrStepMode())
+        if (script->hasAnyBreakpoints())
             moreInterrupts = true;
 
         if (script->hasBreakpointsAt(REGS.pc)) {

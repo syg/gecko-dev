@@ -808,7 +808,7 @@ JSCompartment::clearBreakpointsIn(FreeOp *fop, js::Debugger *dbg, HandleObject h
 {
     for (gc::ZoneCellIter i(zone(), gc::FINALIZE_SCRIPT); !i.done(); i.next()) {
         JSScript *script = i.get<JSScript>();
-        if (script->compartment() == this && script->hasAnyBreakpointsOrStepMode())
+        if (script->compartment() == this && script->hasAnyBreakpoints())
             script->clearBreakpointsIn(fop, dbg, handler);
     }
 }

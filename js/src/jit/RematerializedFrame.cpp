@@ -32,6 +32,7 @@ struct CopyValueToRematerializedFrame
 RematerializedFrame::RematerializedFrame(JSContext *cx, uint8_t *top, unsigned numActualArgs,
                                          InlineFrameIterator &iter, MaybeReadFallback &fallback)
   : prevUpToDate_(false),
+    singleStepMode_(false),
     isDebuggee_(iter.script()->isDebuggee()),
     top_(top),
     pc_(iter.pc()),

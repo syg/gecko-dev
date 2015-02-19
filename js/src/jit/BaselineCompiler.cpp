@@ -776,7 +776,10 @@ BaselineCompiler::emitDebugTrap()
     MOZ_ASSERT(compileDebugInstrumentation_);
     MOZ_ASSERT(frame.numUnsyncedSlots() == 0);
 
-    bool enabled = script->stepModeEnabled() || script->hasBreakpointsAt(pc);
+    // Only locations with breakpoints are initially enabled. Toggling
+    // single-stepping is done on a per-frame basis. See
+    // Debugger::updateSingleStepMode.
+    bool enabled = script->hasBreakpointsAt(pc);
 
     // Emit patchable call to debug trap handler.
     JitCode *handler = cx->runtime()->jitRuntime()->debugTrapHandler(cx);

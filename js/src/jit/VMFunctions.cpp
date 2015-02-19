@@ -928,12 +928,12 @@ HandleDebugTrap(JSContext *cx, BaselineFrame *frame, uint8_t *retAddr, bool *mus
     jsbytecode *pc = script->baselineScript()->icEntryFromReturnAddress(retAddr).pc(script);
 
     MOZ_ASSERT(frame->isDebuggee());
-    MOZ_ASSERT(script->stepModeEnabled() || script->hasBreakpointsAt(pc));
+    MOZ_ASSERT(frame->singleStepMode() || script->hasBreakpointsAt(pc));
 
     RootedValue rval(cx);
     JSTrapStatus status = JSTRAP_CONTINUE;
 
-    if (script->stepModeEnabled())
+    if (frame->singleStepMode())
         status = Debugger::onSingleStep(cx, &rval);
 
     if (status == JSTRAP_CONTINUE && script->hasBreakpointsAt(pc))

@@ -623,6 +623,7 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     static void handleUnrecoverableIonBailoutError(JSContext *cx, jit::RematerializedFrame *frame);
     static void propagateForcedReturn(JSContext *cx, AbstractFramePtr frame, HandleValue rval);
     static bool hasLiveHook(GlobalObject *global, Hook which);
+    static void updateSingleStepMode(JSContext *cx, AbstractFramePtr frame);
     static void assertNotInFrameMaps(AbstractFramePtr frame);
 
     /************************************* Functions for use by Debugger.cpp. */

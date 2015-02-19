@@ -1643,11 +1643,13 @@ CopyFromRematerializedFrame(JSContext *cx, JitActivation *act, uint8_t *fp, size
             "  Copied from rematerialized frame at (%p,%u)",
             fp, inlineDepth);
 
-    // Propagate the debuggee frame flag. For the case where the Debugger did
+    // Propagate the debuggee frame flags. For the case where the Debugger did
     // not rematerialize an Ion frame, the baseline frame has its debuggee
     // flag set iff its script is considered a debuggee. See the debuggee case
     // in InitFromBailout.
     if (rematFrame->isDebuggee()) {
+        if (rematFrame->singleStepMode())
+            frame->setSingleStepMode();
         frame->setIsDebuggee();
         return Debugger::handleIonBailout(cx, rematFrame, frame);
     }

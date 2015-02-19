@@ -47,14 +47,17 @@ class BaselineFrame
         // See InterpreterFrame::PREV_UP_TO_DATE.
         PREV_UP_TO_DATE  = 1 << 5,
 
+        // See InterpreterFrame::SINGLE_STEP_MODE.
+        SINGLE_STEP_MODE = 1 << 6,
+
         // Frame has execution observed by a Debugger.
         //
-        // See comment above 'debugMode' in jscompartment.h for explanation of
+        // See comment above 'isDebuggee' in jscompartment.h for explanation of
         // invariants of debuggee compartments, scripts, and frames.
-        DEBUGGEE         = 1 << 6,
+        DEBUGGEE         = 1 << 7,
 
         // Eval frame, see the "eval frames" comment.
-        EVAL             = 1 << 7,
+        EVAL             = 1 << 8,
 
         // Frame has over-recursed on an early check.
         OVER_RECURSED    = 1 << 9,
@@ -279,6 +282,19 @@ class BaselineFrame
     }
     void unsetPrevUpToDate() {
         flags_ &= ~PREV_UP_TO_DATE;
+    }
+
+    bool singleStepMode() const {
+        MOZ_ASSERT(isDebuggee());
+        return flags_ & SINGLE_STEP_MODE;
+    }
+    void setSingleStepMode() {
+        MOZ_ASSERT(isDebuggee());
+        flags_ |= SINGLE_STEP_MODE;
+    }
+    void unsetSingleStepMode() {
+        MOZ_ASSERT(isDebuggee());
+        flags_ &= ~SINGLE_STEP_MODE;
     }
 
     bool isDebuggee() const {

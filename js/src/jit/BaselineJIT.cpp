@@ -808,7 +808,7 @@ BaselineScript::approximatePcForNativeAddress(JSScript *script, uint8_t *nativeA
 }
 
 void
-BaselineScript::toggleDebugTraps(JSScript *script, jsbytecode *pc)
+BaselineScript::toggleDebugTraps(JSScript *script, jsbytecode *pc, bool enabled)
 {
     MOZ_ASSERT(script->baselineScript() == this);
 
@@ -834,10 +834,9 @@ BaselineScript::toggleDebugTraps(JSScript *script, jsbytecode *pc)
 
             scanner.advanceTo(script->pcToOffset(curPC));
 
-            if (!pc || pc == curPC) {
-                bool enabled = (script->stepModeEnabled() && scanner.isLineHeader()) ||
-                    script->hasBreakpointsAt(curPC);
-
+            if ((!pc && scanner.isLineHeader()) ||
+                (pc == curPC && script->hasBreakpointsAt(pc)))
+            {
                 // Patch the trap.
                 CodeLocationLabel label(method(), CodeOffsetLabel(nativeOffset));
                 Assembler::ToggleCall(label, enabled);

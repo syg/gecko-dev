@@ -762,7 +762,7 @@ AbstractFramePtr::prevUpToDate() const
 }
 
 inline void
-AbstractFramePtr::setPrevUpToDate() const
+AbstractFramePtr::setPrevUpToDate()
 {
     if (isInterpreterFrame()) {
         asInterpreterFrame()->setPrevUpToDate();
@@ -776,7 +776,7 @@ AbstractFramePtr::setPrevUpToDate() const
 }
 
 inline void
-AbstractFramePtr::unsetPrevUpToDate() const
+AbstractFramePtr::unsetPrevUpToDate()
 {
     if (isInterpreterFrame()) {
         asInterpreterFrame()->unsetPrevUpToDate();
@@ -787,6 +787,44 @@ AbstractFramePtr::unsetPrevUpToDate() const
         return;
     }
     asRematerializedFrame()->unsetPrevUpToDate();
+}
+
+inline bool
+AbstractFramePtr::singleStepMode() const
+{
+    if (isInterpreterFrame())
+        return asInterpreterFrame()->singleStepMode();
+    if (isBaselineFrame())
+        return asBaselineFrame()->singleStepMode();
+    return asRematerializedFrame()->singleStepMode();
+}
+
+inline void
+AbstractFramePtr::setSingleStepMode()
+{
+    if (isInterpreterFrame()) {
+        asInterpreterFrame()->setSingleStepMode();
+        return;
+    }
+    if (isBaselineFrame()) {
+        asBaselineFrame()->setSingleStepMode();
+        return;
+    }
+    asRematerializedFrame()->setSingleStepMode();
+}
+
+inline void
+AbstractFramePtr::unsetSingleStepMode()
+{
+    if (isInterpreterFrame()) {
+        asInterpreterFrame()->unsetSingleStepMode();
+        return;
+    }
+    if (isBaselineFrame()) {
+        asBaselineFrame()->unsetSingleStepMode();
+        return;
+    }
+    asRematerializedFrame()->unsetSingleStepMode();
 }
 
 inline Value &

@@ -18,7 +18,8 @@ js::Debugger::onLeaveFrame(JSContext *cx, AbstractFramePtr frame, bool ok)
     MOZ_ASSERT_IF(frame.script()->isDebuggee(), frame.isDebuggee());
     /* Traps must be cleared from eval frames, see slowPathOnLeaveFrame. */
     mozilla::DebugOnly<bool> evalTraps = frame.isEvalFrame() &&
-                                         frame.script()->hasAnyBreakpointsOrStepMode();
+                                         (frame.script()->hasAnyBreakpoints() ||
+                                          frame.singleStepMode());
     MOZ_ASSERT_IF(evalTraps, frame.isDebuggee());
     if (frame.isDebuggee())
         ok = slowPathOnLeaveFrame(cx, frame, ok);

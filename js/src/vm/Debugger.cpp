@@ -261,7 +261,7 @@ void
 BreakpointSite::recompile(FreeOp *fop)
 {
     if (script->hasBaselineScript())
-        script->baselineScript()->toggleDebugTraps(script, pc);
+        script->baselineScript()->toggleDebugTraps(script, pc, true);
 }
 
 void
@@ -585,10 +585,6 @@ Debugger::slowPathOnEnterFrame(JSContext *cx, AbstractFramePtr frame)
 
     return status;
 }
-
-static void
-DebuggerFrame_maybeDecrementFrameScriptStepModeCount(FreeOp *fop, AbstractFramePtr frame,
-                                                     NativeObject *frameobj);
 
 static void
 DebuggerFrame_freeScriptFrameIterData(FreeOp *fop, JSObject *obj);
@@ -1407,6 +1403,7 @@ Debugger::onTrap(JSContext *cx, MutableHandleValue vp)
 Debugger::onSingleStep(JSContext *cx, MutableHandleValue vp)
 {
     ScriptFrameIter iter(cx);
+    MOZ_ASSERT(iter.abstractFramePtr().singleStepMode());
 
     /*
      * We may be stepping over a JSOP_EXCEPTION, that pushes the context's
@@ -1435,41 +1432,6 @@ Debugger::onSingleStep(JSContext *cx, MutableHandleValue vp)
             return JSTRAP_ERROR;
         }
     }
-
-#ifdef DEBUG
-    /*
-     * Validate the single-step count on this frame's script, to ensure that
-     * we're not receiving traps we didn't ask for. Even when frames is
-     * non-empty (and thus we know this trap was requested), do the check
-     * anyway, to make sure the count has the correct non-zero value.
-     *
-     * The converse --- ensuring that we do receive traps when we should --- can
-     * be done with unit tests.
-     */
-    {
-        uint32_t stepperCount = 0;
-        JSScript *trappingScript = iter.script();
-        GlobalObject *global = cx->global();
-        if (GlobalObject::DebuggerVector *debuggers = global->getDebuggers()) {
-            for (Debugger **p = debuggers->begin(); p != debuggers->end(); p++) {
-                Debugger *dbg = *p;
-                for (FrameMap::Range r = dbg->frames.all(); !r.empty(); r.popFront()) {
-                    AbstractFramePtr frame = r.front().key();
-                    NativeObject *frameobj = r.front().value();
-                    if (frame.script() == trappingScript &&
-                        !frameobj->getReservedSlot(JSSLOT_DEBUGFRAME_ONSTEP_HANDLER).isUndefined())
-                    {
-                        stepperCount++;
-                    }
-                }
-            }
-        }
-        if (trappingScript->compileAndGo())
-            MOZ_ASSERT(stepperCount == trappingScript->stepModeCount());
-        else
-            MOZ_ASSERT(stepperCount <= trappingScript->stepModeCount());
-    }
-#endif
 
     /* Call all the onStep handlers we found. */
     for (JSObject **p = frames.begin(); p != frames.end(); p++) {
@@ -3051,7 +3013,6 @@ Debugger::removeDebuggeeGlobal(FreeOp *fop, GlobalObject *global, GlobalObjectSe
         NativeObject *frameobj = e.front().value();
         if (&frame.script()->global() == global) {
             DebuggerFrame_freeScriptFrameIterData(fop, frameobj);
-            DebuggerFrame_maybeDecrementFrameScriptStepModeCount(fop, frame, frameobj);
             e.removeFront();
         }
     }
@@ -4854,6 +4815,46 @@ Debugger::replaceFrameGuts(JSContext *cx, AbstractFramePtr from, AbstractFramePt
 }
 
 /* static */ void
+Debugger::updateSingleStepMode(JSContext *cx, AbstractFramePtr frame)
+{
+    bool hasOnStep = false;
+    for (FrameRange r(frame); !r.empty(); r.popFront()) {
+        NativeObject *frameObj = r.frontFrame();
+        if (!frameObj->getReservedSlot(JSSLOT_DEBUGFRAME_ONSTEP_HANDLER).isUndefined()) {
+            hasOnStep = true;
+            break;
+        }
+    }
+
+    if (hasOnStep == frame.singleStepMode())
+        return;
+
+    if (hasOnStep)
+        frame.setSingleStepMode();
+    else
+        frame.unsetSingleStepMode();
+
+    JSScript *script = frame.script();
+    if (script->hasBaselineScript())
+        script->baselineScript()->toggleDebugTraps(script, nullptr, hasOnStep);
+
+    if (frame.isInterpreterFrame()) {
+        for (ActivationIterator iter(cx->runtime()); !iter.done(); ++iter) {
+            if (!iter->isInterpreter())
+                continue;
+
+            InterpreterActivation *act = iter->asInterpreter();
+            for (InterpreterFrameIterator frameIter(act); !frameIter.done(); ++frameIter) {
+                if (frameIter.frame() == frame.asInterpreterFrame()) {
+                    act->enableInterruptsUnconditionally();
+                    break;
+                }
+            }
+        }
+    }
+}
+
+/* static */ void
 Debugger::assertNotInFrameMaps(AbstractFramePtr frame)
 {
 #ifdef DEBUG
@@ -4874,7 +4875,6 @@ Debugger::removeFromFrameMapsAndClearBreakpointsIn(JSContext *cx, AbstractFrameP
 
         FreeOp *fop = cx->runtime()->defaultFreeOp();
         DebuggerFrame_freeScriptFrameIterData(fop, frameobj);
-        DebuggerFrame_maybeDecrementFrameScriptStepModeCount(fop, frame, frameobj);
 
         dbg->frames.remove(frame);
     }
@@ -5481,15 +5481,6 @@ DebuggerFrame_freeScriptFrameIterData(FreeOp *fop, JSObject *obj)
 }
 
 static void
-DebuggerFrame_maybeDecrementFrameScriptStepModeCount(FreeOp *fop, AbstractFramePtr frame,
-                                                     NativeObject *frameobj)
-{
-    /* If this frame has an onStep handler, decrement the script's count. */
-    if (!frameobj->getReservedSlot(JSSLOT_DEBUGFRAME_ONSTEP_HANDLER).isUndefined())
-        frame.script()->decrementStepModeCount(fop);
-}
-
-static void
 DebuggerFrame_finalize(FreeOp *fop, JSObject *obj)
 {
     DebuggerFrame_freeScriptFrameIterData(fop, obj);
@@ -5921,18 +5912,14 @@ DebuggerFrame_setOnStep(JSContext *cx, unsigned argc, Value *vp)
     }
 
     Value prior = thisobj->getReservedSlot(JSSLOT_DEBUGFRAME_ONSTEP_HANDLER);
-    if (!args[0].isUndefined() && prior.isUndefined()) {
-        // Single stepping toggled off->on.
+    thisobj->setReservedSlot(JSSLOT_DEBUGFRAME_ONSTEP_HANDLER, args[0]);
+
+    if (args[0].isUndefined() != prior.isUndefined()) {
+        // Single stepping toggled.
         AutoCompartment ac(cx, frame.scopeChain());
-        if (!frame.script()->incrementStepModeCount(cx))
-            return false;
-    } else if (args[0].isUndefined() && !prior.isUndefined()) {
-        // Single stepping toggled on->off.
-        frame.script()->decrementStepModeCount(cx->runtime()->defaultFreeOp());
+        Debugger::updateSingleStepMode(cx, frame);
     }
 
-    /* Now that the step mode switch has succeeded, we can install the handler. */
-    thisobj->setReservedSlot(JSSLOT_DEBUGFRAME_ONSTEP_HANDLER, args[0]);
     args.rval().setUndefined();
     return true;
 }

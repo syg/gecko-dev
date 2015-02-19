@@ -26,7 +26,11 @@ class RematerializedFrame
     // See DebugScopes::updateLiveScopes.
     bool prevUpToDate_;
 
-    // Propagated to the Baseline frame once this is popped.
+    // See InterpreterFrames::isSingleStepMode. Propagated to the
+    // BaselineFrame once the IonFrame is bailed out.
+    bool singleStepMode_;
+
+    // Propagated to the BaselineFrame once the Ion frame is bailed out.
     bool isDebuggee_;
 
     // Has a call object been pushed?
@@ -78,6 +82,19 @@ class RematerializedFrame
     }
     void unsetPrevUpToDate() {
         prevUpToDate_ = false;
+    }
+
+    bool singleStepMode() const {
+        MOZ_ASSERT(isDebuggee());
+        return singleStepMode_;
+    }
+    void setSingleStepMode() {
+        MOZ_ASSERT(isDebuggee());
+        singleStepMode_ = true;
+    }
+    void unsetSingleStepMode() {
+        MOZ_ASSERT(isDebuggee());
+        singleStepMode_ = false;
     }
 
     bool isDebuggee() const {

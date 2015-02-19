@@ -3270,46 +3270,6 @@ JSScript::ensureHasDebugScript(JSContext *cx)
     return true;
 }
 
-void
-JSScript::setNewStepMode(FreeOp *fop, uint32_t newValue)
-{
-    DebugScript *debug = debugScript();
-    uint32_t prior = debug->stepMode;
-    debug->stepMode = newValue;
-
-    if (!prior != !newValue) {
-        if (hasBaselineScript())
-            baseline->toggleDebugTraps(this, nullptr);
-
-        if (!stepModeEnabled() && !debug->numSites)
-            fop->free_(releaseDebugScript());
-    }
-}
-
-bool
-JSScript::incrementStepModeCount(JSContext *cx)
-{
-    assertSameCompartment(cx, this);
-    MOZ_ASSERT(cx->compartment()->isDebuggee());
-
-    if (!ensureHasDebugScript(cx))
-        return false;
-
-    DebugScript *debug = debugScript();
-    uint32_t count = debug->stepMode;
-    setNewStepMode(cx->runtime()->defaultFreeOp(), count + 1);
-    return true;
-}
-
-void
-JSScript::decrementStepModeCount(FreeOp *fop)
-{
-    DebugScript *debug = debugScript();
-    uint32_t count = debug->stepMode;
-    MOZ_ASSERT(count > 0);
-    setNewStepMode(fop, count - 1);
-}
-
 BreakpointSite *
 JSScript::getOrCreateBreakpointSite(JSContext *cx, jsbytecode *pc)
 {
@@ -3341,14 +3301,14 @@ JSScript::destroyBreakpointSite(FreeOp *fop, jsbytecode *pc)
     fop->delete_(site);
     site = nullptr;
 
-    if (--debug->numSites == 0 && !stepModeEnabled())
+    if (--debug->numSites == 0)
         fop->free_(releaseDebugScript());
 }
 
 void
 JSScript::clearBreakpointsIn(FreeOp *fop, js::Debugger *dbg, JSObject *handler)
 {
-    if (!hasAnyBreakpointsOrStepMode())
+    if (!hasAnyBreakpoints())
         return;
 
     for (jsbytecode *pc = code(); pc < codeEnd(); pc++) {

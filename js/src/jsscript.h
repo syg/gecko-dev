@@ -362,15 +362,6 @@ class DebugScript
     friend class ::JSScript;
 
     /*
-     * When non-zero, compile script in single-step mode. The top bit is set and
-     * cleared by setStepMode, as used by JSD. The lower bits are a count,
-     * adjusted by changeStepModeCount, used by the Debugger object. Only
-     * when the bit is clear and the count is zero may we compile the script
-     * without single-step support.
-     */
-    uint32_t        stepMode;
-
-    /*
      * Number of breakpoint sites at opcodes in the script. This is the number
      * of populated entries in DebugScript::breakpoints, below.
      */
@@ -1618,9 +1609,6 @@ class JSScript : public js::gc::TenuredCell
     bool cookieIsAliased(const js::frontend::UpvarCookie &cookie);
 
   private:
-    /* Change this->stepMode to |newValue|. */
-    void setNewStepMode(js::FreeOp *fop, uint32_t newValue);
-
     bool ensureHasDebugScript(JSContext *cx);
     js::DebugScript *debugScript();
     js::DebugScript *releaseDebugScript();
@@ -1628,7 +1616,7 @@ class JSScript : public js::gc::TenuredCell
 
   public:
     bool hasBreakpointsAt(jsbytecode *pc);
-    bool hasAnyBreakpointsOrStepMode() { return hasDebugScript_; }
+    bool hasAnyBreakpoints() { return hasDebugScript_; }
 
     // See comment above 'debugMode' in jscompartment.h for explanation of
     // invariants of debuggee compartments, scripts, and frames.
@@ -1644,21 +1632,6 @@ class JSScript : public js::gc::TenuredCell
     void destroyBreakpointSite(js::FreeOp *fop, jsbytecode *pc);
 
     void clearBreakpointsIn(js::FreeOp *fop, js::Debugger *dbg, JSObject *handler);
-
-    /*
-     * Increment or decrement the single-step count. If the count is non-zero
-     * then the script is in single-step mode.
-     *
-     * Only incrementing is fallible, as it could allocate a DebugScript.
-     */
-    bool incrementStepModeCount(JSContext *cx);
-    void decrementStepModeCount(js::FreeOp *fop);
-
-    bool stepModeEnabled() { return hasDebugScript_ && !!debugScript()->stepMode; }
-
-#ifdef DEBUG
-    uint32_t stepModeCount() { return hasDebugScript_ ? debugScript()->stepMode : 0; }
-#endif
 
     void finalize(js::FreeOp *fop);
     void fixupAfterMovingGC() {}

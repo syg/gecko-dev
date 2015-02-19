@@ -391,7 +391,7 @@ struct BaselineScript
     // Toggle debug traps (used for breakpoints and step mode) in the script.
     // If |pc| is nullptr, toggle traps for all ops in the script. Else, only
     // toggle traps at |pc|.
-    void toggleDebugTraps(JSScript *script, jsbytecode *pc);
+    void toggleDebugTraps(JSScript *script, jsbytecode *pc, bool enabled);
 
     void toggleProfilerInstrumentation(bool enable);
     bool isProfilerInstrumentationOn() const {

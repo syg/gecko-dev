@@ -218,8 +218,12 @@ class AbstractFramePtr
     template <class Op> inline void unaliasedForEachActual(JSContext *cx, Op op);
 
     inline bool prevUpToDate() const;
-    inline void setPrevUpToDate() const;
-    inline void unsetPrevUpToDate() const;
+    inline void setPrevUpToDate();
+    inline void unsetPrevUpToDate();
+
+    inline bool singleStepMode() const;
+    inline void setSingleStepMode();
+    inline void unsetSingleStepMode();
 
     inline bool isDebuggee() const;
     inline void setIsDebuggee();
@@ -290,36 +294,34 @@ class InterpreterFrame
 
         CONSTRUCTING       =       0x10,  /* frame is for a constructor invocation */
 
-        /* (0x20, 0x40 and 0x80 are unused) */
-
         /* Function prologue state */
-        HAS_CALL_OBJ       =      0x100,  /* CallObject created for heavyweight fun */
-        HAS_ARGS_OBJ       =      0x200,  /* ArgumentsObject created for needsArgsObj script */
+        HAS_CALL_OBJ       =       0x20,  /* CallObject created for heavyweight fun */
+        HAS_ARGS_OBJ       =       0x40,  /* ArgumentsObject created for needsArgsObj script */
 
         /* Lazy frame initialization */
-        HAS_RVAL           =      0x800,  /* frame has rval_ set */
-        HAS_SCOPECHAIN     =     0x1000,  /* frame has scopeChain_ set */
+        HAS_RVAL           =       0x80,  /* frame has rval_ set */
+        HAS_SCOPECHAIN     =      0x100,  /* frame has scopeChain_ set */
 
         /* Debugger state */
-        PREV_UP_TO_DATE    =     0x4000,  /* see DebugScopes::updateLiveScopes */
-
+        PREV_UP_TO_DATE    =      0x200,  /* see DebugScopes::updateLiveScopes */
+        SINGLE_STEP_MODE   =      0x400,  /* In single-step mode; implies DEBUGGEE */
         /*
-         * See comment above 'debugMode' in jscompartment.h for explanation of
+         * See comment above 'isDebuggee' in jscompartment.h for explanation of
          * invariants of debuggee compartments, scripts, and frames.
          */
-        DEBUGGEE           =     0x8000,  /* Execution is being observed by Debugger */
+        DEBUGGEE           =      0x800,  /* Execution is being observed by Debugger */
 
         /* Used in tracking calls and profiling (see vm/SPSProfiler.cpp) */
-        HAS_PUSHED_SPS_FRAME =   0x10000, /* SPS was notified of enty */
+        HAS_PUSHED_SPS_FRAME =   0x1000, /* SPS was notified of enty */
 
         /*
          * If set, we entered one of the JITs and ScriptFrameIter should skip
          * this frame.
          */
-        RUNNING_IN_JIT     =    0x20000,
+        RUNNING_IN_JIT     =     0x2000,
 
         /* Miscellaneous state. */
-        CREATE_SINGLETON   =    0x40000   /* Constructed |this| object should be singleton. */
+        CREATE_SINGLETON   =     0x4000   /* Constructed |this| object should be singleton. */
     };
 
   private:
@@ -838,6 +840,21 @@ class InterpreterFrame
 
     void unsetPrevUpToDate() {
         flags_ &= ~PREV_UP_TO_DATE;
+    }
+
+    bool singleStepMode() const {
+        MOZ_ASSERT(isDebuggee());
+        return !!(flags_ & SINGLE_STEP_MODE);
+    }
+
+    void setSingleStepMode() {
+        MOZ_ASSERT(isDebuggee());
+        flags_ |= SINGLE_STEP_MODE;
+    }
+
+    void unsetSingleStepMode() {
+        MOZ_ASSERT(isDebuggee());
+        flags_ &= ~SINGLE_STEP_MODE;
     }
 
     bool isDebuggee() const {
