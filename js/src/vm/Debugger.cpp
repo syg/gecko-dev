@@ -4996,13 +4996,11 @@ Debugger::replaceFrameGuts(JSContext* cx, AbstractFramePtr from, AbstractFramePt
     return true;
 }
 
-/* static */ void
-Debugger::assertNotInFrameMaps(AbstractFramePtr frame)
+/* static */ bool
+Debugger::inFrameMaps(AbstractFramePtr frame)
 {
-#ifdef DEBUG
     FrameRange r(frame);
-    MOZ_ASSERT(r.empty());
-#endif
+    return !r.empty();
 }
 
 /* static */ void
