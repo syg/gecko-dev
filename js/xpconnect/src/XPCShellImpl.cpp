@@ -621,6 +621,37 @@ SimulateActivityCallback(JSContext *cx, unsigned argc, jsval *vp)
     return true;
 }
 
+static bool
+StressMalloc(JSContext *cx, unsigned argc, jsval *vp)
+{
+    JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+    if (args.length() != 1 || !args[0].isInt32()) {
+        JS_ReportError(cx, "arghhhhhhhhhhhhhhhhhhh");
+        return false;
+    }
+
+    int32_t n = args[0].toInt32();
+    for (int32_t i = 0; i < n; i++) {
+        void *p = malloc(1);
+        free(p);
+    }
+    for (int32_t i = 0; i < n; i++) {
+        void *p = calloc(i % 32, 1);
+        free(p);
+    }
+    void **ptrs = (void **)malloc(n * sizeof(void *));
+    for (int32_t i = 0; i < n; i++) {
+        ptrs[i] = malloc(1);
+    }
+    for (int32_t i = 0; i < n; i++) {
+        ptrs[i] = realloc(ptrs[i], i % 32);
+        free(ptrs[i]);
+    }
+    free(ptrs);
+
+    return true;
+}
+
 static const JSFunctionSpec glob_functions[] = {
     JS_FS("print",           Print,          0,0),
     JS_FS("readline",        ReadLine,       1,0),
@@ -641,6 +672,7 @@ static const JSFunctionSpec glob_functions[] = {
     JS_FS("btoa",            Btoa,           1,0),
     JS_FS("setInterruptCallback", SetInterruptCallback, 1,0),
     JS_FS("simulateActivityCallback", SimulateActivityCallback, 1,0),
+    JS_FS("stressMalloc", StressMalloc, 1,0),
     JS_FS_END
 };
 
