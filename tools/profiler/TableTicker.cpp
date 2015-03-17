@@ -590,7 +590,10 @@ void mergeStacksIntoProfile(ThreadProfile& aProfile, TickSample* aSample, Native
       // Stringifying optimization information is delayed until streaming
       // time. To re-lookup the entry in the JitcodeGlobalTable, we need to
       // store the JIT code address ('J') in the circular buffer.
-      if (jsFrames[jsIndex].hasTrackedOptimizations) {
+      MOZ_ASSERT_IF(jsFrames[jsIndex].hasTrackedOptimizations,
+                    jsFrames[jsIndex].kind == JS::ProfilingFrameIterator::Frame_Ion);
+      if (jsFrames[jsIndex].kind == JS::ProfilingFrameIterator::Frame_Ion ||
+          jsFrames[jsIndex].kind == JS::ProfilingFrameIterator::Frame_Baseline) {
         aProfile.addTag(ProfileEntry('J', jsFrames[jsIndex].returnAddress));
       }
 
