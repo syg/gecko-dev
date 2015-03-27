@@ -565,6 +565,8 @@ struct JSCompartment
 
   public:
     void addTelemetry(const char* filename, DeprecatedLanguageExtension e);
+
+    bool wantsHighResSourceNotes() const { return runtime_->spsProfiler.enabled(); }
 };
 
 inline bool

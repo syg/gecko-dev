@@ -194,6 +194,9 @@ struct BytecodeEmitter
     const bool      insideNonGlobalEval:1;  /* True if this is a direct eval
                                                call in some non-global scope. */
 
+    bool            highResSourceNotes:1; /* True if emitting extra source notes for more
+                                             precise location information. */
+
     enum EmitterMode {
         Normal,
 
@@ -321,6 +324,14 @@ struct BytecodeEmitter
     void updateDepth(ptrdiff_t target);
     bool updateLineNumberNotes(uint32_t offset);
     bool updateSourceCoordNotes(uint32_t offset);
+
+    // If high resolution source notes are requested (e.g., for profiling),
+    // update source coords.
+    bool updateHighResSourceCoordNotes(uint32_t offset) {
+        if (MOZ_UNLIKELY(highResSourceNotes))
+            return updateSourceCoordNotes(offset);
+        return true;
+    }
 
     bool bindNameToSlot(ParseNode* pn);
     bool bindNameToSlotHelper(ParseNode* pn);
