@@ -2340,6 +2340,9 @@ BytecodeEmitter::emitPropOp(ParseNode* pn, JSOp op)
     if (op == JSOP_CALLPROP && !emit1(JSOP_DUP))
         return false;
 
+    if (!updateHighResSourceCoordNotes(pn->pn_pos.begin))
+        return false;
+
     if (!emitAtomOp(pn, op))
         return false;
 
@@ -2456,7 +2459,11 @@ BytecodeEmitter::emitElemOpBase(JSOp op)
 bool
 BytecodeEmitter::emitElemOp(ParseNode* pn, JSOp op)
 {
-    return emitElemOperands(pn, op) && emitElemOpBase(op);
+    if (!emitElemOperands(pn, op))
+        return false;
+    if (!updateHighResSourceCoordNotes(pn->pn_pos.begin))
+        return false;
+    return emitElemOpBase(op);
 }
 
 bool
@@ -4034,6 +4041,11 @@ BytecodeEmitter::emitAssignment(ParseNode* lhs, JSOp op, ParseNode* rhs)
         if (offset != 1 && !emit2(JSOP_PICK, offset - 1))
             return false;
     }
+
+    // Rewind position back to the left operand for emitting the
+    // assignment operation below.
+    if (!updateHighResSourceCoordNotes(lhs->pn_pos.begin))
+        return false;
 
     /* If += etc., emit the binary operator with a source note. */
     if (op != JSOP_NOP) {
@@ -6892,6 +6904,8 @@ BytecodeEmitter::emitTree(ParseNode* pn)
     /* Emit notes to tell the current bytecode's source line number. */
     if (!updateLineNumberNotes(pn->pn_pos.begin))
         return false;
+    if (!updateHighResSourceCoordNotes(pn->pn_pos.begin))
+        return false;
 
     switch (pn->getKind()) {
       case PNK_FUNCTION:
@@ -7152,6 +7166,8 @@ BytecodeEmitter::emitTree(ParseNode* pn)
         JSOp op = pn->getOp();
         while ((subexpr = subexpr->pn_next) != nullptr) {
             if (!emitTree(subexpr))
+                return false;
+            if (!updateHighResSourceCoordNotes(pn->pn_pos.begin))
                 return false;
             if (!emit1(op))
                 return false;
