@@ -103,6 +103,7 @@ enum VarEmitOption {
     InitializeVars    = 2
 };
 
+template <typename EmitHandler>
 struct BytecodeEmitter
 {
     typedef StmtInfoBCE StmtInfo;
@@ -118,19 +119,7 @@ struct BytecodeEmitter
     Rooted<LazyScript*> lazyScript; /* the lazy script if mode is LazyFunction,
                                         nullptr otherwise. */
 
-    struct EmitSection {
-        BytecodeVector code;        /* bytecode */
-        SrcNotesVector notes;       /* source notes, see below */
-        ptrdiff_t   lastNoteOffset; /* code offset for last source note */
-        uint32_t    currentLine;    /* line number for tree-based srcnote gen */
-        uint32_t    lastColumn;     /* zero-based column index on currentLine of
-                                       last SRC_COLSPAN-annotated opcode */
-
-        EmitSection(ExclusiveContext* cx, uint32_t lineNum)
-          : code(cx), notes(cx), lastNoteOffset(0), currentLine(lineNum), lastColumn(0)
-        {}
-    };
-    EmitSection prolog, main, *current;
+    EmitHandler handler;            /* static specific to the emission kind */
 
     /* the parser */
     Parser<FullParseHandler>* const parser;

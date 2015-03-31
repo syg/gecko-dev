@@ -113,9 +113,7 @@ BytecodeEmitter::BytecodeEmitter(BytecodeEmitter* parent,
     parent(parent),
     script(cx, script),
     lazyScript(cx, lazyScript),
-    prolog(cx, lineNum),
-    main(cx, lineNum),
-    current(&main),
+    handler(cx, lineNum),
     parser(parser),
     evalCaller(evalCaller),
     evalStaticScope(staticEvalScope),
@@ -403,12 +401,6 @@ StatementName(StmtInfoBCE* topStmt)
     if (!topStmt)
         return js_script_str;
     return statementName[topStmt->type];
-}
-
-static void
-ReportStatementTooLarge(TokenStream& ts, StmtInfoBCE* topStmt)
-{
-    ts.reportError(JSMSG_NEED_DIET, StatementName(topStmt));
 }
 
 /*
