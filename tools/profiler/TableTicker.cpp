@@ -245,6 +245,8 @@ JSObject* TableTicker::ToJSObject(JSContext *aCx)
                  js_string.Length(), &val);
   }
   clock_gettime(CLOCK_MONOTONIC, &end);
+  ss.seekg(0, std::ios::end);
+  fprintf(stderr, ">> SHU stringstream %u bytes\n", ss.tellg());
   fprintf(stderr, ">> SHU ToJSObject took %ld ms\n", elapsed_ms(&start, &end));
   return &val.toObject();
 }
