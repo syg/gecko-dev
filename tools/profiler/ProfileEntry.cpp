@@ -129,6 +129,7 @@ void ProfileBuffer::addTag(const ProfileEntry& aTag)
     // JIT code addresses and markers) being incorrectly collected.
     MOZ_ASSERT(mGeneration != UINT32_MAX);
     mGeneration++;
+    fprintf(stderr, ">> SHU mGeneration %u\n", mGeneration);
     mWritePos = 0;
   }
   if (mWritePos == mReadPos) {

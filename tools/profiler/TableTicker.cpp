@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <fstream>
 #include <sstream>
+#include <time.h>
 #include "GeckoProfiler.h"
 #include "SaveProfileTask.h"
 #include "ProfileEntry.h"
@@ -102,6 +103,10 @@ using namespace mozilla;
 # define VALGRIND_MAKE_MEM_DEFINED(_addr,_len)   ((void)0)
 #endif
 
+static long elapsed_ms(struct timespec *start, struct timespec *end) {
+long ns = (end->tv_sec - start->tv_sec) * 1000000000 + (end->tv_nsec - start->tv_nsec);
+return ns / 1000000;
+}
 
 ///////////////////////////////////////////////////////////////////////
 // BEGIN SaveProfileTask et al
@@ -226,6 +231,8 @@ void TableTicker::ToStreamAsJSON(std::ostream& stream)
 
 JSObject* TableTicker::ToJSObject(JSContext *aCx)
 {
+  timespec start, end;
+  clock_gettime(CLOCK_MONOTONIC, &start);
   JS::RootedValue val(aCx);
   std::stringstream ss;
   {
@@ -237,6 +244,8 @@ JSObject* TableTicker::ToJSObject(JSContext *aCx)
     JS_ParseJSON(aCx, static_cast<const char16_t*>(js_string.get()),
                  js_string.Length(), &val);
   }
+  clock_gettime(CLOCK_MONOTONIC, &end);
+  fprintf(stderr, ">> SHU ToJSObject took %ld ms\n", elapsed_ms(&start, &end));
   return &val.toObject();
 }
 
@@ -318,6 +327,8 @@ void BuildJavaThreadJSObject(JSStreamWriter& b)
 
 void TableTicker::StreamJSObject(JSStreamWriter& b)
 {
+  timespec start, end;
+  clock_gettime(CLOCK_MONOTONIC, &start);
   b.BeginObject();
     // Put shared library info
     b.NameValue("libs", GetSharedLibraryInfoString().c_str());
@@ -380,6 +391,9 @@ void TableTicker::StreamJSObject(JSStreamWriter& b)
     b.EndArray();
 
   b.EndObject();
+
+  clock_gettime(CLOCK_MONOTONIC, &end);
+  fprintf(stderr, ">> SHU StreamJSObject took %ld ms\n", elapsed_ms(&start, &end));
 }
 
 void TableTicker::FlushOnJSShutdown(JSRuntime* aRuntime)
