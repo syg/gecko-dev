@@ -89,7 +89,8 @@ class TableTicker: public Sampler {
       mThreadNameFilters[i] = aThreadNameFilters[i];
     }
 
-    sStartTime = mozilla::TimeStamp::Now();
+    bool isInconsistent;
+    sStartTime = mozilla::TimeStamp::ProcessCreation(&isInconsistent);
 
     {
       mozilla::MutexAutoLock lock(*sRegisteredThreadsMutex);
