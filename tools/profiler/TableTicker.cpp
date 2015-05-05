@@ -214,17 +214,28 @@ void TableTicker::ToStreamAsJSON(std::ostream& stream, float aSinceTime)
   StreamJSON(b, aSinceTime);
 }
 
+static long elapsed_ms(struct timespec *start, struct timespec *end) {
+long ns = (end->tv_sec - start->tv_sec) * 1000000000 + (end->tv_nsec - start->tv_nsec);
+return ns / 1000000;
+}
+
 JSObject* TableTicker::ToJSObject(JSContext *aCx, float aSinceTime)
 {
+  timespec start, end;
+  clock_gettime(CLOCK_MONOTONIC, &start);
   JS::RootedValue val(aCx);
   {
     SpliceableChunkedJSONWriter b;
     StreamJSON(b, aSinceTime);
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    fprintf(stderr, ">> SHU StreamJSON took %ld ms\n", elapsed_ms(&start, &end));
     UniquePtr<char[]> buf = b.WriteFunc()->CopyData();
     NS_ConvertUTF8toUTF16 js_string(nsDependentCString(buf.get()));
     MOZ_ALWAYS_TRUE(JS_ParseJSON(aCx, static_cast<const char16_t*>(js_string.get()),
                                  js_string.Length(), &val));
   }
+  clock_gettime(CLOCK_MONOTONIC, &end);
+  fprintf(stderr, ">> SHU ToJSObject took %ld ms\n", elapsed_ms(&start, &end));
   return &val.toObject();
 }
 
