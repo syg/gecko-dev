@@ -205,11 +205,12 @@ exports.getInflatedFrameCache = function getInflatedFrameCache(frameTable) {
  * @param number index
  * @param object frameTable
  * @param object stringTable
+ * @param object allocationsTable
  */
-exports.getOrAddInflatedFrame = function getOrAddInflatedFrame(cache, index, frameTable, stringTable) {
+exports.getOrAddInflatedFrame = function getOrAddInflatedFrame(cache, index, frameTable, stringTable, allocationsTable) {
   let inflatedFrame = cache[index];
   if (inflatedFrame === null) {
-    inflatedFrame = cache[index] = new InflatedFrame(index, frameTable, stringTable);
+    inflatedFrame = cache[index] = new InflatedFrame(index, frameTable, stringTable, allocationsTable);
   }
   return inflatedFrame;
 };
@@ -237,8 +238,9 @@ exports.shouldFlatten = function shouldFlatten(frameKey, prevFrameKey, options) 
  * @param number index
  * @param object frameTable
  * @param object stringTable
+ * @param object allocationsTable
  */
-function InflatedFrame(index, frameTable, stringTable) {
+function InflatedFrame(index, frameTable, stringTable, allocationsTable) {
   const LOCATION_SLOT = frameTable.schema.location;
   const OPTIMIZATIONS_SLOT = frameTable.schema.optimizations;
   const LINE_SLOT = frameTable.schema.line;
@@ -250,6 +252,7 @@ function InflatedFrame(index, frameTable, stringTable) {
   this.line = frame[LINE_SLOT];
   this.column = undefined;
   this.category = frame[CATEGORY_SLOT];
+  this.allocations = allocationsTable ? allocationsTable[index] : 0;
   this.isContent = isContent(this);
 };
 
