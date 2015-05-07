@@ -2136,7 +2136,7 @@ js::CloneFunctionObject(JSContext* cx, HandleFunction fun, HandleObject parent,
     bool useSameScript = CloneFunctionObjectUseSameScript(cx->compartment(), fun, parent);
 
     JSScript::AutoDelazify funScript(cx);
-    if (!useSameScript && fun->isInterpretedLazy()) {
+    if (!useSameScript) {
         funScript = fun;
         if (!funScript)
             return nullptr;
