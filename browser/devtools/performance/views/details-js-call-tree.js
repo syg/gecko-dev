@@ -53,7 +53,9 @@ let JsCallTreeView = Heritage.extend(DetailsSubview, {
     };
     let recording = PerformanceController.getCurrentRecording();
     let profile = recording.getProfile();
+    var start = Date.now();
     let threadNode = this._prepareCallTree(profile, interval, options);
+    console.log(">> SHU prepareCallTree took " + (Date.now() - start) + " ms\n");
     this._populateCallTree(threadNode, options);
     this.emit(EVENTS.JS_CALL_TREE_RENDERED);
   },
