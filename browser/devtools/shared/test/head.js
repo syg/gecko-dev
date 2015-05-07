@@ -242,3 +242,21 @@ function* openAndCloseToolbox(nbOfTimes, usageTime, toolId) {
     yield gDevTools.closeToolbox(target);
   }
 }
+
+/**
+ * Synthesize a profile for testing.
+ */
+function synthesizeProfileForTest(samples) {
+  const { RecordingUtils } = devtools.require("devtools/performance/recording-utils");
+
+  samples.unshift({
+    time: 0,
+    frames: []
+  });
+
+  let uniqueStacks = new RecordingUtils.UniqueStacks();
+  return RecordingUtils.deflateThread({
+    samples: samples,
+    markers: []
+  }, uniqueStacks);
+}
