@@ -180,29 +180,40 @@ ScopeCoordinateFunctionScript(JSScript* script, jsbytecode* pc);
  * chain (that is, fp->scopeChain() or fun->environment()). The hierarchy of
  * scope objects is:
  *
- *   JSObject                      Generic object
+ * Final subclasses are styled '|-', otherwise a direct lineage is shown to
+ * ScopeObject with '|'.
+ *
+ *   JSObject                             Generic object
  *     |
- *   ScopeObject---+---+           Engine-internal scope
- *     |   |   |   |   |
- *     |   |   |   |  StaticNonSyntacticScopeObjects  See NB2
- *     |   |   |   |
- *     |   |   |  StaticEvalObject  Placeholder so eval scopes may be iterated through
- *     |   |   |
- *     |   |  DeclEnvObject         Holds name of recursive/heavyweight named lambda
- *     |   |
- *     |  CallObject                Scope of entire function or strict eval
+ *   ScopeObject                          Engine-internal scope
  *     |
- *   NestedScopeObject              Scope created for a statement
- *     |   |   |
- *     |   |  StaticWithObject      Template for "with" object in static scope chain
- *     |   |
- *     |  DynamicWithObject         Run-time "with" object on scope chain
+ *     |- ExtensibleLexicalObject         Lexical scope with a mutable set of bindings
  *     |
- *   BlockObject                    Shared interface of cloned/static block objects
- *     |   |
- *     |  ClonedBlockObject         let, switch, catch, for
+ *     |- StaticExtensibleLexicalObject   Counterpart to above in static scope chain
  *     |
- *   StaticBlockObject              See NB
+ *     |- UninitializedLexicalObject      Not for use; see note above class
+ *     |
+ *     |- NonSyntacticVariablesObject     Non-syntactic scope that captures non-lexical bindings
+ *     |
+ *     |- StaticNonSyntacticScopeObjects  See NB2
+ *     |
+ *     |- StaticEvalObject                For iterating through eval scopes
+ *     |
+ *     |- DeclEnvObject                   Holds name of recursive/heavyweight named lambda
+ *     |
+ *     |- CallObject                      Scope of entire function or strict eval
+ *     |
+ *   NestedScopeObject                    Scope created for statement
+ *     |
+ *     |- DynamicWithObject               Run-time "with" object on scope chain
+ *     |
+ *     |- StaticWithObject                Template for "with" object in static scope chain
+ *     |
+ *   BlockObject                          Shared interface of cloned/static block objects
+ *     |
+ *     |- StaticBlockObject               See NB
+ *     |
+ *     +- ClonedBlockObject               let, switch, catch, for
  *
  * This hierarchy represents more than just the interface hierarchy: reserved
  * slots in base classes are fixed for all derived classes. Thus, for example,
@@ -215,7 +226,8 @@ ScopeCoordinateFunctionScript(JSScript* script, jsbytecode* pc);
  * support a restricted set of ScopeObject operations.
  *
  * NB2: StaticNonSyntacticScopeObjects notify either of 0+ non-syntactic
- * DynamicWithObjects on the dynamic scope chain or a NonSyntacticScopeObject.
+ * DynamicWithObjects on the dynamic scope chain or a
+ * NonSyntacticVariablesObject.
  *
  * See also "Debug scope objects" below.
  */
