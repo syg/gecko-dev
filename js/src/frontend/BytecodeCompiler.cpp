@@ -219,6 +219,7 @@ frontend::CompileScript(ExclusiveContext* cx, LifoAlloc* alloc, HandleObject sco
                         unsigned staticLevel /* = 0 */,
                         SourceCompressionTask* extraSct /* = nullptr */)
 {
+    MOZ_ASSERT(enclosingStaticScope);
     MOZ_ASSERT(srcBuf.get());
 
     RootedString source(cx, source_);

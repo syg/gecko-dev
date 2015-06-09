@@ -187,10 +187,6 @@ ScopeCoordinateFunctionScript(JSScript* script, jsbytecode* pc);
  *     |
  *   ScopeObject                          Engine-internal scope
  *     |
- *     |- ExtensibleLexicalObject         Lexical scope with a mutable set of bindings
- *     |
- *     |- StaticExtensibleLexicalObject   Counterpart to above in static scope chain
- *     |
  *     |- UninitializedLexicalObject      Not for use; see note above class
  *     |
  *     |- NonSyntacticVariablesObject     Non-syntactic scope that captures non-lexical bindings
@@ -208,6 +204,10 @@ ScopeCoordinateFunctionScript(JSScript* script, jsbytecode* pc);
  *     |- DynamicWithObject               Run-time "with" object on scope chain
  *     |
  *     |- StaticWithObject                Template for "with" object in static scope chain
+ *     |
+ *     |- DynamicExtensibleLexicalObject  Lexical scope with a mutable set of bindings
+ *     |
+ *     |- StaticExtensibleLexicalObject   Counterpart to above in static scope chain
  *     |
  *   BlockObject                          Shared interface of cloned/static block objects
  *     |
@@ -443,28 +443,6 @@ class NonSyntacticVariablesObject : public ScopeObject
     static NonSyntacticVariablesObject* create(JSContext* cx, Handle<GlobalObject*> global);
 };
 
-class StaticExtensibleLexicalObject : public ScopeObject
-{
-  public:
-    static const unsigned RESERVED_SLOTS = 1;
-    static const Class class_;
-
-    static StaticExtensibleLexicalObject* create(JSContext* cx, HandleObject enclosing);
-};
-
-// Unlike BlockObjects, the shape of ExtensibleLexicalObject is not known
-// ahead of time and may mutate during script execution.
-//
-// This is used for the ES6 global lexical scope.
-class ExtensibleLexicalObject : public ScopeObject
-{
-  public:
-    static const unsigned RESERVED_SLOTS = 1;
-    static const Class class_;
-
-    static ExtensibleLexicalObject* create(JSContext* cx, HandleObject enclosing);
-};
-
 class NestedScopeObject : public ScopeObject
 {
   public:
@@ -475,10 +453,10 @@ class NestedScopeObject : public ScopeObject
     inline NestedScopeObject* enclosingNestedScope() const;
 
     // Return true if this object is a compile-time scope template.
-    inline bool isStatic() { return !getProto(); }
+    inline bool isStatic() const { return !getProto(); }
 
     // Return the static scope corresponding to this scope chain object.
-    inline NestedScopeObject* staticScope() {
+    inline NestedScopeObject* staticScope() const {
         MOZ_ASSERT(!isStatic());
         return &getProto()->as<NestedScopeObject>();
     }
@@ -739,6 +717,34 @@ class ClonedBlockObject : public BlockObject
      * variable values as this.
      */
     static ClonedBlockObject* clone(JSContext* cx, Handle<ClonedBlockObject*> block);
+};
+
+class StaticExtensibleLexicalObject : public NestedScopeObject
+{
+  public:
+    static const unsigned RESERVED_SLOTS = 1;
+    static const Class class_;
+
+    static StaticExtensibleLexicalObject* create(JSContext* cx, HandleObject enclosing);
+};
+
+// Unlike BlockObjects, the shape of ExtensibleLexicalObject is not known
+// ahead of time and may mutate during script execution.
+//
+// This is used for the ES6 global lexical scope.
+class ExtensibleLexicalObject : public NestedScopeObject
+{
+  public:
+    static const unsigned RESERVED_SLOTS = 1;
+    static const Class class_;
+
+    static ExtensibleLexicalObject* create(JSContext* cx,
+                                           Handle<StaticExtensibleLexicalObject*> staticScope,
+                                           HandleObject enclosing);
+
+    StaticExtensibleLexicalObject* staticScope() const {
+        return &NestedScopeObject::staticScope()->as<StaticExtensibleLexicalObject>();
+    }
 };
 
 // Internal scope object used by JSOP_BINDNAME upon encountering an
@@ -1077,9 +1083,7 @@ JSObject::is<js::ScopeObject>() const
            is<js::UninitializedLexicalObject>() ||
            is<js::NonSyntacticVariablesObject>() ||
            is<js::StaticEvalObject>() ||
-           is<js::StaticNonSyntacticScopeObjects>() ||
-           is<js::StaticExtensibleLexicalObject>();
-           is<js::ExtensibleLexicalObject>();
+           is<js::StaticNonSyntacticScopeObjects>();
 }
 
 template<>

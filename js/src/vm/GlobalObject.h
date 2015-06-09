@@ -26,7 +26,8 @@ InitSharedArrayBufferClass(JSContext* cx, HandleObject obj);
 
 class Debugger;
 class TypedObjectModuleObject;
-
+class ExtensibleLexicalObject;
+class StaticExtensibleLexicalObject;
 /*
  * Global object slots are reserved as follows:
  *
@@ -136,6 +137,13 @@ class GlobalObject : public NativeObject
 
 
   public:
+    ExtensibleLexicalObject* lexicalScope() const {
+        // TODOshu
+        return nullptr;
+    }
+
+    StaticExtensibleLexicalObject* staticLexicalScope() const;
+
     void setThrowTypeError(JSFunction* fun) {
         MOZ_ASSERT(getSlotRef(THROWTYPEERROR).isUndefined());
         setSlot(THROWTYPEERROR, ObjectValue(*fun));

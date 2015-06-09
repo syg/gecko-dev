@@ -31,6 +31,7 @@
 #include "vm/PIC.h"
 #include "vm/RegExpStatics.h"
 #include "vm/RegExpStaticsObject.h"
+#include "vm/ScopeObject.h"
 #include "vm/StopIterationObject.h"
 #include "vm/WeakMapObject.h"
 
@@ -643,4 +644,10 @@ GlobalObject::addIntrinsicValue(JSContext* cx, HandleId id, HandleValue value)
 
     holder->setSlot(shape->slot(), value);
     return true;
+}
+
+StaticExtensibleLexicalObject*
+GlobalObject::staticLexicalScope() const
+{
+    return lexicalScope()->staticScope();
 }

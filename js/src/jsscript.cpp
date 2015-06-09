@@ -3313,8 +3313,8 @@ CreateEmptyScriptForClone(JSContext* cx, HandleObject enclosingScope, HandleScri
 JSScript*
 js::CloneGlobalScript(JSContext* cx, Handle<ScopeObject*> enclosingScope, HandleScript src)
 {
-    // No enclosingScope means clean global.
-    MOZ_ASSERT(!enclosingScope || enclosingScope->is<StaticNonSyntacticScopeObjects>());
+    MOZ_ASSERT(enclosingScope->is<StaticExtensibleLexicalObject>() ||
+               enclosingScope->is<StaticNonSyntacticScopeObjects>());
 
     RootedScript dst(cx, CreateEmptyScriptForClone(cx, enclosingScope, src));
     if (!dst)

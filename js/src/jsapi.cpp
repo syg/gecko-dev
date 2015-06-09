@@ -3306,10 +3306,8 @@ CreateNonSyntacticScopeChain(JSContext* cx, AutoObjectVector& scopeChain,
     if (!js::CreateScopeObjectsForScopeChain(cx, scopeChain, cx->global(), dynamicScopeObj))
         return false;
 
-    if (scopeChain.empty()) {
-        staticScopeObj.set(nullptr);
-    } else {
-        staticScopeObj.set(StaticNonSyntacticScopeObjects::create(cx, nullptr));
+    if (!scopeChain.empty()) {
+        staticScopeObj.set(StaticNonSyntacticScopeObjects::create(cx, staticScopeObj));
         if (!staticScopeObj)
             return false;
 
@@ -3399,14 +3397,16 @@ CloneFunctionObject(JSContext* cx, HandleObject funobj, HandleObject dynamicScop
 
     if (CanReuseScriptForClone(cx->compartment(), fun, dynamicScope)) {
         // If the script is to be reused, either the script can already handle
-        // non-syntactic scopes, or there is no new static scope.
+        // non-syntactic scopes, or there is only the standard global lexical
+        // scope.
 #ifdef DEBUG
         // Fail here if we OOM during debug asserting.
         // CloneFunctionReuseScript will delazify the script anyways, so we
         // are not creating an extra failure condition for DEBUG builds.
         if (!fun->getOrCreateScript(cx))
             return nullptr;
-        MOZ_ASSERT(!staticScope || fun->nonLazyScript()->hasNonSyntacticScope());
+        MOZ_ASSERT(!staticScope->is<StaticExtensibleLexicalObject>() ||
+                   fun->nonLazyScript()->hasNonSyntacticScope());
 #endif
         return CloneFunctionReuseScript(cx, fun, dynamicScope, fun->getAllocKind());
     }
@@ -3419,14 +3419,15 @@ namespace JS {
 JS_PUBLIC_API(JSObject*)
 CloneFunctionObject(JSContext* cx, JS::Handle<JSObject*> funobj)
 {
-    return CloneFunctionObject(cx, funobj, cx->global(), /* staticScope = */ nullptr);
+    Rooted<ScopeObject*> staticScope(cx, cx->global()->staticLexicalScope());
+    return CloneFunctionObject(cx, funobj, cx->global(), staticScope);
 }
 
 extern JS_PUBLIC_API(JSObject*)
 CloneFunctionObject(JSContext* cx, HandleObject funobj, AutoObjectVector& scopeChain)
 {
     RootedObject dynamicScope(cx);
-    Rooted<ScopeObject*> staticScope(cx);
+    Rooted<ScopeObject*> staticScope(cx, cx->global()->staticLexicalScope());
     if (!CreateNonSyntacticScopeChain(cx, scopeChain, &dynamicScope, &staticScope))
         return nullptr;
 
@@ -3911,9 +3912,11 @@ Compile(JSContext* cx, const ReadOnlyCompileOptions& options, SyntacticScopeOpti
     CHECK_REQUEST(cx);
     AutoLastFrameCheck lfc(cx);
 
-    Rooted<ScopeObject*> staticScope(cx);
+    // Non-syntactic scopes, if present, will come after the global lexical
+    // scope.
+    Rooted<ScopeObject*> staticScope(cx, cx->global()->staticLexicalScope());
     if (scopeOption == HasNonSyntacticScope) {
-        staticScope = StaticNonSyntacticScopeObjects::create(cx, nullptr);
+        staticScope = StaticNonSyntacticScopeObjects::create(cx, staticScope);
         if (!staticScope)
             return false;
     }
@@ -4329,7 +4332,7 @@ static bool
 ExecuteScript(JSContext* cx, AutoObjectVector& scopeChain, HandleScript scriptArg, jsval* rval)
 {
     RootedObject dynamicScope(cx);
-    Rooted<ScopeObject*> staticScope(cx);
+    Rooted<ScopeObject*> staticScope(cx, cx->global()->staticLexicalScope());
     if (!CreateNonSyntacticScopeChain(cx, scopeChain, &dynamicScope, &staticScope))
         return false;
 
@@ -4375,7 +4378,8 @@ JS::CloneAndExecuteScript(JSContext* cx, HandleScript scriptArg)
     CHECK_REQUEST(cx);
     RootedScript script(cx, scriptArg);
     if (script->compartment() != cx->compartment()) {
-        script = CloneGlobalScript(cx, /* enclosingScope = */ nullptr, script);
+        Rooted<ScopeObject*> staticScope(cx, cx->global()->staticLexicalScope());
+        script = CloneGlobalScript(cx, staticScope, script);
         if (!script)
             return false;
 
@@ -4436,7 +4440,7 @@ Evaluate(JSContext* cx, AutoObjectVector& scopeChain, const ReadOnlyCompileOptio
          SourceBufferHolder& srcBuf, MutableHandleValue rval)
 {
     RootedObject dynamicScope(cx);
-    Rooted<ScopeObject*> staticScope(cx);
+    Rooted<ScopeObject*> staticScope(cx, cx->global()->staticLexicalScope());
     if (!CreateNonSyntacticScopeChain(cx, scopeChain, &dynamicScope, &staticScope))
         return false;
     return ::Evaluate(cx, dynamicScope, staticScope, optionsArg, srcBuf, rval);
@@ -4447,7 +4451,8 @@ Evaluate(JSContext* cx, const ReadOnlyCompileOptions& optionsArg,
          const char16_t* chars, size_t length, MutableHandleValue rval)
 {
   SourceBufferHolder srcBuf(chars, length, SourceBufferHolder::NoOwnership);
-  return ::Evaluate(cx, cx->global(), nullptr, optionsArg, srcBuf, rval);
+  Rooted<ScopeObject*> staticScope(cx, cx->global()->staticLexicalScope());
+  return ::Evaluate(cx, cx->global(), staticScope, optionsArg, srcBuf, rval);
 }
 
 extern JS_PUBLIC_API(bool)
@@ -4463,7 +4468,8 @@ JS::Evaluate(JSContext* cx, const ReadOnlyCompileOptions& options,
         return false;
 
     SourceBufferHolder srcBuf(chars, length, SourceBufferHolder::GiveOwnership);
-    bool ok = ::Evaluate(cx, cx->global(), nullptr, options, srcBuf, rval);
+    Rooted<ScopeObject*> staticScope(cx, cx->global()->staticLexicalScope());
+    bool ok = ::Evaluate(cx, cx->global(), staticScope, options, srcBuf, rval);
     return ok;
 }
 
@@ -4487,7 +4493,8 @@ JS_PUBLIC_API(bool)
 JS::Evaluate(JSContext* cx, const ReadOnlyCompileOptions& optionsArg,
              SourceBufferHolder& srcBuf, MutableHandleValue rval)
 {
-    return ::Evaluate(cx, cx->global(), nullptr, optionsArg, srcBuf, rval);
+    Rooted<ScopeObject*> staticScope(cx, cx->global()->staticLexicalScope());
+    return ::Evaluate(cx, cx->global(), staticScope, optionsArg, srcBuf, rval);
 }
 
 JS_PUBLIC_API(bool)
