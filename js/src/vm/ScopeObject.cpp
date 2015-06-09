@@ -593,6 +593,44 @@ const Class NonSyntacticVariablesObject::class_ = {
     JSCLASS_IS_ANONYMOUS
 };
 
+/* static */ StaticExtensibleLexicalObject*
+StaticExtensibleLexicalObject::create(JSContext* cx, HandleObject enclosing)
+{
+    Rooted<StaticExtensibleLexicalObject*> obj(cx,
+        NewObjectWithNullTaggedProto<StaticExtensibleLexicalObject>(cx, TenuredObject,
+                                                                    BaseShape::DELEGATE));
+    if (!obj)
+        return nullptr;
+
+    obj->setEnclosingScope(enclosing);
+    return obj;
+}
+
+const Class StaticExtensibleLexicalObject::class_ = {
+    "StaticExtensibleLexicalObject",
+    JSCLASS_HAS_RESERVED_SLOTS(StaticExtensibleLexicalObject::RESERVED_SLOTS) |
+    JSCLASS_IS_ANONYMOUS
+};
+
+/* static */ ExtensibleLexicalObject*
+ExtensibleLexicalObject::create(JSContext* cx, HandleObject enclosing)
+{
+    Rooted<ExtensibleLexicalObject*> obj(cx,
+        NewObjectWithNullTaggedProto<ExtensibleLexicalObject>(cx, TenuredObject,
+                                                              BaseShape::DELEGATE));
+    if (!obj)
+        return nullptr;
+
+    obj->setEnclosingScope(enclosing);
+    return obj;
+}
+
+const Class ExtensibleLexicalObject::class_ = {
+    "ExtensibleLexicalObject",
+    JSCLASS_HAS_RESERVED_SLOTS(ExtensibleLexicalObject::RESERVED_SLOTS) |
+    JSCLASS_IS_ANONYMOUS
+};
+
 /*****************************************************************************/
 
 /* static */ ClonedBlockObject*

@@ -458,10 +458,11 @@ class StaticExtensibleLexicalObject : public ScopeObject
 // This is used for the ES6 global lexical scope.
 class ExtensibleLexicalObject : public ScopeObject
 {
+  public:
     static const unsigned RESERVED_SLOTS = 1;
     static const Class class_;
 
-    static StaticExtensibleLexicalObject* create(JSContext* cx, HandleObject enclosing);
+    static ExtensibleLexicalObject* create(JSContext* cx, HandleObject enclosing);
 };
 
 class NestedScopeObject : public ScopeObject
@@ -1074,7 +1075,11 @@ JSObject::is<js::ScopeObject>() const
            is<js::DeclEnvObject>() ||
            is<js::NestedScopeObject>() ||
            is<js::UninitializedLexicalObject>() ||
-           is<js::NonSyntacticVariablesObject>();
+           is<js::NonSyntacticVariablesObject>() ||
+           is<js::StaticEvalObject>() ||
+           is<js::StaticNonSyntacticScopeObjects>() ||
+           is<js::StaticExtensibleLexicalObject>();
+           is<js::ExtensibleLexicalObject>();
 }
 
 template<>
