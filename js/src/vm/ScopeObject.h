@@ -443,6 +443,27 @@ class NonSyntacticVariablesObject : public ScopeObject
     static NonSyntacticVariablesObject* create(JSContext* cx, Handle<GlobalObject*> global);
 };
 
+class StaticExtensibleLexicalObject : public ScopeObject
+{
+  public:
+    static const unsigned RESERVED_SLOTS = 1;
+    static const Class class_;
+
+    static StaticExtensibleLexicalObject* create(JSContext* cx, HandleObject enclosing);
+};
+
+// Unlike BlockObjects, the shape of ExtensibleLexicalObject is not known
+// ahead of time and may mutate during script execution.
+//
+// This is used for the ES6 global lexical scope.
+class ExtensibleLexicalObject : public ScopeObject
+{
+    static const unsigned RESERVED_SLOTS = 1;
+    static const Class class_;
+
+    static StaticExtensibleLexicalObject* create(JSContext* cx, HandleObject enclosing);
+};
+
 class NestedScopeObject : public ScopeObject
 {
   public:
