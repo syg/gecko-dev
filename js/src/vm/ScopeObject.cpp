@@ -1113,6 +1113,10 @@ ScopeIter::settle()
           case StaticScopeIter<CanGC>::Eval:
             MOZ_ASSERT(scope_->as<CallObject>().isForEval());
             break;
+          case StaticScopeIter<CanGC>::ExtensibleLexical:
+            MOZ_ASSERT(scope_->as<ExtensibleLexicalObject>().staticScope() ==
+                       staticExtensibleLexical());
+            break;
           case StaticScopeIter<CanGC>::NonSyntactic:
             MOZ_ASSERT(!IsSyntacticScope(scope_));
             break;
@@ -1152,6 +1156,8 @@ ScopeIter::type() const
         return With;
       case StaticScopeIter<CanGC>::Eval:
         return Eval;
+      case StaticScopeIter<CanGC>::ExtensibleLexical:
+        return ExtensibleLexical;
       case StaticScopeIter<CanGC>::NonSyntactic:
         return NonSyntactic;
       case StaticScopeIter<CanGC>::NamedLambda:
@@ -1183,6 +1189,8 @@ ScopeIter::maybeStaticScope() const
         return &staticWith();
       case StaticScopeIter<CanGC>::Eval:
         return &staticEval();
+      case StaticScopeIter<CanGC>::ExtensibleLexical:
+        return &staticExtensibleLexical();
       case StaticScopeIter<CanGC>::NonSyntactic:
         return &staticNonSyntactic();
       case StaticScopeIter<CanGC>::NamedLambda:
@@ -2464,6 +2472,7 @@ GetDebugScopeForMissing(JSContext* cx, const ScopeIter& si)
       }
       case ScopeIter::With:
       case ScopeIter::Eval:
+      case ScopeIter::ExtensibleLexical:
         MOZ_CRASH("should already have a scope");
       case ScopeIter::NonSyntactic:
         MOZ_CRASH("non-syntactic scopes cannot be synthesized");

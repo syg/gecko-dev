@@ -159,6 +159,9 @@ AssertDynamicScopeMatchesStaticScope(JSContext* cx, JSScript* script, JSObject* 
               case StaticScopeIter<NoGC>::Eval:
                 scope = &scope->as<CallObject>().enclosingScope();
                 break;
+              case StaticScopeIter<NoGC>::ExtensibleLexical:
+                scope = &scope->as<ExtensibleLexicalObject>().enclosingScope();
+                break;
               case StaticScopeIter<NoGC>::NonSyntactic:
                 MOZ_CRASH("NonSyntactic should not have a syntactic scope");
                 break;

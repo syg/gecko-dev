@@ -84,6 +84,8 @@ StaticScopeIter<allowGC>::operator++(int)
         obj = obj->template as<NestedScopeObject>().enclosingScopeForStaticScopeIter();
     } else if (obj->template is<StaticEvalObject>()) {
         obj = obj->template as<StaticEvalObject>().enclosingScopeForStaticScopeIter();
+    } else if (obj->template is<StaticExtensibleLexicalObject>()) {
+        obj = obj->template as<StaticExtensibleLexicalObject>().enclosingScopeForStaticScopeIter();
     } else if (obj->template is<StaticNonSyntacticScopeObjects>()) {
         obj = obj->template as<StaticNonSyntacticScopeObjects>().enclosingScopeForStaticScopeIter();
     } else if (onNamedLambda || !obj->template as<JSFunction>().isNamedLambda()) {
@@ -94,6 +96,7 @@ StaticScopeIter<allowGC>::operator++(int)
     }
     MOZ_ASSERT_IF(obj, obj->template is<NestedScopeObject>() ||
                        obj->template is<StaticEvalObject>() ||
+                       obj->template is<StaticExtensibleLexicalObject>() ||
                        obj->template is<StaticNonSyntacticScopeObjects>() ||
                        obj->template is<JSFunction>());
     MOZ_ASSERT_IF(onNamedLambda, obj->template is<JSFunction>());
@@ -111,6 +114,8 @@ StaticScopeIter<allowGC>::hasSyntacticDynamicScopeObject() const
         return true;
     if (obj->template is<StaticEvalObject>())
         return obj->template as<StaticEvalObject>().isStrict();
+    if (obj->template is<StaticExtensibleLexicalObject>())
+        return true;
     MOZ_ASSERT(obj->template is<StaticNonSyntacticScopeObjects>());
     return false;
 }
@@ -120,7 +125,7 @@ inline Shape*
 StaticScopeIter<allowGC>::scopeShape() const
 {
     MOZ_ASSERT(hasSyntacticDynamicScopeObject());
-    MOZ_ASSERT(type() != NamedLambda && type() != Eval);
+    MOZ_ASSERT(type() == Block || type() == Function);
     if (type() == Block)
         return block().lastProperty();
     return funScript()->callObjShape();
@@ -132,15 +137,17 @@ StaticScopeIter<allowGC>::type() const
 {
     if (onNamedLambda)
         return NamedLambda;
-    return obj->template is<StaticBlockObject>()
-           ? Block
-           : (obj->template is<StaticWithObject>()
-              ? With
-              : (obj->template is<StaticEvalObject>()
-                 ? Eval
-                 : (obj->template is<StaticNonSyntacticScopeObjects>())
-                 ? NonSyntactic
-                 : Function));
+    if (obj->template is<StaticBlockObject>())
+        return Block;
+    if (obj->template is<StaticWithObject>())
+        return With;
+    if (obj->template is<StaticEvalObject>())
+        return Eval;
+    if (obj->template is<StaticExtensibleLexicalObject>())
+        return ExtensibleLexical;
+    if (obj->template is<StaticNonSyntacticScopeObjects>())
+        return NonSyntactic;
+    return Function;
 }
 
 template <AllowGC allowGC>
@@ -176,6 +183,14 @@ StaticScopeIter<allowGC>::nonSyntactic() const
 }
 
 template <AllowGC allowGC>
+inline StaticExtensibleLexicalObject&
+StaticScopeIter<allowGC>::extensibleLexical() const
+{
+    MOZ_ASSERT(type() == ExtensibleLexical);
+    return obj->template as<StaticExtensibleLexicalObject>();
+}
+
+template <AllowGC allowGC>
 inline JSScript*
 StaticScopeIter<allowGC>::funScript() const
 {
@@ -206,6 +221,7 @@ JSObject::enclosingScope()
         return nullptr;
 
     MOZ_ASSERT_IF(is<JSFunction>(), as<JSFunction>().isInterpreted());
+    // TODOshu
     return &global();
 }
 

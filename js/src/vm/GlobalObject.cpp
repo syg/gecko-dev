@@ -658,5 +658,5 @@ GlobalObject::addIntrinsicValue(JSContext* cx, HandleId id, HandleValue value)
 StaticExtensibleLexicalObject&
 GlobalObject::staticLexicalScope() const
 {
-    return *lexicalScope().staticScope();
+    return lexicalScope().staticScope();
 }

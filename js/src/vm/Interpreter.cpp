@@ -1176,6 +1176,7 @@ PopScope(JSContext* cx, ScopeIter& si)
         break;
       case ScopeIter::Call:
       case ScopeIter::Eval:
+      case ScopeIter::ExtensibleLexical:
       case ScopeIter::NonSyntactic:
         break;
     }

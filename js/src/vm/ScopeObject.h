@@ -63,6 +63,7 @@ class StaticScopeIter
                       obj->is<StaticBlockObject>() ||
                       obj->is<StaticWithObject>() ||
                       obj->is<StaticEvalObject>() ||
+                      obj->is<StaticExtensibleLexicalObject>() ||
                       obj->is<StaticNonSyntacticScopeObjects>() ||
                       obj->is<JSFunction>());
     }
@@ -83,6 +84,7 @@ class StaticScopeIter
                       obj->is<StaticBlockObject>() ||
                       obj->is<StaticWithObject>() ||
                       obj->is<StaticEvalObject>() ||
+                      obj->is<StaticExtensibleLexicalObject>() ||
                       obj->is<StaticNonSyntacticScopeObjects>() ||
                       obj->is<JSFunction>());
     }
@@ -104,12 +106,13 @@ class StaticScopeIter
     bool hasSyntacticDynamicScopeObject() const;
     Shape* scopeShape() const;
 
-    enum Type { Function, Block, With, NamedLambda, Eval, NonSyntactic };
+    enum Type { Function, Block, With, NamedLambda, Eval, ExtensibleLexical, NonSyntactic };
     Type type() const;
 
     StaticBlockObject& block() const;
     StaticWithObject& staticWith() const;
     StaticEvalObject& eval() const;
+    StaticExtensibleLexicalObject& extensibleLexical() const;
     StaticNonSyntacticScopeObjects& nonSyntactic() const;
     JSScript* funScript() const;
     JSFunction& fun() const;
@@ -205,7 +208,7 @@ ScopeCoordinateFunctionScript(JSScript* script, jsbytecode* pc);
  *     |
  *     |- StaticWithObject                Template for "with" object in static scope chain
  *     |
- *     |- DynamicExtensibleLexicalObject  Lexical scope with a mutable set of bindings
+ *     |- ExtensibleLexicalObject         Lexical scope with a mutable set of bindings
  *     |
  *     |- StaticExtensibleLexicalObject   Counterpart to above in static scope chain
  *     |
@@ -462,7 +465,7 @@ class NestedScopeObject : public ScopeObject
     }
 
     // At compile-time it's possible for the scope chain to be null.
-    JSObject* enclosingScopeForStaticScopeIter() {
+    JSObject* enclosingScopeForStaticScopeIter() const {
         return getReservedSlot(SCOPE_CHAIN_SLOT).toObjectOrNull();
     }
 
@@ -744,13 +747,13 @@ class ExtensibleLexicalObject : public NestedScopeObject
                                            Handle<StaticExtensibleLexicalObject*> staticScope,
                                            HandleObject enclosing);
 
-    StaticExtensibleLexicalObject* staticScope() const {
-        return &NestedScopeObject::staticScope()->as<StaticExtensibleLexicalObject>();
+    StaticExtensibleLexicalObject& staticScope() const {
+        return NestedScopeObject::staticScope()->as<StaticExtensibleLexicalObject>();
     }
 
     bool isGlobal() const {
-        MOZ_ASSERT(staticScope()->isGlobal(), enclosingScope()->is<GlobalObject>());
-        return enclosingScope()->is<GlobalObject>();
+        MOZ_ASSERT_IF(staticScope().isGlobal(), enclosingScope().is<GlobalObject>());
+        return enclosingScope().is<GlobalObject>();
     }
 };
 
@@ -834,7 +837,7 @@ class ScopeIter
     inline JSObject& enclosingScope() const;
 
     // If !done():
-    enum Type { Call, Block, With, Eval, NonSyntactic };
+    enum Type { Call, Block, With, Eval, ExtensibleLexical, NonSyntactic };
     Type type() const;
 
     inline bool hasNonSyntacticScopeObject() const;
@@ -847,6 +850,7 @@ class ScopeIter
     StaticBlockObject& staticBlock() const { return ssi_.block(); }
     StaticWithObject& staticWith() const { return ssi_.staticWith(); }
     StaticEvalObject& staticEval() const { return ssi_.eval(); }
+    StaticExtensibleLexicalObject& staticExtensibleLexical() const { return ssi_.extensibleLexical(); }
     StaticNonSyntacticScopeObjects& staticNonSyntactic() const { return ssi_.nonSyntactic(); }
     JSFunction& fun() const { return ssi_.fun(); }
 
@@ -1077,7 +1081,9 @@ JSObject::is<js::NestedScopeObject>() const
 {
     return is<js::BlockObject>() ||
            is<js::StaticWithObject>() ||
-           is<js::DynamicWithObject>();
+           is<js::DynamicWithObject>() ||
+           is<js::StaticExtensibleLexicalObject>() ||
+           is<js::ExtensibleLexicalObject>();
 }
 
 template<>
@@ -1195,6 +1201,8 @@ ScopeIter::canHaveSyntacticScopeObject() const
       case Eval:
         // Only strict eval scopes can have dynamic scope objects.
         return staticEval().isStrict();
+      case ExtensibleLexical:
+        return true;
       case NonSyntactic:
         return false;
     }
