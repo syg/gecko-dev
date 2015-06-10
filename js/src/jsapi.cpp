@@ -3326,7 +3326,7 @@ CreateNonSyntacticScopeChain(JSContext* cx, AutoObjectVector& scopeChain,
 }
 
 static bool
-IsFunctionCloneable(HandleFunction fun, HandleObject dynamicScope)
+IsFunctionCloneable(HandleFunction fun)
 {
     if (!fun->isInterpreted())
         return true;
@@ -3338,6 +3338,13 @@ IsFunctionCloneable(HandleFunction fun, HandleObject dynamicScope)
         // it.
         if (scope->is<StaticNonSyntacticScopeObjects>())
             return true;
+
+        // If the script is directly under the global scope, we can clone it.
+        if (scope->is<StaticExtensibleLexicalObject>() &&
+            scope->as<StaticExtensibleLexicalObject>().isGlobal())
+        {
+            return true;
+        }
 
         // If the script is an indirect eval that is immediately scoped under
         // the global, we can clone it.
@@ -3380,7 +3387,7 @@ CloneFunctionObject(JSContext* cx, HandleObject funobj, HandleObject dynamicScop
             return nullptr;
     }
 
-    if (!IsFunctionCloneable(fun, dynamicScope)) {
+    if (!IsFunctionCloneable(fun)) {
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_BAD_CLONE_FUNOBJ_SCOPE);
         return nullptr;
     }
@@ -3395,6 +3402,7 @@ CloneFunctionObject(JSContext* cx, HandleObject funobj, HandleObject dynamicScop
         return nullptr;
     }
 
+    // TODOshu
     if (CanReuseScriptForClone(cx->compartment(), fun, dynamicScope)) {
         // If the script is to be reused, either the script can already handle
         // non-syntactic scopes, or there is only the standard global lexical
@@ -3419,7 +3427,7 @@ namespace JS {
 JS_PUBLIC_API(JSObject*)
 CloneFunctionObject(JSContext* cx, JS::Handle<JSObject*> funobj)
 {
-    Rooted<ScopeObject*> staticScope(cx, cx->global()->staticLexicalScope());
+    Rooted<ScopeObject*> staticScope(cx, &cx->global()->staticLexicalScope());
     return CloneFunctionObject(cx, funobj, cx->global(), staticScope);
 }
 
@@ -3427,7 +3435,7 @@ extern JS_PUBLIC_API(JSObject*)
 CloneFunctionObject(JSContext* cx, HandleObject funobj, AutoObjectVector& scopeChain)
 {
     RootedObject dynamicScope(cx);
-    Rooted<ScopeObject*> staticScope(cx, cx->global()->staticLexicalScope());
+    Rooted<ScopeObject*> staticScope(cx, &cx->global()->staticLexicalScope());
     if (!CreateNonSyntacticScopeChain(cx, scopeChain, &dynamicScope, &staticScope))
         return nullptr;
 
@@ -3914,7 +3922,7 @@ Compile(JSContext* cx, const ReadOnlyCompileOptions& options, SyntacticScopeOpti
 
     // Non-syntactic scopes, if present, will come after the global lexical
     // scope.
-    Rooted<ScopeObject*> staticScope(cx, cx->global()->staticLexicalScope());
+    Rooted<ScopeObject*> staticScope(cx, &cx->global()->staticLexicalScope());
     if (scopeOption == HasNonSyntacticScope) {
         staticScope = StaticNonSyntacticScopeObjects::create(cx, staticScope);
         if (!staticScope)
@@ -4332,7 +4340,7 @@ static bool
 ExecuteScript(JSContext* cx, AutoObjectVector& scopeChain, HandleScript scriptArg, jsval* rval)
 {
     RootedObject dynamicScope(cx);
-    Rooted<ScopeObject*> staticScope(cx, cx->global()->staticLexicalScope());
+    Rooted<ScopeObject*> staticScope(cx, &cx->global()->staticLexicalScope());
     if (!CreateNonSyntacticScopeChain(cx, scopeChain, &dynamicScope, &staticScope))
         return false;
 
@@ -4378,7 +4386,7 @@ JS::CloneAndExecuteScript(JSContext* cx, HandleScript scriptArg)
     CHECK_REQUEST(cx);
     RootedScript script(cx, scriptArg);
     if (script->compartment() != cx->compartment()) {
-        Rooted<ScopeObject*> staticScope(cx, cx->global()->staticLexicalScope());
+        Rooted<ScopeObject*> staticScope(cx, &cx->global()->staticLexicalScope());
         script = CloneGlobalScript(cx, staticScope, script);
         if (!script)
             return false;
@@ -4403,7 +4411,7 @@ Evaluate(JSContext* cx, HandleObject scope, Handle<ScopeObject*> staticScope,
 
     AutoLastFrameCheck lfc(cx);
 
-    MOZ_ASSERT_IF(!scope->is<GlobalObject>(), HasNonSyntacticStaticScopeChain(staticScope));
+    MOZ_ASSERT_IF(!IsGlobalLexicalScope(scope), HasNonSyntacticStaticScopeChain(staticScope));
 
     options.setIsRunOnce(true);
     SourceCompressionTask sct(cx);
@@ -4440,7 +4448,7 @@ Evaluate(JSContext* cx, AutoObjectVector& scopeChain, const ReadOnlyCompileOptio
          SourceBufferHolder& srcBuf, MutableHandleValue rval)
 {
     RootedObject dynamicScope(cx);
-    Rooted<ScopeObject*> staticScope(cx, cx->global()->staticLexicalScope());
+    Rooted<ScopeObject*> staticScope(cx, &cx->global()->staticLexicalScope());
     if (!CreateNonSyntacticScopeChain(cx, scopeChain, &dynamicScope, &staticScope))
         return false;
     return ::Evaluate(cx, dynamicScope, staticScope, optionsArg, srcBuf, rval);
@@ -4451,7 +4459,7 @@ Evaluate(JSContext* cx, const ReadOnlyCompileOptions& optionsArg,
          const char16_t* chars, size_t length, MutableHandleValue rval)
 {
   SourceBufferHolder srcBuf(chars, length, SourceBufferHolder::NoOwnership);
-  Rooted<ScopeObject*> staticScope(cx, cx->global()->staticLexicalScope());
+  Rooted<ScopeObject*> staticScope(cx, &cx->global()->staticLexicalScope());
   return ::Evaluate(cx, cx->global(), staticScope, optionsArg, srcBuf, rval);
 }
 
@@ -4468,7 +4476,7 @@ JS::Evaluate(JSContext* cx, const ReadOnlyCompileOptions& options,
         return false;
 
     SourceBufferHolder srcBuf(chars, length, SourceBufferHolder::GiveOwnership);
-    Rooted<ScopeObject*> staticScope(cx, cx->global()->staticLexicalScope());
+    Rooted<ScopeObject*> staticScope(cx, &cx->global()->staticLexicalScope());
     bool ok = ::Evaluate(cx, cx->global(), staticScope, options, srcBuf, rval);
     return ok;
 }
@@ -4493,7 +4501,7 @@ JS_PUBLIC_API(bool)
 JS::Evaluate(JSContext* cx, const ReadOnlyCompileOptions& optionsArg,
              SourceBufferHolder& srcBuf, MutableHandleValue rval)
 {
-    Rooted<ScopeObject*> staticScope(cx, cx->global()->staticLexicalScope());
+    Rooted<ScopeObject*> staticScope(cx, &cx->global()->staticLexicalScope());
     return ::Evaluate(cx, cx->global(), staticScope, optionsArg, srcBuf, rval);
 }
 

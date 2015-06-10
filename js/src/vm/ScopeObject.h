@@ -726,6 +726,8 @@ class StaticExtensibleLexicalObject : public NestedScopeObject
     static const Class class_;
 
     static StaticExtensibleLexicalObject* create(JSContext* cx, HandleObject enclosing);
+
+    bool isGlobal() const { return !enclosingScopeForStaticScopeIter(); }
 };
 
 // Unlike BlockObjects, the shape of ExtensibleLexicalObject is not known
@@ -744,6 +746,11 @@ class ExtensibleLexicalObject : public NestedScopeObject
 
     StaticExtensibleLexicalObject* staticScope() const {
         return &NestedScopeObject::staticScope()->as<StaticExtensibleLexicalObject>();
+    }
+
+    bool isGlobal() const {
+        MOZ_ASSERT(staticScope()->isGlobal(), enclosingScope()->is<GlobalObject>());
+        return enclosingScope()->is<GlobalObject>();
     }
 };
 
@@ -1117,6 +1124,12 @@ IsSyntacticScope(JSObject* scope)
     return scope->is<ScopeObject>() &&
            (!scope->is<DynamicWithObject>() || scope->as<DynamicWithObject>().isSyntactic()) &&
            !scope->is<NonSyntacticVariablesObject>();
+}
+
+inline bool
+IsGlobalLexicalScope(JSObject* scope)
+{
+    return scope->is<ExtensibleLexicalObject>() && scope->as<ExtensibleLexicalObject>().isGlobal();
 }
 
 inline const Value&

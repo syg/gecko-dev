@@ -257,6 +257,15 @@ GlobalObject::createInternal(JSContext* cx, const Class* clasp)
 
     cx->compartment()->initGlobal(*global);
 
+    Rooted<StaticExtensibleLexicalObject*> staticLexical(cx,
+        StaticExtensibleLexicalObject::create(cx, nullptr));
+    if (!staticLexical)
+        return nullptr;
+    ExtensibleLexicalObject* lexical = ExtensibleLexicalObject::create(cx, staticLexical, global);
+    if (!lexical)
+        return nullptr;
+    global->setReservedSlot(LEXICAL_SCOPE, ObjectValue(*lexical));
+
     if (!global->setQualifiedVarObj(cx))
         return nullptr;
     if (!global->setDelegate(cx))
@@ -646,8 +655,8 @@ GlobalObject::addIntrinsicValue(JSContext* cx, HandleId id, HandleValue value)
     return true;
 }
 
-StaticExtensibleLexicalObject*
+StaticExtensibleLexicalObject&
 GlobalObject::staticLexicalScope() const
 {
-    return lexicalScope()->staticScope();
+    return *lexicalScope().staticScope();
 }

@@ -109,6 +109,7 @@ class GlobalObject : public NativeObject
         FLOAT64X2_TYPE_DESCR,
         INT32X4_TYPE_DESCR,
         FOR_OF_PIC_CHAIN,
+        LEXICAL_SCOPE,
 
         /* Total reserved-slot count for global objects. */
         RESERVED_SLOTS
@@ -137,12 +138,12 @@ class GlobalObject : public NativeObject
 
 
   public:
-    ExtensibleLexicalObject* lexicalScope() const {
-        // TODOshu
-        return nullptr;
+    ExtensibleLexicalObject& lexicalScope() const {
+        return reinterpret_cast<ExtensibleLexicalObject&>(
+            getReservedSlot(LEXICAL_SCOPE).toObject());
     }
 
-    StaticExtensibleLexicalObject* staticLexicalScope() const;
+    StaticExtensibleLexicalObject& staticLexicalScope() const;
 
     void setThrowTypeError(JSFunction* fun) {
         MOZ_ASSERT(getSlotRef(THROWTYPEERROR).isUndefined());
