@@ -3303,7 +3303,8 @@ CreateNonSyntacticScopeChain(JSContext* cx, AutoObjectVector& scopeChain,
                              MutableHandleObject dynamicScopeObj,
                              MutableHandle<ScopeObject*> staticScopeObj)
 {
-    if (!js::CreateScopeObjectsForScopeChain(cx, scopeChain, cx->global(), dynamicScopeObj))
+    RootedObject scope(cx, &cx->global()->lexicalScope());
+    if (!js::CreateScopeObjectsForScopeChain(cx, scopeChain, scope, dynamicScopeObj))
         return false;
 
     if (!scopeChain.empty()) {
@@ -3929,7 +3930,8 @@ Compile(JSContext* cx, const ReadOnlyCompileOptions& options, SyntacticScopeOpti
             return false;
     }
 
-    script.set(frontend::CompileScript(cx, &cx->tempLifoAlloc(), cx->global(),
+    RootedObject scope(cx, &cx->global()->lexicalScope());
+    script.set(frontend::CompileScript(cx, &cx->tempLifoAlloc(), scope,
                                        staticScope, nullptr, options, srcBuf));
     return !!script;
 }
@@ -4331,9 +4333,16 @@ ExecuteScript(JSContext* cx, HandleObject scope, HandleScript script, jsval* rva
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, scope, script);
-    MOZ_ASSERT_IF(!scope->is<GlobalObject>(), script->hasNonSyntacticScope());
+    MOZ_ASSERT_IF(!IsGlobalLexicalScope(scope), script->hasNonSyntacticScope());
     AutoLastFrameCheck lfc(cx);
     return Execute(cx, script, *scope, rval);
+}
+
+static bool
+ExecuteScript(JSContext* cx, HandleScript script, jsval* rval)
+{
+    RootedObject scope(cx, &cx->global()->lexicalScope());
+    return ExecuteScript(cx, scope, script, rval);
 }
 
 static bool
@@ -4358,13 +4367,13 @@ ExecuteScript(JSContext* cx, AutoObjectVector& scopeChain, HandleScript scriptAr
 MOZ_NEVER_INLINE JS_PUBLIC_API(bool)
 JS_ExecuteScript(JSContext* cx, HandleScript scriptArg, MutableHandleValue rval)
 {
-    return ExecuteScript(cx, cx->global(), scriptArg, rval.address());
+    return ExecuteScript(cx, scriptArg, rval.address());
 }
 
 MOZ_NEVER_INLINE JS_PUBLIC_API(bool)
 JS_ExecuteScript(JSContext* cx, HandleScript scriptArg)
 {
-    return ExecuteScript(cx, cx->global(), scriptArg, nullptr);
+    return ExecuteScript(cx, scriptArg, nullptr);
 }
 
 MOZ_NEVER_INLINE JS_PUBLIC_API(bool)
@@ -4393,7 +4402,7 @@ JS::CloneAndExecuteScript(JSContext* cx, HandleScript scriptArg)
 
         js::Debugger::onNewScript(cx, script);
     }
-    return ExecuteScript(cx, cx->global(), script, nullptr);
+    return ExecuteScript(cx, script, nullptr);
 }
 
 static const unsigned LARGE_SCRIPT_LENGTH = 500*1024;
@@ -4459,8 +4468,9 @@ Evaluate(JSContext* cx, const ReadOnlyCompileOptions& optionsArg,
          const char16_t* chars, size_t length, MutableHandleValue rval)
 {
   SourceBufferHolder srcBuf(chars, length, SourceBufferHolder::NoOwnership);
+  RootedObject scope(cx, &cx->global()->lexicalScope());
   Rooted<ScopeObject*> staticScope(cx, &cx->global()->staticLexicalScope());
-  return ::Evaluate(cx, cx->global(), staticScope, optionsArg, srcBuf, rval);
+  return ::Evaluate(cx, scope, staticScope, optionsArg, srcBuf, rval);
 }
 
 extern JS_PUBLIC_API(bool)
@@ -4476,8 +4486,9 @@ JS::Evaluate(JSContext* cx, const ReadOnlyCompileOptions& options,
         return false;
 
     SourceBufferHolder srcBuf(chars, length, SourceBufferHolder::GiveOwnership);
+    RootedObject scope(cx, &cx->global()->lexicalScope());
     Rooted<ScopeObject*> staticScope(cx, &cx->global()->staticLexicalScope());
-    bool ok = ::Evaluate(cx, cx->global(), staticScope, options, srcBuf, rval);
+    bool ok = ::Evaluate(cx, scope, staticScope, options, srcBuf, rval);
     return ok;
 }
 
@@ -4509,6 +4520,7 @@ JS_PUBLIC_API(bool)
 JS::Evaluate(JSContext* cx, AutoObjectVector& scopeChain, const ReadOnlyCompileOptions& optionsArg,
              SourceBufferHolder& srcBuf, MutableHandleValue rval)
 {
+    RootedObject scope(cx, &cx->global()->lexicalScope());
     return ::Evaluate(cx, scopeChain, optionsArg, srcBuf, rval);
 }
 

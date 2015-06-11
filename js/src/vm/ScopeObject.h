@@ -1138,6 +1138,12 @@ IsGlobalLexicalScope(JSObject* scope)
     return scope->is<ExtensibleLexicalObject>() && scope->as<ExtensibleLexicalObject>().isGlobal();
 }
 
+inline bool
+IsGlobalScope(JSObject* scope)
+{
+    return IsGlobalLexicalScope(scope) || scope->is<GlobalObject>();
+}
+
 inline const Value&
 ScopeObject::aliasedVar(ScopeCoordinate sc)
 {

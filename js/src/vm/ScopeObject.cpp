@@ -736,7 +736,7 @@ StaticExtensibleLexicalObject::create(JSContext* cx, HandleObject enclosing)
     if (!obj)
         return nullptr;
 
-    obj->setEnclosingScope(enclosing);
+    obj->setReservedSlot(SCOPE_CHAIN_SLOT, ObjectOrNullValue(enclosing));
     return obj;
 }
 
@@ -761,10 +761,50 @@ ExtensibleLexicalObject::create(JSContext* cx, Handle<StaticExtensibleLexicalObj
     return obj;
 }
 
+static JSObject*
+ExtensibleLexical_ThisObject(JSContext* cx, HandleObject obj)
+{
+    // ES6 8.1.1.4 says the 'this' binding of the global lexical scope is the
+    // global object.
+    if (obj->as<ExtensibleLexicalObject>().isGlobal()) {
+        MOZ_ASSERT(cx->global() == obj->enclosingScope());
+        return obj->enclosingScope();
+    }
+    return obj;
+}
+
 const Class ExtensibleLexicalObject::class_ = {
     "ExtensibleLexicalObject",
     JSCLASS_HAS_RESERVED_SLOTS(ExtensibleLexicalObject::RESERVED_SLOTS) |
-    JSCLASS_IS_ANONYMOUS
+    JSCLASS_IS_ANONYMOUS,
+    nullptr, /* addProperty */
+    nullptr, /* delProperty */
+    nullptr, /* getProperty */
+    nullptr, /* setProperty */
+    nullptr, /* enumerate */
+    nullptr, /* resolve */
+    nullptr, /* mayResolve */
+    nullptr, /* convert */
+    nullptr, /* finalize */
+    nullptr, /* call */
+    nullptr, /* hasInstance */
+    nullptr, /* construct */
+    nullptr, /* trace */
+    JS_NULL_CLASS_SPEC,
+    JS_NULL_CLASS_EXT,
+    {
+        nullptr, /* lookupProperty */
+        nullptr, /* defineProperty */
+        nullptr, /* hasProperty */
+        nullptr, /* getProperty */
+        nullptr, /* setProperty */
+        nullptr, /* getOwnPropertyDescriptor */
+        nullptr, /* deleteDescriptor */
+        nullptr, nullptr,    /* watch/unwatch */
+        nullptr,             /* getElements */
+        nullptr,             /* enumerate (native enumeration of target doesn't work) */
+        ExtensibleLexical_ThisObject,
+    }
 };
 
 template<XDRMode mode>

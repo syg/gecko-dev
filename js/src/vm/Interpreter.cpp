@@ -857,7 +857,7 @@ js::ExecuteKernel(JSContext* cx, HandleScript script, JSObject& scopeChainArg, c
                   Value* result)
 {
     MOZ_ASSERT_IF(evalInFrame, type == EXECUTE_DEBUG);
-    MOZ_ASSERT_IF(type == EXECUTE_GLOBAL, !IsSyntacticScope(&scopeChainArg));
+    MOZ_ASSERT_IF(type == EXECUTE_GLOBAL, IsGlobalScope(&scopeChainArg));
 #ifdef DEBUG
     if (thisv.isObject()) {
         RootedObject thisObj(cx, &thisv.toObject());
@@ -867,7 +867,7 @@ js::ExecuteKernel(JSContext* cx, HandleScript script, JSObject& scopeChainArg, c
     RootedObject terminatingScope(cx, &scopeChainArg);
     while (IsSyntacticScope(terminatingScope))
         terminatingScope = terminatingScope->enclosingScope();
-    MOZ_ASSERT(terminatingScope->is<GlobalObject>() ||
+    MOZ_ASSERT(IsGlobalScope(terminatingScope) ||
                script->hasNonSyntacticScope());
 #endif
 
@@ -904,7 +904,7 @@ js::Execute(JSContext* cx, HandleScript script, JSObject& scopeChainArg, Value* 
     RootedObject scopeChain(cx, &scopeChainArg);
     MOZ_ASSERT(scopeChain == GetInnerObject(scopeChain));
 
-    MOZ_RELEASE_ASSERT(scopeChain->is<GlobalObject>() || script->hasNonSyntacticScope(),
+    MOZ_RELEASE_ASSERT(IsGlobalLexicalScope(scopeChain) || script->hasNonSyntacticScope(),
                        "Only scripts with non-syntactic scopes can be executed with "
                        "interesting scopechains");
 
@@ -1470,7 +1470,7 @@ JS_STATIC_ASSERT(JSOP_IFNE == JSOP_IFEQ + 1);
  * We can avoid computing |this| eagerly and push the implicit callee-coerced
  * |this| value, undefined, if either of these conditions hold:
  *
- * 1. The nominal |this|, obj, is a global object.
+ * 1. The nominal |this|, obj, is a global scope.
  *
  * 2. The nominal |this|, obj, has one of Block, Call, or DeclEnv class (this
  *    is what IsCacheableNonGlobalScope tests). Such objects-as-scopes must be
@@ -1493,7 +1493,7 @@ ComputeImplicitThis(JSContext* cx, HandleObject obj, MutableHandleValue vp)
 {
     vp.setUndefined();
 
-    if (obj->is<GlobalObject>())
+    if (IsGlobalScope(obj))
         return true;
 
     if (IsCacheableNonGlobalScope(obj))
