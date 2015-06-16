@@ -255,7 +255,12 @@ InterpreterFrame::epilogue(JSContext* cx)
     }
 
     if (isGlobalFrame()) {
-        MOZ_ASSERT(!IsSyntacticScope(scopeChain()));
+        // Confusingly, global frames may run in non-global scopes (that is,
+        // not directly under the GlobalObject and its lexical scope).
+        //
+        // Gecko often runs global scripts under custom scopes. See users of
+        // CreateNonSyntacticScopeChain.
+        MOZ_ASSERT(IsGlobalScope(scopeChain()) || !IsSyntacticScope(scopeChain()));
         return;
     }
 

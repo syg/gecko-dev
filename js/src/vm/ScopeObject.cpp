@@ -2669,6 +2669,9 @@ js::DumpStaticScopeChain(JSScript* script)
           case StaticScopeIter<NoGC>::Eval:
             fprintf(stdout, "eval");
             break;
+          case StaticScopeIter<NoGC>::ExtensibleLexical:
+            fprintf(stdout, "extensible lexical");
+            break;
           case StaticScopeIter<NoGC>::NonSyntactic:
             fprintf(stdout, "non-syntactic");
             break;

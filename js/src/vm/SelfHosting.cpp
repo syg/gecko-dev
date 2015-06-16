@@ -1817,8 +1817,15 @@ JSRuntime::cloneSelfHostedFunctionScript(JSContext* cx, HandlePropertyName name,
     RootedScript sourceScript(cx, sourceFun->getOrCreateScript(cx));
     if (!sourceScript)
         return false;
-    MOZ_ASSERT(!sourceScript->enclosingStaticScope());
-    return !!CloneScriptIntoFunction(cx, /* enclosingScope = */ nullptr, targetFun, sourceScript);
+
+    // Assert that there are no intervening scopes between the global scope
+    // and the self-hosted script. Toplevel lexicals are explicitly forbidden
+    // by the parser when parsing self-hosted code. The fact they have the
+    // global lexical scope on the scope chain is for uniformity and engine
+    // invariants.
+    MOZ_ASSERT(IsStaticGlobalLexicalScope(sourceScript->enclosingStaticScope()));
+    Rooted<ScopeObject*> enclosingScope(cx, &cx->global()->staticLexicalScope());
+    return !!CloneScriptIntoFunction(cx, enclosingScope, targetFun, sourceScript);
 }
 
 bool

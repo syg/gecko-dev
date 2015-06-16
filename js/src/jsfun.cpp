@@ -1978,10 +1978,12 @@ js::NewScriptedFunction(ExclusiveContext* cx, unsigned nargs,
                         JSFunction::Flags flags, HandleAtom atom,
                         gc::AllocKind allocKind /* = AllocKind::FUNCTION */,
                         NewObjectKind newKind /* = GenericObject */,
-                        HandleObject enclosingDynamicScope /* = nullptr */)
+                        HandleObject enclosingDynamicScopeArg /* = nullptr */)
 {
-    return NewFunctionWithProto(cx, nullptr, nargs, flags,
-                                enclosingDynamicScope ? enclosingDynamicScope : cx->global(),
+    RootedObject enclosingDynamicScope(cx, enclosingDynamicScopeArg);
+    if (!enclosingDynamicScope)
+        enclosingDynamicScope = &cx->global()->lexicalScope();
+    return NewFunctionWithProto(cx, nullptr, nargs, flags, enclosingDynamicScope,
                                 atom, nullptr, allocKind, newKind);
 }
 
