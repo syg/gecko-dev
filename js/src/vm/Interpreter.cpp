@@ -1866,7 +1866,13 @@ Interpret(JSContext* cx, RunState& state)
         activation.enableInterruptsUnconditionally();
 
     // Enter the interpreter loop starting at the current pc.
-    ADVANCE_AND_DISPATCH(0);
+    REGS.pc += 0;
+    if (!REGS.pc) {
+        fprintf(stderr, ">> SHU pc is null at %s:%u\n", script->filename(), script->lineno());
+        MOZ_CRASH();
+    }
+    SANITY_CHECKS();
+    DISPATCH_TO(*REGS.pc | activation.opMask());
 
 INTERPRETER_LOOP() {
 
