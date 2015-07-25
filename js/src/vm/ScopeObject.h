@@ -18,11 +18,15 @@
 
 namespace js {
 
-namespace frontend { struct Definition; }
+namespace frontend {
+struct Definition;
+class FunctionBox;
+}
 
 class StaticWithObject;
 class StaticEvalObject;
 class StaticNonSyntacticScopeObjects;
+class StaticFunctionBoxScopeObject;
 
 /*****************************************************************************/
 
@@ -45,12 +49,23 @@ class StaticNonSyntacticScopeObjects;
  * 'x', enclosed by a scope containing only the name 'f'. (This separate scope
  * is necessary due to the fact that declarations in the function scope shadow
  * (dynamically, in the case of 'eval') the lambda name.)
+ *
+ * TODOshu: Rewrite static scope explanation
  */
 template <AllowGC allowGC>
 class StaticScopeIter
 {
     typename MaybeRooted<JSObject*, allowGC>::RootType obj;
     bool onNamedLambda;
+
+    static bool IsStaticScope(JSObject* obj) {
+        return obj->is<StaticBlockObject>() ||
+               obj->is<StaticWithObject>() ||
+               obj->is<StaticEvalObject>() ||
+               obj->is<StaticNonSyntacticScopeObjects>() ||
+               obj->is<StaticFunctionBoxScopeObject>() ||
+               obj->is<JSFunction>();
+    }
 
   public:
     StaticScopeIter(ExclusiveContext* cx, JSObject* obj)
@@ -59,12 +74,7 @@ class StaticScopeIter
         static_assert(allowGC == CanGC,
                       "the context-accepting constructor should only be used "
                       "in CanGC code");
-        MOZ_ASSERT_IF(obj,
-                      obj->is<StaticBlockObject>() ||
-                      obj->is<StaticWithObject>() ||
-                      obj->is<StaticEvalObject>() ||
-                      obj->is<StaticNonSyntacticScopeObjects>() ||
-                      obj->is<JSFunction>());
+        MOZ_ASSERT_IF(obj, IsStaticScope(obj));
     }
 
     StaticScopeIter(ExclusiveContext* cx, const StaticScopeIter<CanGC>& ssi)
@@ -79,12 +89,7 @@ class StaticScopeIter
         static_assert(allowGC == NoGC,
                       "the constructor not taking a context should only be "
                       "used in NoGC code");
-        MOZ_ASSERT_IF(obj,
-                      obj->is<StaticBlockObject>() ||
-                      obj->is<StaticWithObject>() ||
-                      obj->is<StaticEvalObject>() ||
-                      obj->is<StaticNonSyntacticScopeObjects>() ||
-                      obj->is<JSFunction>());
+        MOZ_ASSERT_IF(obj, IsStaticScope(obj));
     }
 
     explicit StaticScopeIter(const StaticScopeIter<NoGC>& ssi)
@@ -113,6 +118,7 @@ class StaticScopeIter
     StaticNonSyntacticScopeObjects& nonSyntactic() const;
     JSScript* funScript() const;
     JSFunction& fun() const;
+    frontend::FunctionBox* maybeFunctionBox() const;
 };
 
 /*****************************************************************************/
@@ -192,7 +198,7 @@ ScopeCoordinateFunctionScript(JSScript* script, jsbytecode* pc);
  *     |   |
  *     |  CallObject                Scope of entire function or strict eval
  *     |
- *   NestedScopeObject              Scope created for a statement
+ *   NestedScopeObject              Statement scopes; don't cross script boundaries
  *     |   |   |
  *     |   |  StaticWithObject      Template for "with" object in static scope chain
  *     |   |
@@ -431,6 +437,33 @@ class NonSyntacticVariablesObject : public ScopeObject
     static NonSyntacticVariablesObject* create(JSContext* cx, Handle<GlobalObject*> global);
 };
 
+// Function static scopes that wrap around FunctionBoxes used in the Parser,
+// before a JSScript has been created.
+class StaticFunctionBoxScopeObject : public ScopeObject
+{
+    static const unsigned FUNCTION_BOX_SLOT = 1;
+
+  public:
+    static const unsigned RESERVED_SLOTS = 2;
+    static const Class class_;
+
+    static StaticFunctionBoxScopeObject* create(ExclusiveContext* cx,
+                                                HandleObject enclosing);
+
+    void setFunctionBox(frontend::FunctionBox* funbox) {
+        setReservedSlot(FUNCTION_BOX_SLOT, PrivateValue(funbox));
+    }
+
+    frontend::FunctionBox* functionBox() {
+        return reinterpret_cast<frontend::FunctionBox*>(
+            getReservedSlot(FUNCTION_BOX_SLOT).toPrivate());
+    }
+
+    JSObject* enclosingScopeForStaticScopeIter() {
+        return getReservedSlot(SCOPE_CHAIN_SLOT).toObjectOrNull();
+    }
+};
+
 class NestedScopeObject : public ScopeObject
 {
   public:
@@ -454,23 +487,22 @@ class NestedScopeObject : public ScopeObject
         return getReservedSlot(SCOPE_CHAIN_SLOT).toObjectOrNull();
     }
 
-    void initEnclosingNestedScope(JSObject* obj) {
+    void initEnclosingScope(JSObject* obj) {
         MOZ_ASSERT(getReservedSlot(SCOPE_CHAIN_SLOT).isUndefined());
         setReservedSlot(SCOPE_CHAIN_SLOT, ObjectOrNullValue(obj));
     }
 
     /*
-     * The parser uses 'enclosingNestedScope' as the prev-link in the
-     * pc->staticScope stack. Note: in the case of hoisting, this prev-link will
-     * not ultimately be the same as enclosingNestedScope;
-     * initEnclosingNestedScope must be called separately in the
-     * emitter. 'reset' is just for asserting stackiness.
+     * Note: in the case of hoisting, this prev-link will not ultimately be
+     * the same as enclosingNestedScope; initEnclosingNestedScope must be
+     * called separately in the emitter. 'reset' is just for asserting
+     * stackiness.
      */
-    void initEnclosingNestedScopeFromParser(NestedScopeObject* prev) {
+    void initEnclosingScopeFromParser(JSObject* prev) {
         setReservedSlot(SCOPE_CHAIN_SLOT, ObjectOrNullValue(prev));
     }
 
-    void resetEnclosingNestedScopeFromParser() {
+    void resetEnclosingScopeFromParser() {
         setReservedSlot(SCOPE_CHAIN_SLOT, UndefinedValue());
     }
 };
