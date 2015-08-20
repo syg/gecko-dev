@@ -72,6 +72,7 @@ class MOZ_STACK_CLASS BytecodeCompiler
     bool createScript(bool savedCallerFun = false);
     bool createEmitter(SharedContext* sharedContext, HandleScript evalCaller = nullptr,
                        bool insideNonGlobalEval = false);
+    bool isInsideEval();
     bool isInsideNonGlobalEval();
     bool createParseContext(Maybe<ParseContext<FullParseHandler>>& parseContext,
                             SharedContext& globalsc, uint32_t blockScopeDepth = 0);
@@ -80,7 +81,7 @@ class MOZ_STACK_CLASS BytecodeCompiler
                                      Maybe<ParseContext<FullParseHandler>>& parseContext,
                                      SharedContext& globalsc);
     bool handleParseFailure(const Directives& newDirectives);
-    bool prepareAndEmitTree(ParseNode** pn);
+    bool prepareAndEmitTree(ParseNode** pn, ParseContext<FullParseHandler>& pc);
     bool checkArgumentsWithinEval(JSContext* cx, HandleFunction fun);
     bool maybeCheckEvalFreeVariables(HandleScript evalCaller, HandleObject scopeChain,
                                      ParseContext<FullParseHandler>& pc);
@@ -273,10 +274,17 @@ BytecodeCompiler::createEmitter(SharedContext* sharedContext, HandleScript evalC
     return emitter->init();
 }
 
-bool BytecodeCompiler::isInsideNonGlobalEval()
+bool
+BytecodeCompiler::isInsideEval()
 {
-    return enclosingStaticScope && enclosingStaticScope->is<StaticEvalObject>() &&
-        enclosingStaticScope->as<StaticEvalObject>().enclosingScopeForStaticScopeIter();
+    return enclosingStaticScope && enclosingStaticScope->is<StaticEvalObject>();
+}
+
+bool
+BytecodeCompiler::isInsideNonGlobalEval()
+{
+    return isInsideEval() &&
+           enclosingStaticScope->as<StaticEvalObject>().enclosingScopeForStaticScopeIter();
 }
 
 bool
@@ -363,8 +371,13 @@ BytecodeCompiler::handleParseFailure(const Directives& newDirectives)
 }
 
 bool
-BytecodeCompiler::prepareAndEmitTree(ParseNode** ppn)
+BytecodeCompiler::prepareAndEmitTree(ParseNode** ppn, ParseContext<FullParseHandler>& pc)
 {
+    // Accumulate the maximum block scope depth, so that emitTree can assert
+    // when emitting JSOP_GETLOCAL that the local is indeed within the fixed
+    // part of the stack frame.
+    script->bindings.updateNumBlockScoped(pc.blockScopeDepth);
+
     if (!FoldConstants(cx, ppn, parser.ptr()) ||
         !NameFunctions(cx, *ppn) ||
         !emitter->updateLocalsToFrameSlots() ||
@@ -543,42 +556,55 @@ BytecodeCompiler::compileScript(HandleObject scopeChain, HandleScript evalCaller
     if (savedCallerFun && !saveCallerFun(evalCaller, pc.ref()))
         return nullptr;
 
-    bool canHaveDirectives = true;
-    for (;;) {
-        TokenKind tt;
-        if (!parser->tokenStream.peekToken(&tt, TokenStream::Operand))
-            return nullptr;
-        if (tt == TOK_EOF)
-            break;
-
-        parser->tokenStream.tell(&startPosition);
-
-        ParseNode* pn = parser->statement(YieldIsName, canHaveDirectives);
-        if (!pn) {
-            if (!handleStatementParseFailure(scopeChain, evalCaller, pc, globalsc))
+    // Global scripts are parsed incrementally, statement by statement.
+    //
+    // Eval scripts cannot be, as the block depth needs to be computed for all
+    // lexical bindings in the entire eval script.
+    if (isInsideEval()) {
+        ParseNode* pn;
+        do {
+            pn = parser->evalBody();
+            if (!pn && !handleStatementParseFailure(scopeChain, evalCaller, pc, globalsc))
                 return nullptr;
+        } while (!pn);
 
-            pn = parser->statement(YieldIsName);
-            if (!pn) {
-                MOZ_ASSERT(!parser->hadAbortedSyntaxParse());
-                return nullptr;
-            }
-        }
-
-        // Accumulate the maximum block scope depth, so that emitTree can assert
-        // when emitting JSOP_GETLOCAL that the local is indeed within the fixed
-        // part of the stack frame.
-        script->bindings.updateNumBlockScoped(pc->blockScopeDepth);
-
-        if (canHaveDirectives) {
-            if (!parser->maybeParseDirective(/* stmtList = */ nullptr, pn, &canHaveDirectives))
-                return nullptr;
-        }
-
-        if (!prepareAndEmitTree(&pn))
+        if (!prepareAndEmitTree(&pn, *pc))
             return nullptr;
 
         parser->handler.freeTree(pn);
+    } else {
+        bool canHaveDirectives = true;
+        for (;;) {
+            TokenKind tt;
+            if (!parser->tokenStream.peekToken(&tt, TokenStream::Operand))
+                return nullptr;
+            if (tt == TOK_EOF)
+                break;
+
+            parser->tokenStream.tell(&startPosition);
+
+            ParseNode* pn = parser->statement(YieldIsName, canHaveDirectives);
+            if (!pn) {
+                if (!handleStatementParseFailure(scopeChain, evalCaller, pc, globalsc))
+                    return nullptr;
+
+                pn = parser->statement(YieldIsName);
+                if (!pn) {
+                    MOZ_ASSERT(!parser->hadAbortedSyntaxParse());
+                    return nullptr;
+                }
+            }
+
+            if (canHaveDirectives) {
+                if (!parser->maybeParseDirective(/* stmtList = */ nullptr, pn, &canHaveDirectives))
+                    return nullptr;
+            }
+
+            if (!prepareAndEmitTree(&pn, *pc))
+                return nullptr;
+
+            parser->handler.freeTree(pn);
+        }
     }
 
     if (!maybeCheckEvalFreeVariables(evalCaller, scopeChain, *pc) ||
