@@ -1348,15 +1348,15 @@ BytecodeEmitter::emitVarIncDec(ParseNode* pn)
 bool
 BytecodeEmitter::atBodyLevel() const
 {
-    // 'eval' scripts are always under an invisible lexical scope, but
-    // since it is not syntactic, it should still be considered at body
-    // level.
-    if (sc->staticScope() && sc->staticScope()->is<StaticEvalObject>()) {
+    // 'eval' scripts, loader scripts, and XUL frame scripts are always
+    // under an invisible lexical scope, but since it is not syntactic, it
+    // should still be considered at body level.
+    if (sc->isGlobalContext() && parser->options().hasTopBlockScope) {
         bool bl = !innermostStmt()->enclosing;
         MOZ_ASSERT_IF(bl, innermostStmt()->type == StmtType::BLOCK);
         MOZ_ASSERT_IF(bl, innermostStmt()->staticScope
                                          ->as<StaticBlockObject>()
-                                         .maybeEnclosingEval() == sc->staticScope());
+                                         .enclosingStaticScope() == sc->staticScope());
         return bl;
     }
     return !innermostStmt() || sc->isModuleBox();
@@ -2994,12 +2994,13 @@ bool
 BytecodeEmitter::enterBlockScope(StmtInfoBCE* stmtInfo, ObjectBox* objbox, JSOp initialValueOp,
                                  unsigned alreadyPushed)
 {
-    // This is so terrible. The eval body-level lexical scope needs to be
-    // emitted in the prologue so DEFFUN can pick up the right scope chain.
-    bool isEvalBodyLexicalScope = sc->staticScope() &&
-                                  sc->staticScope()->is<StaticEvalObject>() &&
-                                  !innermostStmt();
-    if (isEvalBodyLexicalScope) {
+    // This is so terrible. The body-level block scope of eval scripts, loader
+    // scripts, and XUL frame scripts needs to be emitted in the prologue so
+    // DEFFUN can pick up the right scope chain.
+    bool isTopBlockScope = sc->isGlobalContext() &&
+                           parser->options().hasTopBlockScope &&
+                           !innermostStmt();
+    if (isTopBlockScope) {
         MOZ_ASSERT(code().length() == 0);
         switchToPrologue();
     }
@@ -3018,7 +3019,7 @@ BytecodeEmitter::enterBlockScope(StmtInfoBCE* stmtInfo, ObjectBox* objbox, JSOp 
     if (!initializeBlockScopedLocalsFromStack(blockObj))
         return false;
 
-    if (isEvalBodyLexicalScope)
+    if (isTopBlockScope)
         switchToMain();
 
     return true;

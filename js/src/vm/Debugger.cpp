@@ -6363,6 +6363,7 @@ EvaluateInEnv(JSContext* cx, Handle<Env*> env, HandleValue thisv, AbstractFrameP
     options.setIsRunOnce(true)
            .setForEval(true)
            .setNoScriptRval(false)
+           .setHasTopBlockScope(!!frame)
            .setFileAndLine(filename, lineno)
            .setCanLazilyParse(false)
            .setIntroductionType("debugger eval")

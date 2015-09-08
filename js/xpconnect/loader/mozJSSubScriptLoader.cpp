@@ -130,7 +130,8 @@ PrepareScript(nsIURI* uri,
 {
     JS::CompileOptions options(cx);
     options.setFileAndLine(uriStr, 1)
-           .setVersion(JSVERSION_LATEST);
+           .setVersion(JSVERSION_LATEST)
+           .setHasTopBlockScope(true);
     if (!charset.IsVoid()) {
         char16_t* scriptBuf = nullptr;
         size_t scriptLength = 0;
@@ -808,6 +809,7 @@ ScriptPrecompiler::OnStreamComplete(nsIStreamLoader* aLoader,
     JS::CompileOptions options(cx, JSVERSION_DEFAULT);
     options.forceAsync = true;
     options.installedFile = true;
+    options.hasTopBlockScope = true;
 
     nsCOMPtr<nsIURI> uri;
     mChannel->GetURI(getter_AddRefs(uri));

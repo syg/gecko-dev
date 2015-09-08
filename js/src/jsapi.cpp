@@ -3376,6 +3376,8 @@ IsFunctionCloneable(HandleFunction fun, HandleObject dynamicScope)
         // If the script is an indirect eval that is immediately scoped under
         // the global, we can clone it.
         if (scope->is<StaticBlockObject>()) {
+            if (scope->as<StaticBlockObject>().needsClone())
+                return false;
             if (StaticEvalObject* staticEval = scope->as<StaticBlockObject>().maybeEnclosingEval())
                 return !staticEval->isDirect();
         }
@@ -3826,6 +3828,7 @@ JS::ReadOnlyCompileOptions::copyPODOptions(const ReadOnlyCompileOptions& rhs)
     isRunOnce = rhs.isRunOnce;
     forEval = rhs.forEval;
     noScriptRval = rhs.noScriptRval;
+    hasTopBlockScope = rhs.hasTopBlockScope;
 }
 
 JS::OwningCompileOptions::OwningCompileOptions(JSContext* cx)

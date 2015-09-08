@@ -1800,6 +1800,7 @@ nsMessageManagerScriptExecutor::TryCacheLoadAndCompileScript(
     JS::CompileOptions options(cx, JSVERSION_LATEST);
     options.setFileAndLine(url.get(), 1);
     options.setNoScriptRval(true);
+    options.setHasTopBlockScope(true);
     JS::Rooted<JSScript*> script(cx);
 
     if (aRunInGlobalScope) {

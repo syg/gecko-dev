@@ -899,7 +899,7 @@ Parser<SyntaxParseHandler>::standaloneModule(HandleModuleObject module)
 
 template <>
 ParseNode*
-Parser<FullParseHandler>::evalBody()
+Parser<FullParseHandler>::blockScopedBody()
 {
     AutoPushStmtInfoPC stmtInfo(*this, StmtType::BLOCK);
     ParseNode* block = pushLexicalScope(stmtInfo);

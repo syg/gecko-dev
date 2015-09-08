@@ -560,12 +560,14 @@ BytecodeCompiler::compileScript(HandleObject scopeChain, HandleScript evalCaller
 
     // Global scripts are parsed incrementally, statement by statement.
     //
-    // Eval scripts cannot be, as the block depth needs to be computed for all
-    // lexical bindings in the entire eval script.
-    if (isEvalCompilationUnit()) {
+    // Eval scripts, loader scripts, and XUL frame scripts cannot be, as the
+    // block depth needs to be computed for all lexical bindings in the entire
+    // eval script.
+    MOZ_ASSERT_IF(isEvalCompilationUnit(), parser->options().hasTopBlockScope);
+    if (options.hasTopBlockScope) {
         ParseNode* pn;
         do {
-            pn = parser->evalBody();
+            pn = parser->blockScopedBody();
             if (!pn && !handleStatementParseFailure(scopeChain, evalCaller, pc, globalsc))
                 return nullptr;
         } while (!pn);

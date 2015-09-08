@@ -3412,7 +3412,8 @@ class JS_FRIEND_API(ReadOnlyCompileOptions) : public TransitiveCompileOptions
         column(0),
         isRunOnce(false),
         forEval(false),
-        noScriptRval(false)
+        noScriptRval(false),
+        hasTopBlockScope(false)
     { }
 
     // Set all POD options (those not requiring reference counts, copies,
@@ -3437,6 +3438,12 @@ class JS_FRIEND_API(ReadOnlyCompileOptions) : public TransitiveCompileOptions
     bool isRunOnce;
     bool forEval;
     bool noScriptRval;
+
+    // Scripts loaded through the subscript loader and XUL frame scripts each
+    // have a non-extensible lexical scope (i.e., block scope) at the top
+    // level. That is, these scripts do *not* have access to the global
+    // lexical scope by design.
+    bool hasTopBlockScope;
 
   private:
     void operator=(const ReadOnlyCompileOptions&) = delete;
@@ -3511,6 +3518,7 @@ class JS_FRIEND_API(OwningCompileOptions) : public ReadOnlyCompileOptions
     OwningCompileOptions& setIsRunOnce(bool once) { isRunOnce = once; return *this; }
     OwningCompileOptions& setForEval(bool eval) { forEval = eval; return *this; }
     OwningCompileOptions& setNoScriptRval(bool nsr) { noScriptRval = nsr; return *this; }
+    OwningCompileOptions& setHasTopBlockScope(bool ts) { hasTopBlockScope = ts; return *this; }
     OwningCompileOptions& setSelfHostingMode(bool shm) { selfHostingMode = shm; return *this; }
     OwningCompileOptions& setCanLazilyParse(bool clp) { canLazilyParse = clp; return *this; }
     OwningCompileOptions& setSourceIsLazy(bool l) { sourceIsLazy = l; return *this; }
@@ -3608,6 +3616,7 @@ class MOZ_STACK_CLASS JS_FRIEND_API(CompileOptions) : public ReadOnlyCompileOpti
     CompileOptions& setIsRunOnce(bool once) { isRunOnce = once; return *this; }
     CompileOptions& setForEval(bool eval) { forEval = eval; return *this; }
     CompileOptions& setNoScriptRval(bool nsr) { noScriptRval = nsr; return *this; }
+    CompileOptions& setHasTopBlockScope(bool ts) { hasTopBlockScope = ts; return *this; }
     CompileOptions& setSelfHostingMode(bool shm) { selfHostingMode = shm; return *this; }
     CompileOptions& setCanLazilyParse(bool clp) { canLazilyParse = clp; return *this; }
     CompileOptions& setSourceIsLazy(bool l) { sourceIsLazy = l; return *this; }
