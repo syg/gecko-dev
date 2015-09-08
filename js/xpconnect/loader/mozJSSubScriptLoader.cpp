@@ -131,7 +131,9 @@ PrepareScript(nsIURI* uri,
     JS::CompileOptions options(cx);
     options.setFileAndLine(uriStr, 1)
            .setVersion(JSVERSION_LATEST)
-           .setHasTopBlockScope(true);
+           .setHasTopBlockScope(true)
+           .setHasNonSyntacticScope(!JS_IsGlobalObject(targetObj));
+
     if (!charset.IsVoid()) {
         char16_t* scriptBuf = nullptr;
         size_t scriptLength = 0;
@@ -148,10 +150,7 @@ PrepareScript(nsIURI* uri,
         }
 
         if (!reuseGlobal) {
-            if (JS_IsGlobalObject(targetObj))
-                JS::Compile(cx, options, srcBuf, script);
-            else
-                JS::CompileForNonSyntacticScope(cx, options, srcBuf, script);
+            JS::Compile(cx, options, srcBuf, script);
         } else {
             AutoObjectVector scopeChain(cx);
             if (!JS_IsGlobalObject(targetObj) &&
@@ -167,10 +166,7 @@ PrepareScript(nsIURI* uri,
         // the lazy source loader doesn't know the encoding.
         if (!reuseGlobal) {
             options.setSourceIsLazy(true);
-            if (JS_IsGlobalObject(targetObj))
-                JS::Compile(cx, options, buf, len, script);
-            else
-                JS::CompileForNonSyntacticScope(cx, options, buf, len, script);
+            JS::Compile(cx, options, buf, len, script);
         } else {
             AutoObjectVector scopeChain(cx);
             if (!JS_IsGlobalObject(targetObj) &&

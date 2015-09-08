@@ -1801,17 +1801,11 @@ nsMessageManagerScriptExecutor::TryCacheLoadAndCompileScript(
     options.setFileAndLine(url.get(), 1);
     options.setNoScriptRval(true);
     options.setHasTopBlockScope(true);
+    options.setHasNonSyntacticScope(!aRunInGlobalScope);
     JS::Rooted<JSScript*> script(cx);
 
-    if (aRunInGlobalScope) {
-      if (!JS::Compile(cx, options, srcBuf, &script)) {
-        return;
-      }
-    } else {
-      // We're going to run these against some non-global scope.
-      if (!JS::CompileForNonSyntacticScope(cx, options, srcBuf, &script)) {
-        return;
-      }
+    if (!JS::Compile(cx, options, srcBuf, &script)) {
+      return;
     }
 
     aScriptp.set(script);

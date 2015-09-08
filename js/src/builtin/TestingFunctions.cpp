@@ -2302,10 +2302,11 @@ EvalReturningScope(JSContext* cx, unsigned argc, Value* vp)
     JS::CompileOptions options(cx);
     options.setFileAndLine(filename.get(), lineno);
     options.setNoScriptRval(true);
+    options.setHasNonSyntacticScope(true);
 
     JS::SourceBufferHolder srcBuf(src, srclen, JS::SourceBufferHolder::NoOwnership);
     RootedScript script(cx);
-    if (!JS::CompileForNonSyntacticScope(cx, options, srcBuf, &script))
+    if (!JS::Compile(cx, options, srcBuf, &script))
         return false;
 
     if (global) {

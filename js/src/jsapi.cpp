@@ -3829,6 +3829,7 @@ JS::ReadOnlyCompileOptions::copyPODOptions(const ReadOnlyCompileOptions& rhs)
     forEval = rhs.forEval;
     noScriptRval = rhs.noScriptRval;
     hasTopBlockScope = rhs.hasTopBlockScope;
+    hasNonSyntacticScope = rhs.hasNonSyntacticScope;
 }
 
 JS::OwningCompileOptions::OwningCompileOptions(JSContext* cx)
@@ -3935,19 +3936,18 @@ JS::CompileOptions::CompileOptions(JSContext* cx, JSVersion version)
     asmJSOption = cx->runtime()->options().asmJS();
 }
 
-enum SyntacticScopeOption { HasSyntacticScope, HasNonSyntacticScope };
-
-static bool
-Compile(JSContext* cx, const ReadOnlyCompileOptions& options, SyntacticScopeOption scopeOption,
-        SourceBufferHolder& srcBuf, MutableHandleScript script)
+bool
+JS::Compile(JSContext* cx, const ReadOnlyCompileOptions& options,
+            SourceBufferHolder& srcBuf, MutableHandleScript script)
 {
+    MOZ_ASSERT_IF(options.hasNonSyntacticScope, options.hasTopBlockScope);
     MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
     AutoLastFrameCheck lfc(cx);
 
     Rooted<ScopeObject*> staticScope(cx);
-    if (scopeOption == HasNonSyntacticScope) {
+    if (options.hasNonSyntacticScope) {
         staticScope = StaticNonSyntacticScopeObjects::create(cx, nullptr);
         if (!staticScope)
             return false;
@@ -3958,17 +3958,17 @@ Compile(JSContext* cx, const ReadOnlyCompileOptions& options, SyntacticScopeOpti
     return !!script;
 }
 
-static bool
-Compile(JSContext* cx, const ReadOnlyCompileOptions& options, SyntacticScopeOption scopeOption,
-        const char16_t* chars, size_t length, MutableHandleScript script)
+bool
+JS::Compile(JSContext* cx, const ReadOnlyCompileOptions& options,
+            const char16_t* chars, size_t length, MutableHandleScript script)
 {
     SourceBufferHolder srcBuf(chars, length, SourceBufferHolder::NoOwnership);
-    return ::Compile(cx, options, scopeOption, srcBuf, script);
+    return Compile(cx, options, srcBuf, script);
 }
 
-static bool
-Compile(JSContext* cx, const ReadOnlyCompileOptions& options, SyntacticScopeOption scopeOption,
-        const char* bytes, size_t length, MutableHandleScript script)
+bool
+JS::Compile(JSContext* cx, const ReadOnlyCompileOptions& options,
+            const char* bytes, size_t length, MutableHandleScript script)
 {
     mozilla::UniquePtr<char16_t, JS::FreePolicy> chars;
     if (options.utf8)
@@ -3978,22 +3978,22 @@ Compile(JSContext* cx, const ReadOnlyCompileOptions& options, SyntacticScopeOpti
     if (!chars)
         return false;
 
-    return ::Compile(cx, options, scopeOption, chars.get(), length, script);
+    return Compile(cx, options, chars.get(), length, script);
 }
 
-static bool
-Compile(JSContext* cx, const ReadOnlyCompileOptions& options, SyntacticScopeOption scopeOption,
-        FILE* fp, MutableHandleScript script)
+bool
+JS::Compile(JSContext* cx, const ReadOnlyCompileOptions& options,
+            FILE* fp, MutableHandleScript script)
 {
     FileContents buffer(cx);
     if (!ReadCompleteFile(cx, fp, buffer))
         return false;
 
-    return ::Compile(cx, options, scopeOption, buffer.begin(), buffer.length(), script);
+    return Compile(cx, options, buffer.begin(), buffer.length(), script);
 }
 
-static bool
-Compile(JSContext* cx, const ReadOnlyCompileOptions& optionsArg, SyntacticScopeOption scopeOption,
+bool
+JS::Compile(JSContext* cx, const ReadOnlyCompileOptions& optionsArg,
         const char* filename, MutableHandleScript script)
 {
     AutoFile file;
@@ -4001,78 +4001,7 @@ Compile(JSContext* cx, const ReadOnlyCompileOptions& optionsArg, SyntacticScopeO
         return false;
     CompileOptions options(cx, optionsArg);
     options.setFileAndLine(filename, 1);
-    return ::Compile(cx, options, scopeOption, file.fp(), script);
-}
-
-bool
-JS::Compile(JSContext* cx, const ReadOnlyCompileOptions& options,
-            SourceBufferHolder& srcBuf, JS::MutableHandleScript script)
-{
-    return ::Compile(cx, options, HasSyntacticScope, srcBuf, script);
-}
-
-bool
-JS::Compile(JSContext* cx, const ReadOnlyCompileOptions& options,
-            const char* bytes, size_t length, JS::MutableHandleScript script)
-{
-    return ::Compile(cx, options, HasSyntacticScope, bytes, length, script);
-}
-
-bool
-JS::Compile(JSContext* cx, const ReadOnlyCompileOptions& options,
-            const char16_t* chars, size_t length, JS::MutableHandleScript script)
-{
-    return ::Compile(cx, options, HasSyntacticScope, chars, length, script);
-}
-
-bool
-JS::Compile(JSContext* cx, const ReadOnlyCompileOptions& options,
-            FILE* file, JS::MutableHandleScript script)
-{
-    return ::Compile(cx, options, HasSyntacticScope, file, script);
-}
-
-bool
-JS::Compile(JSContext* cx, const ReadOnlyCompileOptions& options,
-            const char* filename, JS::MutableHandleScript script)
-{
-    return ::Compile(cx, options, HasSyntacticScope, filename, script);
-}
-
-bool
-JS::CompileForNonSyntacticScope(JSContext* cx, const ReadOnlyCompileOptions& options,
-                                SourceBufferHolder& srcBuf, JS::MutableHandleScript script)
-{
-    return ::Compile(cx, options, HasNonSyntacticScope, srcBuf, script);
-}
-
-bool
-JS::CompileForNonSyntacticScope(JSContext* cx, const ReadOnlyCompileOptions& options,
-                                const char* bytes, size_t length, JS::MutableHandleScript script)
-{
-    return ::Compile(cx, options, HasNonSyntacticScope, bytes, length, script);
-}
-
-bool
-JS::CompileForNonSyntacticScope(JSContext* cx, const ReadOnlyCompileOptions& options,
-                                const char16_t* chars, size_t length,
-                                JS::MutableHandleScript script)
-{
-    return ::Compile(cx, options, HasNonSyntacticScope, chars, length, script);
-}
-
-bool
-JS::CompileForNonSyntacticScope(JSContext* cx, const ReadOnlyCompileOptions& options,
-                                FILE* file, JS::MutableHandleScript script)
-{
-    return ::Compile(cx, options, HasNonSyntacticScope, file, script);
-}
-
-bool
-JS::CompileForNonSyntacticScope(JSContext* cx, const ReadOnlyCompileOptions& options,
-                                const char* filename, JS::MutableHandleScript script)
-{
-    return ::Compile(cx, options, HasNonSyntacticScope, filename, script);
+    return Compile(cx, options, file.fp(), script);
 }
 
 JS_PUBLIC_API(bool)
