@@ -2303,6 +2303,7 @@ EvalReturningScope(JSContext* cx, unsigned argc, Value* vp)
     options.setFileAndLine(filename.get(), lineno);
     options.setNoScriptRval(true);
     options.setHasNonSyntacticScope(true);
+    options.setHasTopBlockScope(true);
 
     JS::SourceBufferHolder srcBuf(src, srclen, JS::SourceBufferHolder::NoOwnership);
     RootedScript script(cx);
