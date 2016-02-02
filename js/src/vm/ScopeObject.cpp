@@ -1038,7 +1038,7 @@ ClonedBlockObject::createGlobal(JSContext* cx, Handle<GlobalObject*> global)
 
     // Currently the global lexical scope cannot have any bindings with frame
     // slots.
-    staticLexical->setLocalOffset(UINT32_MAX);
+    staticLexical->setLocalOffset(LOCALNO_LIMIT - 1);
     staticLexical->initEnclosingScope(nullptr);
     Rooted<ClonedBlockObject*> lexical(cx, ClonedBlockObject::create(cx, staticLexical, global));
     if (!lexical)
@@ -3400,8 +3400,12 @@ js::CheckEvalDeclarationConflicts(JSContext* cx, HandleScript script,
     // Check that a direct eval will not hoist 'var' bindings over lexical
     // bindings with the same name.
     while (obj != varObj) {
-        if (!CheckVarNameConflictsInScope<ClonedBlockObject>(cx, script, obj))
-            return false;
+        // Annex B.3.5 says 'var' declarations with the same name as catch
+        // parameters are allowed.
+        if (!obj->as<ClonedBlockObject>().isForCatchParameters()) {
+            if (!CheckVarNameConflictsInScope<ClonedBlockObject>(cx, script, obj))
+                return false;
+        }
         obj = obj->enclosingScope();
     }
 
