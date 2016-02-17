@@ -121,7 +121,13 @@ ErrorCopier::~ErrorCopier()
     JSContext* cx = ac->context()->asJSContext();
     if (ac->origin() != cx->compartment() && cx->isExceptionPending()) {
         RootedValue exc(cx);
-        if (cx->getPendingException(&exc) && exc.isObject() && exc.toObject().is<ErrorObject>()) {
+        // The provenance of Debugger.DebuggeeWouldRun is the topmost locking
+        // debugger compartment; it should not be copied around.
+        if (cx->getPendingException(&exc) &&
+            exc.isObject() &&
+            exc.toObject().is<ErrorObject>() &&
+            exc.toObject().as<ErrorObject>().type() != JSEXN_DEBUGGEEWOULDRUN)
+        {
             cx->clearPendingException();
             ac.reset();
             Rooted<ErrorObject*> errObj(cx, &exc.toObject().as<ErrorObject>());
