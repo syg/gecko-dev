@@ -375,8 +375,11 @@ Debugger::slowPathCheckNoExecute(JSContext* cx)
 
     if (Debugger* dbg = EnterDebuggeeNoExecute::findDebuggerInStack(cx)) {
         AutoCompartment ac(cx, dbg->toJSObject());
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_DEBUGGEE_WOULD_RUN);
-        return false;
+        unsigned flags = cx->runtime()->options().throwOnDebuggeeWouldRun()
+                       ? JSREPORT_ERROR
+                       : JSREPORT_WARNING;
+        return JS_ReportErrorFlagsAndNumber(cx, flags, GetErrorMessage, nullptr,
+                                            JSMSG_DEBUGGEE_WOULD_RUN);
     }
     return true;
 }
