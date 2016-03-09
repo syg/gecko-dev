@@ -1568,6 +1568,8 @@ WasmModuleObject::init(Module* module)
     MOZ_ASSERT(!hasModule());
     if (!module)
         return false;
+    module->setOwner(this);
+    compartment()->wasmModules.insertBack(module);
     setReservedSlot(MODULE_SLOT, PrivateValue(module));
     return true;
 }
@@ -1577,7 +1579,9 @@ WasmModuleObject::module() const
 {
     MOZ_ASSERT(is<WasmModuleObject>());
     MOZ_ASSERT(hasModule());
-    return *(Module*)getReservedSlot(MODULE_SLOT).toPrivate();
+    Module& m = *(Module*)getReservedSlot(MODULE_SLOT).toPrivate();
+    MOZ_ASSERT(m.owner() == this);
+    return m;
 }
 
 void
