@@ -98,13 +98,6 @@ enum {
     JSSLOT_DEBUGSCRIPT_COUNT
 };
 
-
-// Either a real ScriptSourceObject or a synthesized.
-//
-// If synthesized, the referent is a WasmModuleObject, denoting the
-// synthesized source of a wasm module.
-using DebuggerSourceReferent = Variant<ScriptSourceObject*, WasmModuleObject*>;
-
 extern const Class DebuggerSource_class;
 
 enum {
@@ -530,6 +523,7 @@ Debugger::Debugger(JSContext* cx, NativeObject* dbg)
     objects(cx),
     environments(cx),
     wasmModuleScripts(cx),
+    wasmModuleSources(cx),
 #ifdef NIGHTLY_BUILD
     traceLoggerLastDrainedSize(0),
     traceLoggerLastDrainedIteration(0),
@@ -570,7 +564,8 @@ Debugger::init(JSContext* cx)
               objects.init() &&
               observedGCs.init() &&
               environments.init() &&
-              wasmModuleScripts.init();
+              wasmModuleScripts.init() &&
+              wasmModuleSources.init();
     if (!ok)
         ReportOutOfMemory(cx);
     return ok;
@@ -2816,6 +2811,7 @@ Debugger::markAll(JSTracer* trc)
         dbg->objects.trace(trc);
         dbg->environments.trace(trc);
         dbg->wasmModuleScripts.trace(trc);
+        dbg->wasmModuleSources.trace(trc);
 
         for (Breakpoint* bp = dbg->firstBreakpoint(); bp; bp = bp->nextInDebugger()) {
             TraceManuallyBarrieredEdge(trc, &bp->site->script, "breakpoint script");
@@ -2867,6 +2863,9 @@ Debugger::trace(JSTracer* trc)
 
     /* Trace the WasmModuleObject -> synthesized Debugger.Script weak map. */
     wasmModuleScripts.trace(trc);
+
+    /* Trace the WasmModuleObject -> synthesized Debugger.Source weak map. */
+    wasmModuleSources.trace(trc);
 }
 
 /* static */ void
@@ -5061,14 +5060,14 @@ Debugger::synthesizeWasmScript(JSContext* cx, Handle<WasmModuleObject*> wasmModu
 }
 
 static JSObject*
-DebuggerScript_check(JSContext* cx, const Value& v, const char* clsname, const char* fnname)
+DebuggerScript_check(JSContext* cx, const Value& v, const char* fnname)
 {
     JSObject* thisobj = NonNullObject(cx, v);
     if (!thisobj)
         return nullptr;
     if (thisobj->getClass() != &DebuggerScript_class) {
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_PROTO,
-                             clsname, fnname, thisobj->getClass()->name);
+                             "Debugger.Script", fnname, thisobj->getClass()->name);
         return nullptr;
     }
 
@@ -5078,7 +5077,7 @@ DebuggerScript_check(JSContext* cx, const Value& v, const char* clsname, const c
      */
     if (!GetScriptReferentCell(thisobj)) {
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_PROTO,
-                             clsname, fnname, "prototype object");
+                             "Debugger.Script", fnname, "prototype object");
         return nullptr;
     }
 
@@ -5090,7 +5089,7 @@ static JSObject*
 DebuggerScript_checkThis(JSContext* cx, const CallArgs& args, const char* fnname,
                          const char* refname)
 {
-    JSObject* thisobj = DebuggerScript_check(cx, args.thisv(), "Debugger.Script", fnname);
+    JSObject* thisobj = DebuggerScript_check(cx, args.thisv(), fnname);
     if (!thisobj)
         return nullptr;
 
@@ -5177,14 +5176,37 @@ DebuggerScript_getLineCount(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
+class DebuggerScriptGetSourceMatcher
+{
+    JSContext* cx_;
+    Debugger* dbg_;
+
+  public:
+    DebuggerScriptGetSourceMatcher(JSContext* cx, Debugger* dbg)
+      : cx_(cx), dbg_(dbg)
+    { }
+
+    using ReturnType = JSObject*;
+
+    ReturnType match(HandleScript script) {
+        RootedScriptSource source(cx_,
+            &UncheckedUnwrap(script->sourceObject())->as<ScriptSourceObject>());
+        return dbg_->wrapSource(cx_, source);
+    }
+
+    ReturnType match(Handle<WasmModuleObject*> wasmModule) {
+        return dbg_->synthesizeWasmSource(cx_, wasmModule);
+    }
+};
+
 static bool
 DebuggerScript_getSource(JSContext* cx, unsigned argc, Value* vp)
 {
-    THIS_DEBUGSCRIPT_SCRIPT(cx, argc, vp, "(get source)", args, obj, script);
+    THIS_DEBUGSCRIPT_REFERENT(cx, argc, vp, "(get source)", args, obj, referent);
     Debugger* dbg = Debugger::fromChildJSObject(obj);
 
-    RootedScriptSource source(cx, &UncheckedUnwrap(script->sourceObject())->as<ScriptSourceObject>());
-    RootedObject sourceObject(cx, dbg->wrapSource(cx, source));
+    DebuggerScriptGetSourceMatcher matcher(cx, dbg);
+    RootedObject sourceObject(cx, referent.match(matcher));
     if (!sourceObject)
         return false;
 
@@ -6203,8 +6225,18 @@ const Class DebuggerSource_class = {
     DebuggerSource_trace
 };
 
+class SetDebuggerSourcePrivateMatcher
+{
+    NativeObject* obj_;
+  public:
+    explicit SetDebuggerSourcePrivateMatcher(NativeObject* obj) : obj_(obj) { }
+    using ReturnType = void;
+    ReturnType match(HandleScriptSource source) { obj_->setPrivateGCThing(source); }
+    ReturnType match(Handle<WasmModuleObject*> module) { obj_->setPrivateGCThing(module); }
+};
+
 JSObject*
-Debugger::newDebuggerSource(JSContext* cx, HandleScriptSource source)
+Debugger::newDebuggerSource(JSContext* cx, Handle<DebuggerSourceReferent> referent)
 {
     assertSameCompartment(cx, object.get());
 
@@ -6215,35 +6247,53 @@ Debugger::newDebuggerSource(JSContext* cx, HandleScriptSource source)
     if (!sourceobj)
         return nullptr;
     sourceobj->setReservedSlot(JSSLOT_DEBUGSOURCE_OWNER, ObjectValue(*object));
-    sourceobj->setPrivateGCThing(source);
+    SetDebuggerSourcePrivateMatcher matcher(sourceobj);
+    referent.match(matcher);
 
     return sourceobj;
 }
 
+template <typename Map, typename Referent>
 JSObject*
-Debugger::wrapSource(JSContext* cx, HandleScriptSource source)
+Debugger::wrapSourceUntaggedReferent(JSContext* cx, CrossCompartmentKey::Kind keyKind,
+                                     Map& map, Handle<Referent> untaggedReferent)
 {
     assertSameCompartment(cx, object.get());
-    MOZ_ASSERT(cx->compartment() != source->compartment());
-    DependentAddPtr<SourceWeakMap> p(cx, sources, source);
+    MOZ_ASSERT(cx->compartment() != untaggedReferent->compartment());
+    DependentAddPtr<Map> p(cx, map, untaggedReferent);
     if (!p) {
-        JSObject* sourceobj = newDebuggerSource(cx, source);
+        Rooted<DebuggerSourceReferent> taggedReferent(cx, untaggedReferent.get());
+        JSObject* sourceobj = newDebuggerSource(cx, taggedReferent);
         if (!sourceobj)
             return nullptr;
 
-        if (!p.add(cx, sources, source, sourceobj))
+        if (!p.add(cx, map, untaggedReferent, sourceobj))
             return nullptr;
 
-        CrossCompartmentKey key(CrossCompartmentKey::DebuggerSource, object, source);
+        CrossCompartmentKey key(keyKind, object, untaggedReferent);
         if (!object->compartment()->putWrapper(cx, key, ObjectValue(*sourceobj))) {
-            sources.remove(source);
+            map.remove(untaggedReferent);
             ReportOutOfMemory(cx);
             return nullptr;
         }
     }
 
-    MOZ_ASSERT(GetSourceReferent(p->value()).as<ScriptSourceObject*>() == source);
+    MOZ_ASSERT(GetSourceReferent(p->value()).template as<Referent>() == untaggedReferent);
     return p->value();
+}
+
+JSObject*
+Debugger::wrapSource(JSContext* cx, HandleScriptSource source)
+{
+    return wrapSourceUntaggedReferent(cx, CrossCompartmentKey::DebuggerSource,
+                                      sources, source);
+}
+
+JSObject*
+Debugger::synthesizeWasmSource(JSContext* cx, Handle<WasmModuleObject*> wasmModule)
+{
+    return wrapSourceUntaggedReferent(cx, CrossCompartmentKey::DebuggerObject,
+                                      wasmModuleSources, wasmModule);
 }
 
 static bool
