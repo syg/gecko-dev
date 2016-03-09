@@ -29,7 +29,6 @@
 #include "jit/JSONSpewer.h"
 #include "jit/MIRGraph.h"
 #include "js/GCAPI.h"
-#include "js/GCVariant.h"
 #include "js/UbiNodeBreadthFirst.h"
 #include "js/Vector.h"
 #include "vm/ArgumentsObject.h"
@@ -530,6 +529,7 @@ Debugger::Debugger(JSContext* cx, NativeObject* dbg)
     sources(cx),
     objects(cx),
     environments(cx),
+    wasmModuleScripts(cx),
 #ifdef NIGHTLY_BUILD
     traceLoggerLastDrainedSize(0),
     traceLoggerLastDrainedIteration(0),
@@ -569,7 +569,8 @@ Debugger::init(JSContext* cx)
               sources.init() &&
               objects.init() &&
               observedGCs.init() &&
-              environments.init();
+              environments.init() &&
+              wasmModuleScripts.init();
     if (!ok)
         ReportOutOfMemory(cx);
     return ok;
@@ -2814,6 +2815,7 @@ Debugger::markAll(JSTracer* trc)
         dbg->sources.trace(trc);
         dbg->objects.trace(trc);
         dbg->environments.trace(trc);
+        dbg->wasmModuleScripts.trace(trc);
 
         for (Breakpoint* bp = dbg->firstBreakpoint(); bp; bp = bp->nextInDebugger()) {
             TraceManuallyBarrieredEdge(trc, &bp->site->script, "breakpoint script");
@@ -2854,7 +2856,7 @@ Debugger::trace(JSTracer* trc)
     /* Trace the weak map from JSScript instances to Debugger.Script objects. */
     scripts.trace(trc);
 
-    /* Trace the referent ->Debugger.Source weak map */
+    /* Trace the referent -> Debugger.Source weak map */
     sources.trace(trc);
 
     /* Trace the referent -> Debugger.Object weak map. */
@@ -2862,6 +2864,9 @@ Debugger::trace(JSTracer* trc)
 
     /* Trace the referent -> Debugger.Environment weak map. */
     environments.trace(trc);
+
+    /* Trace the WasmModuleObject -> synthesized Debugger.Script weak map. */
+    wasmModuleScripts.trace(trc);
 }
 
 /* static */ void
@@ -4253,6 +4258,7 @@ Debugger::findScripts(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGGER(cx, argc, vp, "findScripts", args, dbg);
 
+    // Find all real JSScripts that match the query.
     ScriptQuery query(cx, dbg);
     if (!query.init())
         return false;
@@ -4270,17 +4276,37 @@ Debugger::findScripts(JSContext* cx, unsigned argc, Value* vp)
         return false;
 
     Handle<ScriptVector> scripts(query.foundScripts());
-    RootedArrayObject result(cx, NewDenseFullyAllocatedArray(cx, scripts.length()));
+
+    // TODOshu: Until such time that wasm modules are real ES6 modules,
+    // unconditionally synthesize all wasm toplevel module scripts.
+    Rooted<GCVector<WasmModuleObject*>> wasmModules(cx, GCVector<WasmModuleObject*>(cx));
+    for (WeakGlobalObjectSet::Range r = dbg->allDebuggees(); !r.empty(); r.popFront()) {
+        for (wasm::Module* module : r.front()->compartment()->wasmModules) {
+            if (!wasmModules.append(module->owner()))
+                return false;
+        }
+    }
+
+    size_t resultLength = scripts.length() + wasmModules.length();
+    RootedArrayObject result(cx, NewDenseFullyAllocatedArray(cx, resultLength));
     if (!result)
         return false;
 
-    result->ensureDenseInitializedLength(cx, 0, scripts.length());
+    result->ensureDenseInitializedLength(cx, 0, resultLength);
 
     for (size_t i = 0; i < scripts.length(); i++) {
         JSObject* scriptObject = dbg->wrapScript(cx, scripts[i]);
         if (!scriptObject)
             return false;
         result->setDenseElement(i, ObjectValue(*scriptObject));
+    }
+
+    size_t wasmStart = scripts.length();
+    for (size_t i = 0; i < wasmModules.length(); i++) {
+        JSObject* scriptObject = dbg->synthesizeWasmScript(cx, wasmModules[i]);
+        if (!scriptObject)
+            return false;
+        result->setDenseElement(wasmStart + i, ObjectValue(*scriptObject));
     }
 
     args.rval().setObject(*result);
@@ -4911,16 +4937,6 @@ const JSFunctionSpec Debugger::static_methods[] {
 
 /*** Debugger.Script *****************************************************************************/
 
-// Either a real JSScript or synthesized.
-//
-// If synthesized, the referent is one of the following:
-//
-//   1. A WasmModuleObject, denoting a synthesized toplevel wasm module
-//      script.
-//   2. A wasm JSFunction, denoting a synthesized wasm function script.
-//      NYI!
-using DebuggerScriptReferent = Variant<JSScript*, WasmModuleObject*>;
-
 // Very very scary. For internal use only.
 static inline gc::Cell*
 GetScriptReferentCell(JSObject* obj)
@@ -4973,8 +4989,18 @@ const Class DebuggerScript_class = {
     DebuggerScript_trace
 };
 
+class DebuggerScriptSetPrivateMatcher
+{
+    NativeObject* obj_;
+  public:
+    explicit DebuggerScriptSetPrivateMatcher(NativeObject* obj) : obj_(obj) { }
+    using ReturnType = void;
+    ReturnType match(HandleScript script) { obj_->setPrivateGCThing(script); }
+    ReturnType match(Handle<WasmModuleObject*> module) { obj_->setPrivateGCThing(module); }
+};
+
 JSObject*
-Debugger::newDebuggerScript(JSContext* cx, HandleScript script)
+Debugger::newDebuggerScript(JSContext* cx, Handle<DebuggerScriptReferent> referent)
 {
     assertSameCompartment(cx, object.get());
 
@@ -4985,35 +5011,53 @@ Debugger::newDebuggerScript(JSContext* cx, HandleScript script)
     if (!scriptobj)
         return nullptr;
     scriptobj->setReservedSlot(JSSLOT_DEBUGSCRIPT_OWNER, ObjectValue(*object));
-    scriptobj->setPrivateGCThing(script);
+    DebuggerScriptSetPrivateMatcher matcher(scriptobj);
+    referent.match(matcher);
 
     return scriptobj;
 }
 
+template <typename Map, typename Referent>
 JSObject*
-Debugger::wrapScript(JSContext* cx, HandleScript script)
+Debugger::wrapScriptUntaggedReferent(JSContext* cx, CrossCompartmentKey::Kind keyKind,
+                                     Map& map, Handle<Referent> untaggedReferent)
 {
-    assertSameCompartment(cx, object.get());
-    MOZ_ASSERT(cx->compartment() != script->compartment());
-    DependentAddPtr<ScriptWeakMap> p(cx, scripts, script);
+    assertSameCompartment(cx, object);
+    MOZ_ASSERT(cx->compartment() != untaggedReferent->compartment());
+    DependentAddPtr<Map> p(cx, map, untaggedReferent);
     if (!p) {
-        JSObject* scriptobj = newDebuggerScript(cx, script);
+        Rooted<DebuggerScriptReferent> taggedReferent(cx, untaggedReferent.get());
+        JSObject* scriptobj = newDebuggerScript(cx, taggedReferent);
         if (!scriptobj)
             return nullptr;
 
-        if (!p.add(cx, scripts, script, scriptobj))
+        if (!p.add(cx, map, untaggedReferent, scriptobj))
             return nullptr;
 
-        CrossCompartmentKey key(CrossCompartmentKey::DebuggerScript, object, script);
+        CrossCompartmentKey key(keyKind, object, untaggedReferent);
         if (!object->compartment()->putWrapper(cx, key, ObjectValue(*scriptobj))) {
-            scripts.remove(script);
+            map.remove(untaggedReferent);
             ReportOutOfMemory(cx);
             return nullptr;
         }
     }
 
-    MOZ_ASSERT(GetScriptReferent(p->value()).as<JSScript*>() == script);
+    MOZ_ASSERT(GetScriptReferent(p->value()).template as<Referent>() == untaggedReferent);
     return p->value();
+}
+
+JSObject*
+Debugger::wrapScript(JSContext* cx, HandleScript script)
+{
+    return wrapScriptUntaggedReferent(cx, CrossCompartmentKey::DebuggerScript,
+                                      scripts, script);
+}
+
+JSObject*
+Debugger::synthesizeWasmScript(JSContext* cx, Handle<WasmModuleObject*> wasmModule)
+{
+    return wrapScriptUntaggedReferent(cx, CrossCompartmentKey::DebuggerObject,
+                                      wasmModuleScripts, wasmModule);
 }
 
 static JSObject*

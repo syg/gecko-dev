@@ -21,6 +21,7 @@
 #include "ds/TraceableFifo.h"
 #include "gc/Barrier.h"
 #include "js/Debug.h"
+#include "js/GCVariant.h"
 #include "js/HashTable.h"
 #include "vm/GlobalObject.h"
 #include "vm/SavedStacks.h"
@@ -39,6 +40,7 @@ class LSprinter;
 
 class Breakpoint;
 class DebuggerMemory;
+class WasmModuleObject;
 
 typedef HashSet<ReadBarrieredGlobalObject,
                 MovableCellHasher<ReadBarrieredGlobalObject>,
@@ -216,6 +218,16 @@ class AutoSuppressDebuggeeNoExecuteChecks
  * environments and objects are really two different concepts.
  */
 typedef JSObject Env;
+
+// Either a real JSScript or synthesized.
+//
+// If synthesized, the referent is one of the following:
+//
+//   1. A WasmModuleObject, denoting a synthesized toplevel wasm module
+//      script.
+//   2. A wasm JSFunction, denoting a synthesized wasm function script.
+//      NYI!
+typedef mozilla::Variant<JSScript*, WasmModuleObject*> DebuggerScriptReferent;
 
 class Debugger : private mozilla::LinkedListElement<Debugger>
 {
@@ -443,6 +455,10 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     /* The map from debuggee Envs to Debugger.Environment instances. */
     ObjectWeakMap environments;
 
+    /* The map from WasmModuleObjects to synthesized Debugger.Script instances. */
+    typedef DebuggerWeakMap<WasmModuleObject*> WasmModuleWeakMap;
+    WasmModuleWeakMap wasmModuleScripts;
+
     /*
      * Keep track of tracelogger last drained identifiers to know if there are
      * lost events.
@@ -657,10 +673,19 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     JSTrapStatus firePromiseHook(JSContext* cx, Hook hook, HandleObject promise, MutableHandleValue vp);
 
     /*
-     * Allocate and initialize a Debugger.Script instance whose referent is
-     * |script|.
+     * Wrap a Debugger.Script referent given its untagged form, allocating if
+     * necessary. Ideally this would take a Handle<DebuggerScriptReferent>
+     * and we'd be done with it, but C++ sucks and that version is hard to write.
      */
-    JSObject* newDebuggerScript(JSContext* cx, HandleScript script);
+    template <typename Map, typename Referent>
+    JSObject* wrapScriptUntaggedReferent(JSContext* cx, CrossCompartmentKey::Kind keyKind,
+                                         Map& map, Handle<Referent> untaggedReferent);
+
+    /*
+     * Allocate and initialize a Debugger.Script instance whose referent is
+     * |referent|.
+     */
+    JSObject* newDebuggerScript(JSContext* cx, Handle<DebuggerScriptReferent> referent);
 
     /*
      * Allocate and initialize a Debugger.Source instance whose referent is
@@ -953,6 +978,14 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
      * must be a script in a debuggee compartment.
      */
     JSObject* wrapScript(JSContext* cx, HandleScript script);
+
+    /*
+     * Return the Debugger.Script object for |wasmModule| (the toplevel
+     * script), synthesizing a new one if needed. The context |cx| must be in
+     * the debugger compartment; |wasmModule| must be a WasmModuleObject in
+     * the debuggee compartment.
+     */
+    JSObject* synthesizeWasmScript(JSContext* cx, Handle<WasmModuleObject*> wasmModule);
 
     /*
      * Return the Debugger.Source object for |source|, or create a new one if
