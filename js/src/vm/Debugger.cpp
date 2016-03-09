@@ -5243,6 +5243,26 @@ DebuggerScript_getGlobal(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
+struct DebuggerScriptGetFormatMatcher
+{
+    using ReturnType = const char*;
+    ReturnType match(HandleScript script) { return "js"; }
+    ReturnType match(Handle<WasmModuleObject*> wasmModule) { return "wasm"; }
+};
+
+static bool
+DebuggerScript_getFormat(JSContext* cx, unsigned argc, Value* vp)
+{
+    THIS_DEBUGSCRIPT_REFERENT(cx, argc, vp, "(get format)", args, obj, referent);
+    DebuggerScriptGetFormatMatcher matcher;
+    const char* s = referent.match(matcher);
+    JSAtom* str = Atomize(cx, s, strlen(s));
+    if (!str)
+        return false;
+    args.rval().setString(str);
+    return true;
+}
+
 static bool
 DebuggerScript_getChildScripts(JSContext* cx, unsigned argc, Value* vp)
 {
@@ -6159,6 +6179,7 @@ static const JSPropertySpec DebuggerScript_properties[] = {
     JS_PSG("sourceStart", DebuggerScript_getSourceStart, 0),
     JS_PSG("sourceLength", DebuggerScript_getSourceLength, 0),
     JS_PSG("global", DebuggerScript_getGlobal, 0),
+    JS_PSG("format", DebuggerScript_getFormat, 0),
     JS_PS_END
 };
 
@@ -6591,6 +6612,26 @@ DebuggerSource_getCanonicalId(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
+struct DebuggerSourceGetFormatMatcher
+{
+    using ReturnType = const char*;
+    ReturnType match(HandleScriptSource source) { return "js"; }
+    ReturnType match(Handle<WasmModuleObject*> wasmModule) { return "wasm"; }
+};
+
+static bool
+DebuggerSource_getFormat(JSContext* cx, unsigned argc, Value* vp)
+{
+    THIS_DEBUGSOURCE_REFERENT(cx, argc, vp, "(get format)", args, obj, referent);
+    DebuggerSourceGetFormatMatcher matcher;
+    const char* s = referent.match(matcher);
+    JSAtom* str = Atomize(cx, s, strlen(s));
+    if (!str)
+        return false;
+    args.rval().setString(str);
+    return true;
+}
+
 static const JSPropertySpec DebuggerSource_properties[] = {
     JS_PSG("text", DebuggerSource_getText, 0),
     JS_PSG("url", DebuggerSource_getUrl, 0),
@@ -6602,6 +6643,7 @@ static const JSPropertySpec DebuggerSource_properties[] = {
     JS_PSG("elementAttributeName", DebuggerSource_getElementProperty, 0),
     JS_PSGS("sourceMapURL", DebuggerSource_getSourceMapUrl, DebuggerSource_setSourceMapUrl, 0),
     JS_PSG("canonicalId", DebuggerSource_getCanonicalId, 0),
+    JS_PSG("format", DebuggerSource_getFormat, 0),
     JS_PS_END
 };
 
