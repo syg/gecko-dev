@@ -25,9 +25,12 @@
 #include "asmjs/WasmGenerator.h"
 #include "asmjs/WasmText.h"
 #include "vm/ArrayBufferObject.h"
+#include "vm/Debugger.h"
 
 #include "jsatominlines.h"
 #include "jsobjinlines.h"
+
+#include "vm/Debugger-inl.h"
 
 using namespace js;
 using namespace js::wasm;
@@ -1594,7 +1597,11 @@ wasm::Eval(JSContext* cx, Handle<TypedArrayObject*> code, HandleObject importObj
     if (!moduleObj->module().dynamicallyLink(cx, moduleObj, heap, imports, *exportMap, &exportObj))
         return false;
 
-    return CreateInstance(cx, exportObj, instance);
+    if (!CreateInstance(cx, exportObj, instance))
+        return false;
+
+    Debugger::onNewWasmModule(cx, moduleObj);
+    return true;
 }
 
 static bool
