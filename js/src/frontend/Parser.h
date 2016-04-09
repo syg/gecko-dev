@@ -17,6 +17,7 @@
 #include "frontend/FullParseHandler.h"
 #include "frontend/ParseMaps.h"
 #include "frontend/ParseNode.h"
+#include "frontend/ParseScope.h"
 #include "frontend/SharedContext.h"
 #include "frontend/SyntaxParseHandler.h"
 
@@ -101,6 +102,9 @@ struct MOZ_STACK_CLASS ParseContext : public GenericParseContext
     typedef typename ParseHandler::DefinitionNode DefinitionNode;
 
     uint32_t        bodyid;         /* block number of program/function body */
+
+    ParseScopeStmtInfo bodyLevelStmt;
+    ParseStmtInfo* stmtStack2;
 
     StmtInfoStack<StmtInfoPC> stmtStack;
 
@@ -187,6 +191,8 @@ struct MOZ_STACK_CLASS ParseContext : public GenericParseContext
     bool define(TokenStream& ts, HandlePropertyName name, Node pn, Definition::Kind kind,
                 bool declaringVarInCatchBody = false);
 
+    bool define2(TokenStream& ts, HandlePropertyName name, BindingKind kind);
+
     /*
      * Let definitions may shadow same-named definitions in enclosing scopes.
      * To represesent this, 'decls' is not a plain map, but actually:
@@ -264,6 +270,7 @@ struct MOZ_STACK_CLASS ParseContext : public GenericParseContext
                  Node maybeFunction, SharedContext* sc, Directives* newDirectives)
       : GenericParseContext(parent, sc),
         bodyid(0),           // initialized in init()
+        bodyLevelStmt(*this, prs->alloc, ParseStmtInfo::BodyLevel),
         stmtStack(prs->context),
         maybeFunction(maybeFunction),
         lastYieldOffset(NoYieldOffset),
@@ -299,6 +306,17 @@ struct MOZ_STACK_CLASS ParseContext : public GenericParseContext
         if (StmtInfoPC* stmt = innermostScopeStmt())
             return stmt->staticScope;
         return sc->staticScope();
+    }
+
+    ParseScopeStmtInfo& innermostScopeStmt2() {
+        ParseStmtInfo* stmt = stmtStack2;
+        while (!stmt->isScope())
+            stmt = stmt->enclosing();
+        return stmt->asScopeStmt();
+    }
+
+    ParseScope& innermostScope2() {
+        return innermostScopeStmt2().scope();
     }
 
     bool isBodyLevelLexicallyDeclaredName(HandleAtom name) {

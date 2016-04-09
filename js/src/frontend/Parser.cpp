@@ -90,6 +90,42 @@ typedef Handle<NestedStaticScope*> HandleNestedStaticScope;
 
 #define MUST_MATCH_TOKEN(tt, errno) MUST_MATCH_TOKEN_MOD(tt, TokenStream::None, errno)
 
+#ifdef DEBUG
+void
+ParseScope::dump(ExclusiveContext* cx)
+{
+    fprintf(stdout, "ParseScope %p", this);
+
+    fprintf(stdout, "\n  bindings:");
+    for (AtomMap::Range r = bindings_.all(); !r.empty(); r.popFront()) {
+        JSAutoByteString bytes;
+        if (!AtomToPrintableString(cx, r.front().key(), &bytes))
+            return;
+        const char* kind;
+        switch (r.front().value()) {
+          case BindingKind::Argument: kind = "arg"; break;
+          case BindingKind::Var: kind = "var"; break;
+          case BindingKind::Let: kind = "let"; break;
+          case BindingKind::Constant: kind = "const"; break;
+          case BindingKind::Import: kind = "import"; break;
+        }
+        fprintf(stdout, " %s %s;", kind, bytes.ptr());
+    }
+
+    bool first = true;
+    fprintf(stdout, "\n  uses:");
+    for (AtomSet::Range r = uses_.all(); !r.empty(); r.popFront()) {
+        JSAutoByteString bytes;
+        if (!AtomToPrintableString(cx, r.front(), &bytes))
+            return;
+        fprintf(stdout, "%s%s", first ? " " : ", ", bytes.ptr());
+        first = false;
+    }
+
+    fprintf(stdout, "\n\n");
+}
+#endif
+
 template <>
 bool
 ParseContext<FullParseHandler>::checkLocalsOverflow(TokenStream& ts)
@@ -212,12 +248,57 @@ SharedContext::markSuperScopeNeedsHomeObject()
     MOZ_CRASH("Must have found an enclosing function box scope that allows super.property");
 }
 
+template <typename ParseHandler>
+bool
+ParseContext<ParseHandler>::define2(TokenStream& ts, HandlePropertyName name, BindingKind kind)
+{
+    ParseScope& scope = innermostScope2();
+    switch (kind) {
+      case BindingKind::Argument:
+      case BindingKind::Var:
+        if (!scope.hasBinding(name)) {
+            if (!scope.addBinding(name, kind)) {
+                ts.reportError(JSMSG_OUT_OF_MEMORY);
+                return false;
+            }
+        }
+        break;
+
+      case BindingKind::Let:
+      case BindingKind::Constant:
+      case BindingKind::Import:
+        MOZ_ASSERT(!scope.hasBinding(name));
+        if (!scope.addBinding(name, kind)) {
+            ts.reportError(JSMSG_OUT_OF_MEMORY);
+            return false;
+        }
+        break;
+
+      default:
+        MOZ_CRASH("unexpected BindingKind");
+    }
+
+    return true;
+}
+
 // See comment on member function declaration.
 template <>
 bool
 ParseContext<FullParseHandler>::define(TokenStream& ts, HandlePropertyName name, ParseNode* pn,
                                        Definition::Kind kind, bool declaringVarInCatchBody)
 {
+    {
+        BindingKind kind2;
+        switch (kind) {
+          case Definition::ARG: kind2 = BindingKind::Argument; break;
+          case Definition::VAR: kind2 = BindingKind::Var; break;
+          case Definition::LET: kind2 = BindingKind::Let; break;
+          case Definition::CONSTANT: kind2 = BindingKind::Constant; break;
+          case Definition::IMPORT: kind2 = BindingKind::Import; break;
+        }
+        MOZ_ALWAYS_TRUE(define2(ts, name, kind2));
+    }
+
     MOZ_ASSERT(!pn->isUsed());
     MOZ_ASSERT_IF(pn->isDefn(), pn->isPlaceholder());
     MOZ_ASSERT_IF(declaringVarInCatchBody, kind == Definition::VAR);
@@ -4206,6 +4287,8 @@ template <typename ParseHandler>
 bool
 Parser<ParseHandler>::noteNameUse(HandlePropertyName name, Node pn)
 {
+    MOZ_ALWAYS_TRUE(pc->innermostScope2().addUse(name));
+
     /*
      * The asm.js validator does all its own symbol-table management so, as an
      * optimization, avoid doing any work here. Use-def links are only necessary

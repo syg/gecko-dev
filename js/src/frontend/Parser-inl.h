@@ -23,7 +23,8 @@ ParseContext<ParseHandler>::init(Parser<ParseHandler>& parser)
 
     if (!decls_.init() ||
         !lexdeps.ensureMap(sc->context) ||
-        !bodyLevelLexicallyDeclaredNames_.init())
+        !bodyLevelLexicallyDeclaredNames_.init() ||
+        !bodyLevelStmt.init())
     {
         ReportOutOfMemory(sc->context);
         return false;
