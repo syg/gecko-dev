@@ -38,9 +38,14 @@ class BytecodeAnalysis
     JSScript* script_;
     Vector<BytecodeInfo, 0, JitAllocPolicy> infos_;
 
-    bool usesScopeChain_;
+    bool usesEnvironmentChain_;
     bool hasTryFinally_;
     bool hasSetArg_;
+
+    // Ion cannot compile lexical environments currently and as such cannot
+    // correctly compile lambdas in parameter default expressions. See bug
+    // 1273858.
+    bool hasLambdaInDefaultsWithCallObject_;
 
   public:
     explicit BytecodeAnalysis(TempAllocator& alloc, JSScript* script);
@@ -58,8 +63,8 @@ class BytecodeAnalysis
         return nullptr;
     }
 
-    bool usesScopeChain() const {
-        return usesScopeChain_;
+    bool usesEnvironmentChain() const {
+        return usesEnvironmentChain_;
     }
 
     bool hasTryFinally() const {
@@ -68,6 +73,10 @@ class BytecodeAnalysis
 
     bool hasSetArg() const {
         return hasSetArg_;
+    }
+
+    bool hasLambdaInDefaultsWithCallObject() const {
+        return hasLambdaInDefaultsWithCallObject_;
     }
 };
 

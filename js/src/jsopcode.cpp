@@ -38,8 +38,8 @@
 #include "gc/GCInternals.h"
 #include "js/CharacterEncoding.h"
 #include "vm/CodeCoverage.h"
+#include "vm/EnvironmentObject.h"
 #include "vm/Opcodes.h"
-#include "vm/ScopeObject.h"
 #include "vm/Shape.h"
 #include "vm/StringBuffer.h"
 
@@ -776,45 +776,6 @@ ToDisassemblySource(JSContext* cx, HandleValue v, JSAutoByteString* bytes)
 
     if (v.isObject()) {
         JSObject& obj = v.toObject();
-        if (obj.is<StaticBlockScope>()) {
-            Rooted<StaticBlockScope*> block(cx, &obj.as<StaticBlockScope>());
-            char* source = JS_sprintf_append(nullptr, "depth %d {", block->localOffset());
-            if (!source) {
-                ReportOutOfMemory(cx);
-                return false;
-            }
-
-            Shape::Range<CanGC> r(cx, block->lastProperty());
-
-            while (!r.empty()) {
-                Rooted<Shape*> shape(cx, &r.front());
-                JSAtom* atom = JSID_IS_INT(shape->propid())
-                               ? cx->names().empty
-                               : JSID_TO_ATOM(shape->propid());
-
-                JSAutoByteString bytes;
-                if (!AtomToPrintableString(cx, atom, &bytes))
-                    return false;
-
-                r.popFront();
-                source = JS_sprintf_append(source, "%s: %d%s",
-                                           bytes.ptr(),
-                                           block->shapeToIndex(*shape),
-                                           !r.empty() ? ", " : "");
-                if (!source) {
-                    ReportOutOfMemory(cx);
-                    return false;
-                }
-            }
-
-            source = JS_sprintf_append(source, "}");
-            if (!source) {
-                ReportOutOfMemory(cx);
-                return false;
-            }
-            bytes->initBytes(source);
-            return true;
-        }
 
         if (obj.is<JSFunction>()) {
             RootedFunction fun(cx, &obj.as<JSFunction>());
@@ -833,6 +794,77 @@ ToDisassemblySource(JSContext* cx, HandleValue v, JSAutoByteString* bytes)
     }
 
     return !!ValueToPrintable(cx, v, bytes, true);
+}
+
+static bool
+ToDisassemblySource(JSContext* cx, HandleScope scope, JSAutoByteString* bytes)
+{
+    char* source = JS_sprintf_append(nullptr, "%s {", ScopeKindString(scope->kind()));
+    if (!source) {
+        ReportOutOfMemory(cx);
+        return false;
+    }
+
+    for (Rooted<BindingIter> bi(cx, BindingIter(scope)); bi; bi++) {
+        JSAutoByteString nameBytes;
+        if (!AtomToPrintableString(cx, bi.name(), &nameBytes))
+            return false;
+
+        source = JS_sprintf_append(source, "%s: ", nameBytes.ptr());
+        if (!source) {
+            ReportOutOfMemory(cx);
+            return false;
+        }
+
+        BindingLocation loc = bi.location();
+        switch (loc.kind()) {
+          case BindingLocation::Kind::Global:
+            source = JS_sprintf_append(source, "global");
+            break;
+
+          case BindingLocation::Kind::Frame:
+            source = JS_sprintf_append(source, "frame slot %u", loc.slot());
+            break;
+
+          case BindingLocation::Kind::Environment:
+            source = JS_sprintf_append(source, "env slot %u", loc.slot());
+            break;
+
+          case BindingLocation::Kind::Argument:
+            source = JS_sprintf_append(source, "arg slot %u", loc.slot());
+            break;
+
+          case BindingLocation::Kind::NamedLambdaCallee:
+            source = JS_sprintf_append(source, "named lambda callee");
+            break;
+
+          case BindingLocation::Kind::Import:
+            source = JS_sprintf_append(source, "import");
+            break;
+        }
+
+        if (!source) {
+            ReportOutOfMemory(cx);
+            return false;
+        }
+
+        if (!bi.isLast()) {
+            source = JS_sprintf_append(source, ", ");
+            if (!source) {
+                ReportOutOfMemory(cx);
+                return false;
+            }
+        }
+    }
+
+    source = JS_sprintf_append(source, "}");
+    if (!source) {
+        ReportOutOfMemory(cx);
+        return false;
+    }
+
+    bytes->initBytes(source);
+    return true;
 }
 
 unsigned
@@ -889,14 +921,24 @@ js::Disassemble1(JSContext* cx, HandleScript script, jsbytecode* pc,
         break;
       }
 
-      case JOF_SCOPECOORD: {
+      case JOF_SCOPE: {
+        RootedScope scope(cx, script->getScope(GET_UINT32_INDEX(pc)));
+        JSAutoByteString bytes;
+        if (!ToDisassemblySource(cx, scope, &bytes))
+            return 0;
+        if (Sprint(sp, " %s", bytes.ptr()) == -1)
+            return 0;
+        break;
+      }
+
+      case JOF_ENVCOORD: {
         RootedValue v(cx,
-            StringValue(ScopeCoordinateName(cx->caches.scopeCoordinateNameCache, script, pc)));
+            StringValue(EnvironmentCoordinateName(cx->caches.envCoordinateNameCache, script, pc)));
         JSAutoByteString bytes;
         if (!ToDisassemblySource(cx, v, &bytes))
             return 0;
-        ScopeCoordinate sc(pc);
-        if (Sprint(sp, " %s (hops = %u, slot = %u)", bytes.ptr(), sc.hops(), sc.slot()) == -1)
+        EnvironmentCoordinate ec(pc);
+        if (Sprint(sp, " %s (hops = %u, slot = %u)", bytes.ptr(), ec.hops(), ec.slot()) == -1)
             return 0;
         break;
       }
@@ -1143,7 +1185,7 @@ ExpressionDecompiler::decompilePC(jsbytecode* pc)
         return write("(intermediate value)");
       }
       case JSOP_GETALIASEDVAR: {
-        JSAtom* atom = ScopeCoordinateName(cx->caches.scopeCoordinateNameCache, script, pc);
+        JSAtom* atom = EnvironmentCoordinateName(cx->caches.envCoordinateNameCache, script, pc);
         MOZ_ASSERT(atom);
         return write(atom);
       }
@@ -1279,12 +1321,16 @@ JSAtom*
 ExpressionDecompiler::getArg(unsigned slot)
 {
     MOZ_ASSERT(script->functionNonDelazifying());
-    MOZ_ASSERT(slot < script->bindings.numArgs());
+    MOZ_ASSERT(slot < script->numArgs());
 
-    for (BindingIter bi(script); bi; bi++) {
-        MOZ_ASSERT(bi->kind() == Binding::ARGUMENT);
-        if (bi.argIndex() == slot)
-            return bi->name();
+    for (PositionalFormalParameterIter fi(script); fi; fi++) {
+        if (fi.argumentSlot() == slot) {
+            if (!fi.isDestructured())
+                return fi.name();
+
+            // Destructured arguments have no single binding name.
+            return Atomize(cx, "destructured argument", strlen("destructured argument"));
+        }
     }
 
     MOZ_CRASH("No binding");
@@ -1294,34 +1340,35 @@ JSAtom*
 ExpressionDecompiler::getLocal(uint32_t local, jsbytecode* pc)
 {
     MOZ_ASSERT(local < script->nfixed());
-    if (local < script->nbodyfixed()) {
-        for (BindingIter bi(script); bi; bi++) {
-            if (bi->kind() != Binding::ARGUMENT && !bi->aliased() && bi.frameIndex() == local)
-                return bi->name();
-        }
 
-        MOZ_CRASH("No binding");
+    // Look for it in the body scope first.
+    for (BindingIter bi(script->bodyScope()); bi; bi++) {
+        BindingLocation loc = bi.location();
+        if (loc.kind() == BindingLocation::Kind::Frame && loc.slot() == local)
+            return bi.name();
     }
-    for (NestedStaticScope* chain = script->getStaticBlockScope(pc);
-         chain;
-         chain = chain->enclosingNestedScope())
-    {
-        if (!chain->is<StaticBlockScope>())
+
+    // If not found, look for it in a lexical scope.
+    for (ScopeIter si(script->innermostScope(pc)); si; si++) {
+        if (!si.scope()->is<LexicalScope>())
             continue;
-        StaticBlockScope& block = chain->as<StaticBlockScope>();
-        if (local < block.localOffset())
+        LexicalScope& lexicalScope = si.scope()->as<LexicalScope>();
+
+        // Is the slot within bounds of the current lexical scope?
+        if (local < lexicalScope.firstFrameSlot())
             continue;
-        local -= block.localOffset();
-        if (local >= block.numVariables())
-            return nullptr;
-        for (Shape::Range<NoGC> r(block.lastProperty()); !r.empty(); r.popFront()) {
-            const Shape& shape = r.front();
-            if (block.shapeToIndex(shape) == local)
-                return JSID_TO_ATOM(shape.propid());
+        if (local >= lexicalScope.nextFrameSlot())
+            break;
+
+        // If so, get the name.
+        for (BindingIter bi(si.scope()); bi; bi++) {
+            BindingLocation loc = bi.location();
+            if (loc.kind() == BindingLocation::Kind::Frame && loc.slot() == local)
+                return bi.name();
         }
-        break;
     }
-    return nullptr;
+
+    MOZ_CRASH("No binding");
 }
 
 bool

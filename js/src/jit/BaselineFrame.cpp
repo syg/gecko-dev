@@ -9,7 +9,7 @@
 #include "jit/BaselineJIT.h"
 #include "jit/Ion.h"
 #include "vm/Debugger.h"
-#include "vm/ScopeObject.h"
+#include "vm/EnvironmentObject.h"
 
 #include "jit/JitFrames-inl.h"
 #include "vm/Stack-inl.h"
@@ -40,9 +40,9 @@ BaselineFrame::trace(JSTracer* trc, JitFrameIterator& frameIterator)
         TraceRootRange(trc, numArgs + isConstructing(), argv(), "baseline-args");
     }
 
-    // Mark scope chain, if it exists.
-    if (scopeChain_)
-        TraceRoot(trc, &scopeChain_, "baseline-scopechain");
+    // Mark environment chain, if it exists.
+    if (envChain_)
+        TraceRoot(trc, &envChain_, "baseline-envchain");
 
     // Mark return value.
     if (hasReturnValue())
@@ -87,50 +87,34 @@ BaselineFrame::trace(JSTracer* trc, JitFrameIterator& frameIterator)
 bool
 BaselineFrame::isNonGlobalEvalFrame() const
 {
-    return isEvalFrame() &&
-           script()->enclosingStaticScope()->as<StaticEvalScope>().isNonGlobal();
+    return isEvalFrame() && script()->enclosingScope()->as<EvalScope>().isNonGlobal();
 }
 
 bool
-BaselineFrame::copyRawFrameSlots(MutableHandle<GCVector<Value>> vec) const
+BaselineFrame::initExtraFunctionEnvironmentObjects(JSContext* cx)
 {
-    unsigned nfixed = script()->nfixed();
-    unsigned nformals = numFormalArgs();
-
-    if (!vec.resize(nformals + nfixed))
-        return false;
-
-    mozilla::PodCopy(vec.begin(), argv(), nformals);
-    for (unsigned i = 0; i < nfixed; i++)
-        vec[nformals + i].set(*valueSlot(i));
-    return true;
+    return js::InitExtraFunctionEnvironmentObjects(cx, this);
 }
 
 bool
-BaselineFrame::initStrictEvalScopeObjects(JSContext* cx)
+BaselineFrame::pushCallObject(JSContext* cx)
 {
-    MOZ_ASSERT(isStrictEvalFrame());
+    MOZ_ASSERT(!hasCallObj());
 
-    CallObject* callobj = CallObject::createForStrictEval(cx, this);
+    CallObject* callobj;
+    if (isEvalFrame()) {
+        MOZ_ASSERT(script()->strict() ||
+                   script()->enclosingScope()->kind() == ScopeKind::ParameterDefaults);
+        callobj = CallObject::createForEval(cx, this);
+    } else {
+        MOZ_ASSERT(callee()->needsCallObject());
+        callobj = CallObject::createForFunction(cx, this);
+    }
+
     if (!callobj)
         return false;
 
-    pushOnScopeChain(*callobj);
-    flags_ |= HAS_CALL_OBJ;
-    return true;
-}
-
-bool
-BaselineFrame::initFunctionScopeObjects(JSContext* cx)
-{
-    MOZ_ASSERT(isFunctionFrame());
-    MOZ_ASSERT(callee()->needsCallObject());
-
-    CallObject* callobj = CallObject::createForFunction(cx, this);
-    if (!callobj)
-        return false;
-
-    pushOnScopeChain(*callobj);
+    pushOnEnvironmentChain(*callobj);
     flags_ |= HAS_CALL_OBJ;
     return true;
 }
@@ -140,7 +124,7 @@ BaselineFrame::initForOsr(InterpreterFrame* fp, uint32_t numStackValues)
 {
     mozilla::PodZero(this);
 
-    scopeChain_ = fp->scopeChain();
+    envChain_ = fp->environmentChain();
 
     if (fp->hasCallObjUnchecked())
         flags_ |= BaselineFrame::HAS_CALL_OBJ;

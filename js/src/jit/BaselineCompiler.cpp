@@ -21,8 +21,8 @@
 #include "jit/SharedICHelpers.h"
 #include "jit/VMFunctions.h"
 #include "js/UniquePtr.h"
+#include "vm/EnvironmentObject.h"
 #include "vm/Interpreter.h"
-#include "vm/ScopeObject.h"
 #include "vm/TraceLogging.h"
 
 #include "jsscriptinlines.h"
@@ -133,21 +133,30 @@ BaselineCompiler::compile()
     if (!code)
         return Method_Error;
 
-    JSObject* templateScope = nullptr;
+    Rooted<EnvironmentObject*> templateEnv(cx);
     if (script->functionNonDelazifying()) {
         RootedFunction fun(cx, script->functionNonDelazifying());
+
+        if (fun->needsNamedLambdaEnvironment()) {
+            templateEnv = NamedLambdaObject::createTemplateObject(cx, fun, gc::TenuredHeap);
+            if (!templateEnv)
+                return Method_Error;
+        }
+
+        if (fun->needsDefaultsEnvironment()) {
+            Rooted<LexicalScope*> scope(cx, script->defaultsScope());
+            templateEnv = LexicalEnvironmentObject::createTemplateObject(cx, scope, templateEnv,
+                                                                         gc::TenuredHeap);
+            if (!templateEnv)
+                return Method_Error;
+        }
+
         if (fun->needsCallObject()) {
             RootedScript scriptRoot(cx, script);
-            templateScope = CallObject::createTemplateObject(cx, scriptRoot, gc::TenuredHeap);
-            if (!templateScope)
+            templateEnv = CallObject::createTemplateObject(cx, scriptRoot, templateEnv,
+                                                           gc::TenuredHeap);
+            if (!templateEnv)
                 return Method_Error;
-
-            if (fun->isNamedLambda()) {
-                RootedObject declEnvObject(cx, DeclEnvObject::createTemplateObject(cx, fun, TenuredObject));
-                if (!declEnvObject)
-                    return Method_Error;
-                templateScope->as<ScopeObject>().setEnclosingScope(declEnvObject);
-            }
         }
     }
 
@@ -216,7 +225,7 @@ BaselineCompiler::compile()
     }
 
     baselineScript->setMethod(code);
-    baselineScript->setTemplateScope(templateScope);
+    baselineScript->setTemplateEnvironment(templateEnv);
 
     JitSpew(JitSpew_BaselineScripts, "Created BaselineScript %p (raw %p) for %s:%d",
             (void*) baselineScript.get(), (void*) code->raw(),
@@ -308,9 +317,14 @@ BaselineCompiler::compile()
 }
 
 void
-BaselineCompiler::emitInitializeLocals(size_t n, const Value& v)
+BaselineCompiler::emitInitializeLocals()
 {
-    MOZ_ASSERT(frame.nlocals() > 0 && n <= frame.nlocals());
+    // Initialize all locals to |undefined|. Lexical bindings are temporal
+    // dead zoned in bytecode.
+
+    size_t n = frame.nlocals();
+    if (n == 0)
+        return;
 
     // Use R0 to minimize code size. If the number of locals to push is <
     // LOOP_UNROLL_FACTOR, then the initialization pushes are emitted directly
@@ -318,7 +332,7 @@ BaselineCompiler::emitInitializeLocals(size_t n, const Value& v)
     static const size_t LOOP_UNROLL_FACTOR = 4;
     size_t toPushExtra = n % LOOP_UNROLL_FACTOR;
 
-    masm.moveValue(v, R0);
+    masm.moveValue(UndefinedValue(), R0);
 
     // Handle any extra pushes left over by the optional unrolled loop below.
     for (size_t i = 0; i < toPushExtra; i++)
@@ -360,20 +374,20 @@ BaselineCompiler::emitPrologue()
     // Initialize BaselineFrame::flags.
     masm.store32(Imm32(0), frame.addressOfFlags());
 
-    // Handle scope chain pre-initialization (in case GC gets run
-    // during stack check).  For global and eval scripts, the scope
-    // chain is in R1.  For function scripts, the scope chain is in
+    // Handle env chain pre-initialization (in case GC gets run
+    // during stack check).  For global and eval scripts, the env
+    // chain is in R1.  For function scripts, the env chain is in
     // the callee, nullptr is stored for now so that GC doesn't choke
-    // on a bogus ScopeChain value in the frame.
+    // on a bogus EnvironmentChain value in the frame.
     if (function())
-        masm.storePtr(ImmPtr(nullptr), frame.addressOfScopeChain());
+        masm.storePtr(ImmPtr(nullptr), frame.addressOfEnvironmentChain());
     else
-        masm.storePtr(R1.scratchReg(), frame.addressOfScopeChain());
+        masm.storePtr(R1.scratchReg(), frame.addressOfEnvironmentChain());
 
     // Functions with a large number of locals require two stack checks.
     // The VMCall for a fallible stack check can only occur after the
-    // scope chain has been initialized, as that is required for proper
-    // exception handling if the VMCall returns false.  The scope chain
+    // env chain has been initialized, as that is required for proper
+    // exception handling if the VMCall returns false.  The env chain
     // initialization can only happen after the UndefinedValues for the
     // local slots have been pushed.
     // However by that time, the stack might have grown too much.
@@ -381,7 +395,7 @@ BaselineCompiler::emitPrologue()
     // before pushing the locals.  The early check sets a flag on the
     // frame if the stack check fails (but otherwise doesn't throw an
     // exception).  If the flag is set, then the jitcode skips past
-    // the pushing of the locals, and directly to scope chain initialization
+    // the pushing of the locals, and directly to env chain initialization
     // followed by the actual stack check, which will throw the correct
     // exception.
     Label earlyStackCheckFailed;
@@ -394,12 +408,7 @@ BaselineCompiler::emitPrologue()
                           &earlyStackCheckFailed);
     }
 
-    // Initialize local vars to |undefined| and lexicals to a magic value that
-    // throws on touch.
-    if (frame.nvars() > 0)
-        emitInitializeLocals(frame.nvars(), UndefinedValue());
-    if (frame.nlexicals() > 0)
-        emitInitializeLocals(frame.nlexicals(), MagicValue(JS_UNINITIALIZED_LEXICAL));
+    emitInitializeLocals();
 
     if (needsEarlyStackCheck())
         masm.bind(&earlyStackCheckFailed);
@@ -410,16 +419,16 @@ BaselineCompiler::emitPrologue()
 #endif
 
     // Record the offset of the prologue, because Ion can bailout before
-    // the scope chain is initialized.
+    // the env chain is initialized.
     prologueOffset_ = CodeOffset(masm.currentOffset());
 
     // When compiling with Debugger instrumentation, set the debuggeeness of
     // the frame before any operation that can call into the VM.
     emitIsDebuggeeCheck();
 
-    // Initialize the scope chain before any operation that may
+    // Initialize the env chain before any operation that may
     // call into the VM and trigger a GC.
-    if (!initScopeChain())
+    if (!initEnvironmentChain())
         return false;
 
     if (!emitStackCheck())
@@ -624,16 +633,16 @@ BaselineCompiler::emitDebugPrologue()
     return true;
 }
 
-typedef bool (*InitGlobalOrEvalScopeObjectsFn)(JSContext*, BaselineFrame*);
-static const VMFunction InitGlobalOrEvalScopeObjectsInfo =
-    FunctionInfo<InitGlobalOrEvalScopeObjectsFn>(jit::InitGlobalOrEvalScopeObjects);
+typedef bool (*CheckGlobalOrEvalDeclarationConflictsFn)(JSContext*, BaselineFrame*);
+static const VMFunction CheckGlobalOrEvalDeclarationConflictsInfo =
+    FunctionInfo<CheckGlobalOrEvalDeclarationConflictsFn>(jit::CheckGlobalOrEvalDeclarationConflicts);
 
-typedef bool (*InitFunctionScopeObjectsFn)(JSContext*, BaselineFrame*);
-static const VMFunction InitFunctionScopeObjectsInfo =
-    FunctionInfo<InitFunctionScopeObjectsFn>(jit::InitFunctionScopeObjects);
+typedef bool (*InitExtraFunctionEnvironmentObjectsFn)(JSContext*, BaselineFrame*);
+static const VMFunction InitExtraFunctionEnvironmentObjectsInfo =
+    FunctionInfo<InitExtraFunctionEnvironmentObjectsFn>(jit::InitExtraFunctionEnvironmentObjects);
 
 bool
-BaselineCompiler::initScopeChain()
+BaselineCompiler::initEnvironmentChain()
 {
     CallVMPhase phase = POST_INITIALIZE;
     if (needsEarlyStackCheck())
@@ -641,42 +650,39 @@ BaselineCompiler::initScopeChain()
 
     RootedFunction fun(cx, function());
     if (fun) {
-        // Use callee->environment as scope chain. Note that we do
-        // this also for needsCallObject functions, so that the scope
-        // chain slot is properly initialized if the call triggers GC.
+        // Use callee->environment as scope chain. Note that we do this also
+        // for needsSomeEnvironmentObject functions, so that the scope chain
+        // slot is properly initialized if the call triggers GC.
         Register callee = R0.scratchReg();
         Register scope = R1.scratchReg();
         masm.loadFunctionFromCalleeToken(frame.addressOfCalleeToken(), callee);
         masm.loadPtr(Address(callee, JSFunction::offsetOfEnvironment()), scope);
-        masm.storePtr(scope, frame.addressOfScopeChain());
+        masm.storePtr(scope, frame.addressOfEnvironmentChain());
 
-        if (fun->needsCallObject()) {
-            // Call into the VM to create a new call object.
+        if (fun->needsExtraEnvironmentObjects()) {
+            // Call into the VM to create the extra environment object.
             prepareVMCall();
 
             masm.loadBaselineFramePtr(BaselineFrameReg, R0.scratchReg());
             pushArg(R0.scratchReg());
 
-            if (!callVMNonOp(InitFunctionScopeObjectsInfo, phase))
+            if (!callVMNonOp(InitExtraFunctionEnvironmentObjectsInfo, phase))
                 return false;
         }
     } else if (module()) {
         // Modules use a pre-created scope object.
         Register scope = R1.scratchReg();
         masm.movePtr(ImmGCPtr(&module()->initialEnvironment()), scope);
-        masm.storePtr(scope, frame.addressOfScopeChain());
+        masm.storePtr(scope, frame.addressOfEnvironmentChain());
     } else {
-        // ScopeChain pointer in BaselineFrame has already been initialized
-        // in prologue, but we need to do two more things:
-        //
-        // 1. Check for redeclaration errors
-        // 2. Possibly create a new call object for strict eval.
+        // EnvironmentChain pointer in BaselineFrame has already been initialized
+        // in prologue, but we need to check for redeclaration errors.
 
         prepareVMCall();
         masm.loadBaselineFramePtr(BaselineFrameReg, R0.scratchReg());
         pushArg(R0.scratchReg());
 
-        if (!callVMNonOp(InitGlobalOrEvalScopeObjectsInfo, phase))
+        if (!callVMNonOp(CheckGlobalOrEvalDeclarationConflictsInfo, phase))
             return false;
     }
 
@@ -1407,7 +1413,7 @@ BaselineCompiler::emit_JSOP_GLOBALTHIS()
     frame.syncStack(0);
 
     if (!script->hasNonSyntacticScope()) {
-        ClonedBlockObject* globalLexical = &script->global().lexicalScope();
+        LexicalEnvironmentObject* globalLexical = &script->global().lexicalEnvironment();
         masm.moveValue(globalLexical->thisValue(), R0);
         frame.push(R0);
         return true;
@@ -1415,7 +1421,7 @@ BaselineCompiler::emit_JSOP_GLOBALTHIS()
 
     prepareVMCall();
 
-    masm.loadPtr(frame.addressOfScopeChain(), R0.scratchReg());
+    masm.loadPtr(frame.addressOfEnvironmentChain(), R0.scratchReg());
     pushArg(R0.scratchReg());
 
     if (!callVM(GetNonSyntacticGlobalThisInfo))
@@ -1582,7 +1588,7 @@ BaselineCompiler::emit_JSOP_LAMBDA()
     RootedFunction fun(cx, script->getFunction(GET_UINT32_INDEX(pc)));
 
     prepareVMCall();
-    masm.loadPtr(frame.addressOfScopeChain(), R0.scratchReg());
+    masm.loadPtr(frame.addressOfEnvironmentChain(), R0.scratchReg());
 
     pushArg(R0.scratchReg());
     pushArg(ImmGCPtr(fun));
@@ -1608,7 +1614,7 @@ BaselineCompiler::emit_JSOP_LAMBDA_ARROW()
     RootedFunction fun(cx, script->getFunction(GET_UINT32_INDEX(pc)));
 
     prepareVMCall();
-    masm.loadPtr(frame.addressOfScopeChain(), R2.scratchReg());
+    masm.loadPtr(frame.addressOfEnvironmentChain(), R2.scratchReg());
 
     pushArg(R0);
     pushArg(R2.scratchReg());
@@ -2234,7 +2240,7 @@ BaselineCompiler::emit_JSOP_GETGNAME()
 
     frame.syncStack(0);
 
-    masm.movePtr(ImmGCPtr(&script->global().lexicalScope()), R0.scratchReg());
+    masm.movePtr(ImmGCPtr(&script->global().lexicalEnvironment()), R0.scratchReg());
 
     // Call IC.
     ICGetName_Fallback::Compiler stubCompiler(cx);
@@ -2254,12 +2260,12 @@ BaselineCompiler::emit_JSOP_BINDGNAME()
         // exists, is initialized, and is writable (i.e., an initialized
         // 'let') at compile time.
         RootedPropertyName name(cx, script->getName(pc));
-        Rooted<ClonedBlockObject*> globalLexical(cx, &script->global().lexicalScope());
-        if (Shape* shape = globalLexical->lookup(cx, name)) {
+        Rooted<LexicalEnvironmentObject*> env(cx, &script->global().lexicalEnvironment());
+        if (Shape* shape = env->lookup(cx, name)) {
             if (shape->writable() &&
-                !globalLexical->getSlot(shape->slot()).isMagic(JS_UNINITIALIZED_LEXICAL))
+                !env->getSlot(shape->slot()).isMagic(JS_UNINITIALIZED_LEXICAL))
             {
-                frame.push(ObjectValue(*globalLexical));
+                frame.push(ObjectValue(*env));
                 return true;
             }
         } else if (Shape* shape = script->global().lookup(cx, name)) {
@@ -2286,7 +2292,7 @@ bool
 BaselineCompiler::emit_JSOP_BINDVAR()
 {
     frame.syncStack(0);
-    masm.loadPtr(frame.addressOfScopeChain(), R0.scratchReg());
+    masm.loadPtr(frame.addressOfEnvironmentChain(), R0.scratchReg());
 
     prepareVMCall();
     pushArg(R0.scratchReg());
@@ -2414,35 +2420,35 @@ BaselineCompiler::emit_JSOP_STRICTDELPROP()
 }
 
 void
-BaselineCompiler::getScopeCoordinateObject(Register reg)
+BaselineCompiler::getEnvironmentCoordinateObject(Register reg)
 {
-    ScopeCoordinate sc(pc);
+    EnvironmentCoordinate ec(pc);
 
-    masm.loadPtr(frame.addressOfScopeChain(), reg);
-    for (unsigned i = sc.hops(); i; i--)
-        masm.extractObject(Address(reg, ScopeObject::offsetOfEnclosingScope()), reg);
+    masm.loadPtr(frame.addressOfEnvironmentChain(), reg);
+    for (unsigned i = ec.hops(); i; i--)
+        masm.extractObject(Address(reg, EnvironmentObject::offsetOfEnclosingEnvironment()), reg);
 }
 
 Address
-BaselineCompiler::getScopeCoordinateAddressFromObject(Register objReg, Register reg)
+BaselineCompiler::getEnvironmentCoordinateAddressFromObject(Register objReg, Register reg)
 {
-    ScopeCoordinate sc(pc);
-    Shape* shape = ScopeCoordinateToStaticScopeShape(script, pc);
+    EnvironmentCoordinate ec(pc);
+    Shape* shape = EnvironmentCoordinateToEnvironmentShape(script, pc);
 
     Address addr;
-    if (shape->numFixedSlots() <= sc.slot()) {
+    if (shape->numFixedSlots() <= ec.slot()) {
         masm.loadPtr(Address(objReg, NativeObject::offsetOfSlots()), reg);
-        return Address(reg, (sc.slot() - shape->numFixedSlots()) * sizeof(Value));
+        return Address(reg, (ec.slot() - shape->numFixedSlots()) * sizeof(Value));
     }
 
-    return Address(objReg, NativeObject::getFixedSlotOffset(sc.slot()));
+    return Address(objReg, NativeObject::getFixedSlotOffset(ec.slot()));
 }
 
 Address
-BaselineCompiler::getScopeCoordinateAddress(Register reg)
+BaselineCompiler::getEnvironmentCoordinateAddress(Register reg)
 {
-    getScopeCoordinateObject(reg);
-    return getScopeCoordinateAddressFromObject(reg, reg);
+    getEnvironmentCoordinateObject(reg);
+    return getEnvironmentCoordinateAddressFromObject(reg, reg);
 }
 
 bool
@@ -2450,7 +2456,7 @@ BaselineCompiler::emit_JSOP_GETALIASEDVAR()
 {
     frame.syncStack(0);
 
-    Address address = getScopeCoordinateAddress(R0.scratchReg());
+    Address address = getEnvironmentCoordinateAddress(R0.scratchReg());
     masm.loadValue(address, R0);
 
     if (ionCompileable_) {
@@ -2468,7 +2474,7 @@ BaselineCompiler::emit_JSOP_GETALIASEDVAR()
 bool
 BaselineCompiler::emit_JSOP_SETALIASEDVAR()
 {
-    JSScript* outerScript = ScopeCoordinateFunctionScript(script, pc);
+    JSScript* outerScript = EnvironmentCoordinateFunctionScript(script, pc);
     if (outerScript && outerScript->treatAsRunOnce()) {
         // Type updates for this operation might need to be tracked, so treat
         // this as a SETPROP.
@@ -2478,7 +2484,7 @@ BaselineCompiler::emit_JSOP_SETALIASEDVAR()
         frame.popValue(R1);
 
         // Load and box lhs into R0.
-        getScopeCoordinateObject(R2.scratchReg());
+        getEnvironmentCoordinateObject(R2.scratchReg());
         masm.tagValue(JSVAL_TYPE_OBJECT, R2.scratchReg(), R0);
 
         // Call SETPROP IC.
@@ -2495,8 +2501,8 @@ BaselineCompiler::emit_JSOP_SETALIASEDVAR()
     frame.popRegsAndSync(1);
     Register objReg = R2.scratchReg();
 
-    getScopeCoordinateObject(objReg);
-    Address address = getScopeCoordinateAddressFromObject(objReg, R1.scratchReg());
+    getEnvironmentCoordinateObject(objReg);
+    Address address = getEnvironmentCoordinateAddressFromObject(objReg, R1.scratchReg());
     masm.patchableCallPreBarrier(address, MIRType::Value);
     masm.storeValue(R0, address);
     frame.push(R0);
@@ -2520,7 +2526,7 @@ BaselineCompiler::emit_JSOP_GETNAME()
 {
     frame.syncStack(0);
 
-    masm.loadPtr(frame.addressOfScopeChain(), R0.scratchReg());
+    masm.loadPtr(frame.addressOfEnvironmentChain(), R0.scratchReg());
 
     // Call IC.
     ICGetName_Fallback::Compiler stubCompiler(cx);
@@ -2538,9 +2544,9 @@ BaselineCompiler::emit_JSOP_BINDNAME()
     frame.syncStack(0);
 
     if (*pc == JSOP_BINDGNAME && !script->hasNonSyntacticScope())
-        masm.movePtr(ImmGCPtr(&script->global().lexicalScope()), R0.scratchReg());
+        masm.movePtr(ImmGCPtr(&script->global().lexicalEnvironment()), R0.scratchReg());
     else
-        masm.loadPtr(frame.addressOfScopeChain(), R0.scratchReg());
+        masm.loadPtr(frame.addressOfEnvironmentChain(), R0.scratchReg());
 
     // Call IC.
     ICBindName_Fallback::Compiler stubCompiler(cx);
@@ -2560,7 +2566,7 @@ bool
 BaselineCompiler::emit_JSOP_DELNAME()
 {
     frame.syncStack(0);
-    masm.loadPtr(frame.addressOfScopeChain(), R0.scratchReg());
+    masm.loadPtr(frame.addressOfEnvironmentChain(), R0.scratchReg());
 
     prepareVMCall();
 
@@ -2642,7 +2648,7 @@ BaselineCompiler::emit_JSOP_DEFVAR()
         attrs |= JSPROP_PERMANENT;
     MOZ_ASSERT(attrs <= UINT32_MAX);
 
-    masm.loadPtr(frame.addressOfScopeChain(), R0.scratchReg());
+    masm.loadPtr(frame.addressOfEnvironmentChain(), R0.scratchReg());
 
     prepareVMCall();
 
@@ -2672,7 +2678,7 @@ BaselineCompiler::emit_JSOP_DEFLET()
         attrs |= JSPROP_READONLY;
     MOZ_ASSERT(attrs <= UINT32_MAX);
 
-    masm.loadPtr(frame.addressOfScopeChain(), R0.scratchReg());
+    masm.loadPtr(frame.addressOfEnvironmentChain(), R0.scratchReg());
 
     prepareVMCall();
 
@@ -2692,7 +2698,7 @@ BaselineCompiler::emit_JSOP_DEFFUN()
     RootedFunction fun(cx, script->getFunction(GET_UINT32_INDEX(pc)));
 
     frame.syncStack(0);
-    masm.loadPtr(frame.addressOfScopeChain(), R0.scratchReg());
+    masm.loadPtr(frame.addressOfEnvironmentChain(), R0.scratchReg());
 
     prepareVMCall();
 
@@ -3031,6 +3037,12 @@ BaselineCompiler::emit_JSOP_THROWSETALIASEDCONST()
 }
 
 bool
+BaselineCompiler::emit_JSOP_THROWSETCALLEE()
+{
+    return emitThrowConstAssignment();
+}
+
+bool
 BaselineCompiler::emitUninitializedLexicalCheck(const ValueOperand& val)
 {
     Label done;
@@ -3063,7 +3075,7 @@ bool
 BaselineCompiler::emit_JSOP_INITGLEXICAL()
 {
     frame.popRegsAndSync(1);
-    frame.push(ObjectValue(script->global().lexicalScope()));
+    frame.push(ObjectValue(script->global().lexicalEnvironment()));
     frame.push(R0);
     return emit_JSOP_SETPROP();
 }
@@ -3072,7 +3084,7 @@ bool
 BaselineCompiler::emit_JSOP_CHECKALIASEDLEXICAL()
 {
     frame.syncStack(0);
-    masm.loadValue(getScopeCoordinateAddress(R0.scratchReg()), R0);
+    masm.loadValue(getEnvironmentCoordinateAddress(R0.scratchReg()), R0);
     return emitUninitializedLexicalCheck(R0);
 }
 
@@ -3240,7 +3252,7 @@ bool
 BaselineCompiler::emit_JSOP_IMPLICITTHIS()
 {
     frame.syncStack(0);
-    masm.loadPtr(frame.addressOfScopeChain(), R0.scratchReg());
+    masm.loadPtr(frame.addressOfEnvironmentChain(), R0.scratchReg());
 
     prepareVMCall();
 
@@ -3388,33 +3400,33 @@ BaselineCompiler::emit_JSOP_RETSUB()
     return emitOpIC(stubCompiler.getStub(&stubSpace_));
 }
 
-typedef bool (*PushBlockScopeFn)(JSContext*, BaselineFrame*, Handle<StaticBlockScope*>);
-static const VMFunction PushBlockScopeInfo = FunctionInfo<PushBlockScopeFn>(jit::PushBlockScope);
+typedef bool (*PushLexicalEnvFn)(JSContext*, BaselineFrame*, Handle<LexicalScope*>);
+static const VMFunction PushLexicalEnvInfo = FunctionInfo<PushLexicalEnvFn>(jit::PushLexicalEnv);
 
 bool
-BaselineCompiler::emit_JSOP_PUSHBLOCKSCOPE()
+BaselineCompiler::emit_JSOP_PUSHLEXICALENV()
 {
-    StaticBlockScope& blockScope = script->getObject(pc)->as<StaticBlockScope>();
+    LexicalScope& scope = script->getScope(pc)->as<LexicalScope>();
 
     // Call a stub to push the block on the block chain.
     prepareVMCall();
     masm.loadBaselineFramePtr(BaselineFrameReg, R0.scratchReg());
 
-    pushArg(ImmGCPtr(&blockScope));
+    pushArg(ImmGCPtr(&scope));
     pushArg(R0.scratchReg());
 
-    return callVM(PushBlockScopeInfo);
+    return callVM(PushLexicalEnvInfo);
 }
 
-typedef bool (*PopBlockScopeFn)(JSContext*, BaselineFrame*);
-static const VMFunction PopBlockScopeInfo = FunctionInfo<PopBlockScopeFn>(jit::PopBlockScope);
+typedef bool (*PopLexicalEnvFn)(JSContext*, BaselineFrame*);
+static const VMFunction PopLexicalEnvInfo = FunctionInfo<PopLexicalEnvFn>(jit::PopLexicalEnv);
 
-typedef bool (*DebugLeaveThenPopBlockScopeFn)(JSContext*, BaselineFrame*, jsbytecode*);
-static const VMFunction DebugLeaveThenPopBlockScopeInfo =
-    FunctionInfo<DebugLeaveThenPopBlockScopeFn>(jit::DebugLeaveThenPopBlockScope);
+typedef bool (*DebugLeaveThenPopLexicalEnvFn)(JSContext*, BaselineFrame*, jsbytecode*);
+static const VMFunction DebugLeaveThenPopLexicalEnvInfo =
+    FunctionInfo<DebugLeaveThenPopLexicalEnvFn>(jit::DebugLeaveThenPopLexicalEnv);
 
 bool
-BaselineCompiler::emit_JSOP_POPBLOCKSCOPE()
+BaselineCompiler::emit_JSOP_POPLEXICALENV()
 {
     prepareVMCall();
 
@@ -3423,23 +3435,23 @@ BaselineCompiler::emit_JSOP_POPBLOCKSCOPE()
     if (compileDebugInstrumentation_) {
         pushArg(ImmPtr(pc));
         pushArg(R0.scratchReg());
-        return callVM(DebugLeaveThenPopBlockScopeInfo);
+        return callVM(DebugLeaveThenPopLexicalEnvInfo);
     }
 
     pushArg(R0.scratchReg());
-    return callVM(PopBlockScopeInfo);
+    return callVM(PopLexicalEnvInfo);
 }
 
-typedef bool (*FreshenBlockScopeFn)(JSContext*, BaselineFrame*);
-static const VMFunction FreshenBlockScopeInfo =
-    FunctionInfo<FreshenBlockScopeFn>(jit::FreshenBlockScope);
+typedef bool (*FreshenLexicalEnvFn)(JSContext*, BaselineFrame*);
+static const VMFunction FreshenLexicalEnvInfo =
+    FunctionInfo<FreshenLexicalEnvFn>(jit::FreshenLexicalEnv);
 
-typedef bool (*DebugLeaveThenFreshenBlockScopeFn)(JSContext*, BaselineFrame*, jsbytecode*);
-static const VMFunction DebugLeaveThenFreshenBlockScopeInfo =
-    FunctionInfo<DebugLeaveThenFreshenBlockScopeFn>(jit::DebugLeaveThenFreshenBlockScope);
+typedef bool (*DebugLeaveThenFreshenLexicalEnvFn)(JSContext*, BaselineFrame*, jsbytecode*);
+static const VMFunction DebugLeaveThenFreshenLexicalEnvInfo =
+    FunctionInfo<DebugLeaveThenFreshenLexicalEnvFn>(jit::DebugLeaveThenFreshenLexicalEnv);
 
 bool
-BaselineCompiler::emit_JSOP_FRESHENBLOCKSCOPE()
+BaselineCompiler::emit_JSOP_FRESHENLEXICALENV()
 {
     prepareVMCall();
 
@@ -3448,18 +3460,44 @@ BaselineCompiler::emit_JSOP_FRESHENBLOCKSCOPE()
     if (compileDebugInstrumentation_) {
         pushArg(ImmPtr(pc));
         pushArg(R0.scratchReg());
-        return callVM(DebugLeaveThenFreshenBlockScopeInfo);
+        return callVM(DebugLeaveThenFreshenLexicalEnvInfo);
     }
 
     pushArg(R0.scratchReg());
-    return callVM(FreshenBlockScopeInfo);
+    return callVM(FreshenLexicalEnvInfo);
 }
 
-typedef bool (*DebugLeaveBlockFn)(JSContext*, BaselineFrame*, jsbytecode*);
-static const VMFunction DebugLeaveBlockInfo = FunctionInfo<DebugLeaveBlockFn>(jit::DebugLeaveBlock);
+typedef bool (*RecreateLexicalEnvFn)(JSContext*, BaselineFrame*);
+static const VMFunction RecreateLexicalEnvInfo =
+    FunctionInfo<RecreateLexicalEnvFn>(jit::RecreateLexicalEnv);
+
+typedef bool (*DebugLeaveThenRecreateLexicalEnvFn)(JSContext*, BaselineFrame*, jsbytecode*);
+static const VMFunction DebugLeaveThenRecreateLexicalEnvInfo =
+    FunctionInfo<DebugLeaveThenRecreateLexicalEnvFn>(jit::DebugLeaveThenRecreateLexicalEnv);
 
 bool
-BaselineCompiler::emit_JSOP_DEBUGLEAVEBLOCK()
+BaselineCompiler::emit_JSOP_RECREATELEXICALENV()
+{
+    prepareVMCall();
+
+    masm.loadBaselineFramePtr(BaselineFrameReg, R0.scratchReg());
+
+    if (compileDebugInstrumentation_) {
+        pushArg(ImmPtr(pc));
+        pushArg(R0.scratchReg());
+        return callVM(DebugLeaveThenRecreateLexicalEnvInfo);
+    }
+
+    pushArg(R0.scratchReg());
+    return callVM(RecreateLexicalEnvInfo);
+}
+
+typedef bool (*DebugLeaveLexicalEnvFn)(JSContext*, BaselineFrame*, jsbytecode*);
+static const VMFunction DebugLeaveLexicalEnvInfo =
+    FunctionInfo<DebugLeaveLexicalEnvFn>(jit::DebugLeaveLexicalEnv);
+
+bool
+BaselineCompiler::emit_JSOP_DEBUGLEAVELEXICALENV()
 {
     if (!compileDebugInstrumentation_)
         return true;
@@ -3469,16 +3507,29 @@ BaselineCompiler::emit_JSOP_DEBUGLEAVEBLOCK()
     pushArg(ImmPtr(pc));
     pushArg(R0.scratchReg());
 
-    return callVM(DebugLeaveBlockInfo);
+    return callVM(DebugLeaveLexicalEnvInfo);
 }
 
-typedef bool (*EnterWithFn)(JSContext*, BaselineFrame*, HandleValue, Handle<StaticWithScope*>);
+typedef bool (*PushCallObjectFn)(JSContext*, BaselineFrame*);
+static const VMFunction PushCallObjectInfo = FunctionInfo<PushCallObjectFn>(jit::PushCallObject);
+
+bool
+BaselineCompiler::emit_JSOP_PUSHCALLOBJ()
+{
+    prepareVMCall();
+    masm.loadBaselineFramePtr(BaselineFrameReg, R0.scratchReg());
+    pushArg(R0.scratchReg());
+
+    return callVM(PushCallObjectInfo);
+}
+
+typedef bool (*EnterWithFn)(JSContext*, BaselineFrame*, HandleValue, Handle<WithScope*>);
 static const VMFunction EnterWithInfo = FunctionInfo<EnterWithFn>(jit::EnterWith);
 
 bool
 BaselineCompiler::emit_JSOP_ENTERWITH()
 {
-    StaticWithScope& withScope = script->getObject(pc)->as<StaticWithScope>();
+    WithScope& withScope = script->getScope(pc)->as<WithScope>();
 
     // Pop "with" object to R0.
     frame.popRegsAndSync(1);
@@ -3946,16 +3997,16 @@ BaselineCompiler::emit_JSOP_INITIALYIELD()
     MOZ_ASSERT(GET_UINT24(pc) == 0);
     masm.storeValue(Int32Value(0), Address(genObj, GeneratorObject::offsetOfYieldIndexSlot()));
 
-    Register scopeObj = R0.scratchReg();
-    Address scopeChainSlot(genObj, GeneratorObject::offsetOfScopeChainSlot());
-    masm.loadPtr(frame.addressOfScopeChain(), scopeObj);
-    masm.patchableCallPreBarrier(scopeChainSlot, MIRType::Value);
-    masm.storeValue(JSVAL_TYPE_OBJECT, scopeObj, scopeChainSlot);
+    Register envObj = R0.scratchReg();
+    Address envChainSlot(genObj, GeneratorObject::offsetOfEnvironmentChainSlot());
+    masm.loadPtr(frame.addressOfEnvironmentChain(), envObj);
+    masm.patchableCallPreBarrier(envChainSlot, MIRType::Value);
+    masm.storeValue(JSVAL_TYPE_OBJECT, envObj, envChainSlot);
 
     Register temp = R1.scratchReg();
     Label skipBarrier;
     masm.branchPtrInNurseryRange(Assembler::Equal, genObj, temp, &skipBarrier);
-    masm.branchPtrInNurseryRange(Assembler::NotEqual, scopeObj, temp, &skipBarrier);
+    masm.branchPtrInNurseryRange(Assembler::NotEqual, envObj, temp, &skipBarrier);
     masm.push(genObj);
     MOZ_ASSERT(genObj == R2.scratchReg());
     masm.call(&postBarrierSlot_);
@@ -3991,16 +4042,16 @@ BaselineCompiler::emit_JSOP_YIELD()
         masm.storeValue(Int32Value(GET_UINT24(pc)),
                         Address(genObj, GeneratorObject::offsetOfYieldIndexSlot()));
 
-        Register scopeObj = R0.scratchReg();
-        Address scopeChainSlot(genObj, GeneratorObject::offsetOfScopeChainSlot());
-        masm.loadPtr(frame.addressOfScopeChain(), scopeObj);
-        masm.patchableCallPreBarrier(scopeChainSlot, MIRType::Value);
-        masm.storeValue(JSVAL_TYPE_OBJECT, scopeObj, scopeChainSlot);
+        Register envObj = R0.scratchReg();
+        Address envChainSlot(genObj, GeneratorObject::offsetOfEnvironmentChainSlot());
+        masm.loadPtr(frame.addressOfEnvironmentChain(), envObj);
+        masm.patchableCallPreBarrier(envChainSlot, MIRType::Value);
+        masm.storeValue(JSVAL_TYPE_OBJECT, envObj, envChainSlot);
 
         Register temp = R1.scratchReg();
         Label skipBarrier;
         masm.branchPtrInNurseryRange(Assembler::Equal, genObj, temp, &skipBarrier);
-        masm.branchPtrInNurseryRange(Assembler::NotEqual, scopeObj, temp, &skipBarrier);
+        masm.branchPtrInNurseryRange(Assembler::NotEqual, envObj, temp, &skipBarrier);
         MOZ_ASSERT(genObj == R2.scratchReg());
         masm.call(&postBarrierSlot_);
         masm.bind(&skipBarrier);
@@ -4185,10 +4236,10 @@ BaselineCompiler::emit_JSOP_RESUME()
     masm.subFromStackPtr(Imm32(BaselineFrame::Size()));
     masm.checkStackAlignment();
 
-    // Store flags and scope chain.
+    // Store flags and env chain.
     masm.store32(Imm32(BaselineFrame::HAS_CALL_OBJ), frame.addressOfFlags());
-    masm.unboxObject(Address(genObj, GeneratorObject::offsetOfScopeChainSlot()), scratch2);
-    masm.storePtr(scratch2, frame.addressOfScopeChain());
+    masm.unboxObject(Address(genObj, GeneratorObject::offsetOfEnvironmentChainSlot()), scratch2);
+    masm.storePtr(scratch2, frame.addressOfEnvironmentChain());
 
     // Store the arguments object if there is one.
     Label noArgsObj;

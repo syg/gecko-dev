@@ -20,7 +20,7 @@
 
 #include "gc/Nursery-inl.h"
 #include "vm/ArrayObject-inl.h"
-#include "vm/ScopeObject-inl.h"
+#include "vm/EnvironmentObject-inl.h"
 #include "vm/Shape-inl.h"
 
 using namespace js;
@@ -1109,7 +1109,7 @@ PurgeScopeChainHelper(ExclusiveContext* cx, HandleObject objArg, HandleId id)
      * may gain such properties via eval introducing new vars; see bug 490364.
      */
     if (obj->is<CallObject>()) {
-        while ((obj = obj->enclosingScope()) != nullptr) {
+        while ((obj = obj->enclosingEnvironment()) != nullptr) {
             if (!PurgeProtoChain(cx, obj, id))
                 return false;
         }
@@ -1754,7 +1754,7 @@ GetExistingProperty(JSContext* cx,
         vp.set(obj->getSlot(shape->slot()));
         MOZ_ASSERT_IF(!vp.isMagic(JS_UNINITIALIZED_LEXICAL) &&
                       !obj->isSingleton() &&
-                      !obj->template is<ScopeObject>() &&
+                      !obj->template is<EnvironmentObject>() &&
                       shape->hasDefaultGetter(),
                       ObjectGroupHasProperty(cx, obj->group(), shape->propid(), vp));
     } else {
@@ -2120,7 +2120,7 @@ NativeSetExistingDataProperty(JSContext* cx, HandleNativeObject obj, HandleShape
         return result.fail(JSMSG_GETTER_ONLY);
     }
 
-    MOZ_ASSERT(!obj->is<DynamicWithObject>());  // See bug 1128681.
+    MOZ_ASSERT(!obj->is<WithEnvironmentObject>());  // See bug 1128681.
 
     uint32_t sample = cx->runtime()->propertyRemovals;
     RootedId id(cx, shape->propid());
@@ -2248,9 +2248,6 @@ static bool
 SetNonexistentProperty(JSContext* cx, HandleId id, HandleValue v, HandleValue receiver,
                        QualifiedBool qualified, ObjectOpResult& result)
 {
-    // We should never add properties to lexical blocks.
-    MOZ_ASSERT_IF(receiver.isObject(), !receiver.toObject().is<ClonedBlockObject>());
-
     if (!qualified && receiver.isObject() && receiver.toObject().isUnqualifiedVarObj()) {
         if (!MaybeReportUndeclaredVarAssignment(cx, JSID_TO_STRING(id)))
             return false;
