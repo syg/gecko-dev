@@ -14,6 +14,7 @@
 #include "jit/JitFrameIterator.h"
 #include "jit/JitFrames.h"
 
+#include "vm/EnvironmentObject.h"
 #include "vm/Stack.h"
 
 namespace js {
@@ -52,7 +53,7 @@ class RematerializedFrame
     unsigned numActualArgs_;
 
     JSScript* script_;
-    JSObject* scopeChain_;
+    JSObject* envChain_;
     JSFunction* callee_;
     ArgumentsObject* argsObj_;
 
@@ -119,14 +120,27 @@ class RematerializedFrame
         return frameNo_ > 0;
     }
 
-    JSObject* scopeChain() const {
-        return scopeChain_;
+    JSObject* environmentChain() const {
+        return envChain_;
     }
-    void pushOnScopeChain(ScopeObject& scope);
-    MOZ_MUST_USE bool initFunctionScopeObjects(JSContext* cx);
+
+    void pushOnEnvironmentChain(EnvironmentObject& env) {
+        MOZ_ASSERT(*environmentChain() == env.enclosingEnvironment());
+        envChain_ = &env;
+    }
+
+    template <typename SpecificEnvironment>
+    void popOffEnvironmentChain() {
+        MOZ_ASSERT(envChain_->is<SpecificEnvironment>());
+        envChain_ = &envChain_->as<SpecificEnvironment>().enclosingEnvironment();
+        if (mozilla::IsSame<SpecificEnvironment, CallObject>::value)
+            hasCallObj_ = false;
+    }
+
+    MOZ_MUST_USE bool initExtraFunctionEnvironmentObjects(JSContext* cx);
+    MOZ_MUST_USE bool pushCallObject(JSContext* cx);
 
     bool hasCallObj() const {
-        MOZ_ASSERT(callee()->needsCallObject());
         return hasCallObj_;
     }
     CallObject& callObj() const;

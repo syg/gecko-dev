@@ -1054,9 +1054,9 @@ Debugger::wrapEnvironment(JSContext* cx, Handle<Env*> env,
 
     /*
      * DebuggerEnv should only wrap a debug scope chain obtained (transitively)
-     * from GetDebugScopeFor(Frame|Function).
+     * from GetDebugEnvironmentFor(Frame|Function).
      */
-    MOZ_ASSERT(!IsSyntacticScope(env));
+    MOZ_ASSERT(!IsSyntacticEnvironment(env));
 
     DependentAddPtr<ObjectWeakMap> p(cx, environments, env);
     if (p) {
@@ -1560,7 +1560,7 @@ Debugger::parseResumptionValue(Maybe<AutoCompartment>& ac, bool ok, const Value&
     if (frame.debuggerNeedsCheckPrimitiveReturn()) {
         bool success;
         {
-            AutoCompartment ac2(cx, frame.scopeChain());
+            AutoCompartment ac2(cx, frame.environmentChain());
             success = GetThisValueForDebuggerMaybeOptimizedOut(cx, frame, pc, &rootThis);
         }
         if (!success || !cx->compartment()->wrap(cx, &rootThis)) {
@@ -2374,7 +2374,7 @@ Debugger::updateExecutionObservabilityOfFrames(JSContext* cx, const ExecutionObs
     // See comment in unsetPrevUpToDateUntil.
     if (oldestEnabledFrame) {
         AutoCompartment ac(cx, oldestEnabledFrame.compartment());
-        DebugScopes::unsetPrevUpToDateUntil(cx, oldestEnabledFrame);
+        DebugEnvironments::unsetPrevUpToDateUntil(cx, oldestEnabledFrame);
     }
 
     return true;
@@ -4375,8 +4375,8 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
             if (p) {
                 /* Is our newly found script deeper than the last one we found? */
                 JSScript* incumbent = p->value();
-                if (StaticScopeChainLength(script->innermostStaticScope()) >
-                    StaticScopeChainLength(incumbent->innermostStaticScope()))
+                if (script->innermostScope()->chainLength() >
+                    incumbent->innermostScope()->chainLength())
                 {
                     p->value() = script;
                 }
@@ -4575,7 +4575,8 @@ class MOZ_STACK_CLASS Debugger::ObjectQuery
         /*
          * If the referent is an object and matches our query's restrictions,
          * add it to the vector accumulating results. Skip objects that should
-         * never be exposed to JS, like ScopeObjects and internal functions.
+         * never be exposed to JS, like EnvironmentObjects and internal
+         * functions.
          */
 
         if (!referent.is<JSObject>() || referent.exposeToJS().isUndefined())
@@ -4939,10 +4940,13 @@ Debugger::isCompilableUnit(JSContext* cx, unsigned argc, Value* vp)
     bool result = true;
 
     CompileOptions options(cx);
-    frontend::Parser<frontend::FullParseHandler> parser(cx, &cx->tempLifoAlloc(),
+    frontend::UsedNameTracker usedNames(cx);
+    if (!usedNames.init())
+        return false;
+    frontend::Parser<frontend::FullParseHandler> parser(cx, cx->tempLifoAlloc(),
                                                         options, chars.twoByteChars(),
                                                         length, /* foldConstants = */ true,
-                                                        nullptr, nullptr);
+                                                        usedNames, nullptr, nullptr);
     JS::WarningReporter older = JS::SetWarningReporter(cx, nullptr);
     if (!parser.checkOptions() || !parser.parse()) {
         // We ran into an error. If it was because we ran out of memory we report
@@ -5484,7 +5488,7 @@ DebuggerScript_getChildScripts(JSContext* cx, unsigned argc, Value* vp)
         RootedFunction fun(cx);
         RootedScript funScript(cx);
         RootedObject obj(cx), s(cx);
-        for (uint32_t i = script->innerObjectsStart(); i < objects->length; i++) {
+        for (uint32_t i = 0; i < objects->length; i++) {
             obj = objects->vector[i];
             if (obj->is<JSFunction>()) {
                 fun = &obj->as<JSFunction>();
@@ -6137,7 +6141,7 @@ Debugger::replaceFrameGuts(JSContext* cx, AbstractFramePtr from, AbstractFramePt
 
         // Rekey missingScopes to maintain Debugger.Environment identity and
         // forward liveScopes to point to the new frame.
-        DebugScopes::forwardLiveFrame(cx, from, to);
+        DebugEnvironments::forwardLiveFrame(cx, from, to);
     });
 
     // Forward live Debugger.Frame objects.
@@ -7172,9 +7176,9 @@ DebuggerFrame::getEnvironment(JSContext* cx, Handle<DebuggerFrame*> frame,
 
     Rooted<Env*> env(cx);
     {
-        AutoCompartment ac(cx, iter.abstractFramePtr().scopeChain());
+        AutoCompartment ac(cx, iter.abstractFramePtr().environmentChain());
         UpdateFrameIterPc(iter);
-        env = GetDebugScopeForFrame(cx, iter.abstractFramePtr(), iter.pc());
+        env = GetDebugEnvironmentForFrame(cx, iter.abstractFramePtr(), iter.pc());
         if (!env)
             return false;
     }
@@ -7244,7 +7248,7 @@ DebuggerFrame::getThis(JSContext* cx, Handle<DebuggerFrame*> frame, MutableHandl
 
     {
         AbstractFramePtr frame = iter.abstractFramePtr();
-        AutoCompartment ac(cx, frame.scopeChain());
+        AutoCompartment ac(cx, frame.environmentChain());
 
         UpdateFrameIterPc(iter);
 
@@ -7625,10 +7629,15 @@ DebuggerArguments_getArg(JSContext* cx, unsigned argc, Value* vp)
             if (!script->ensureHasAnalyzedArgsUsage(cx))
                 return false;
         }
-        if (unsigned(i) < frame.numFormalArgs() && script->formalIsAliased(i)) {
-            for (AliasedFormalIter fi(script); ; fi++) {
-                if (fi.frameIndex() == unsigned(i)) {
-                    arg = frame.callObj().aliasedVar(fi);
+        if (unsigned(i) < frame.numFormalArgs()) {
+            for (PositionalFormalParameterIter fi(script); fi; fi++) {
+                if (fi.argumentSlot() == unsigned(i)) {
+                    // We might've been called before the CallObject was
+                    // created.
+                    if (fi.closedOver() && frame.hasCallObj())
+                        arg = frame.callObj().aliasedBinding(fi);
+                    else
+                        arg = frame.unaliasedActual(i, DONT_CHECK_ALIASING);
                     break;
                 }
             }
@@ -7789,7 +7798,7 @@ DebuggerFrame_setOnStep(JSContext* cx, unsigned argc, Value* vp)
     Value prior = thisobj->getReservedSlot(JSSLOT_DEBUGFRAME_ONSTEP_HANDLER);
     if (!args[0].isUndefined() && prior.isUndefined()) {
         // Single stepping toggled off->on.
-        AutoCompartment ac(cx, frame.scopeChain());
+        AutoCompartment ac(cx, frame.environmentChain());
         // Ensure observability *before* incrementing the step mode
         // count. Calling this function after calling incrementStepModeCount
         // will make it a no-op.
@@ -7843,7 +7852,7 @@ DebuggerFrame_setOnPop(JSContext* cx, unsigned argc, Value* vp)
  * value in |*rval|. Use |thisv| as the 'this' value.
  *
  * If |frame| is non-nullptr, evaluate as for a direct eval in that frame; |env|
- * must be either |frame|'s DebugScopeObject, or some extension of that
+ * must be either |frame|'s DebugEnvironmentProxy, or some extension of that
  * environment; either way, |frame|'s scope is where newly declared variables
  * go. In this case, |frame| must have a computed 'this' value, equal to |thisv|.
  */
@@ -7855,43 +7864,8 @@ EvaluateInEnv(JSContext* cx, Handle<Env*> env, AbstractFramePtr frame,
     assertSameCompartment(cx, env, frame);
     MOZ_ASSERT_IF(frame, pc);
 
-    /*
-     * Pass in a StaticEvalScope *not* linked to env for evalStaticScope, as
-     * ScopeIter should stop at any non-ScopeObject or non-syntactic With
-     * boundaries, and we are putting a DebugScopeProxy or non-syntactic With on
-     * the scope chain.
-     */
-    Rooted<StaticScope*> enclosingStaticScope(cx);
-    if (!IsGlobalLexicalScope(env)) {
-        // If we are doing a global evalWithBindings, we will still need to
-        // link the static global lexical scope to the static non-syntactic
-        // scope.
-        if (IsGlobalLexicalScope(env->enclosingScope()))
-            enclosingStaticScope = &cx->global()->lexicalScope().staticBlock();
-        enclosingStaticScope = StaticNonSyntacticScope::create(cx, enclosingStaticScope);
-        if (!enclosingStaticScope)
-            return false;
-    } else {
-        enclosingStaticScope = &cx->global()->lexicalScope().staticBlock();
-    }
-
-    // Do not consider executeInGlobal{WithBindings} as an eval, but instead
-    // as executing a series of statements at the global level. This is to
-    // circumvent the fresh lexical scope that all eval have, so that the
-    // users of executeInGlobal, like the web console, may add new bindings to
-    // the global scope.
-    Rooted<StaticScope*> staticScope(cx);
-    if (frame) {
-        staticScope = StaticEvalScope::create(cx, enclosingStaticScope);
-        if (!staticScope)
-            return false;
-    } else {
-        staticScope = enclosingStaticScope;
-    }
-
     CompileOptions options(cx);
     options.setIsRunOnce(true)
-           .setForEval(true)
            .setNoScriptRval(false)
            .setFileAndLine(filename, lineno)
            .setCanLazilyParse(false)
@@ -7899,18 +7873,35 @@ EvaluateInEnv(JSContext* cx, Handle<Env*> env, AbstractFramePtr frame,
            .maybeMakeStrictMode(frame ? frame.script()->strict() : false);
     RootedScript callerScript(cx, frame ? frame.script() : nullptr);
     SourceBufferHolder srcBuf(chars.start().get(), chars.length(), SourceBufferHolder::NoOwnership);
-    RootedScript script(cx, frontend::CompileScript(cx, &cx->tempLifoAlloc(), env, staticScope,
-                                                    callerScript, options, srcBuf,
-                                                    /* source = */ nullptr));
+    RootedScript script(cx);
+
+    ScopeKind scopeKind;
+    if (IsGlobalLexicalEnvironment(env))
+        scopeKind = ScopeKind::Global;
+    else
+        scopeKind = ScopeKind::NonSyntactic;
+
+    if (frame) {
+        MOZ_ASSERT(scopeKind == ScopeKind::NonSyntactic);
+        RootedScope scope(cx, GlobalScope::createEmpty(cx, ScopeKind::NonSyntactic));
+        if (!scope)
+            return false;
+        script = frontend::CompileEvalScript(cx, cx->tempLifoAlloc(), env, scope,
+                                             options, srcBuf);
+        if (script)
+            script->setActiveEval();
+    } else {
+        // Do not consider executeInGlobal{WithBindings} as an eval, but instead
+        // as executing a series of statements at the global level. This is to
+        // circumvent the fresh lexical scope that all eval have, so that the
+        // users of executeInGlobal, like the web console, may add new bindings to
+        // the global scope.
+        script = frontend::CompileGlobalScript(cx, cx->tempLifoAlloc(), scopeKind, options,
+                                               srcBuf);
+    }
+
     if (!script)
         return false;
-
-    // Again, executeInGlobal is not considered eval.
-    if (frame) {
-        if (script->strict())
-            staticScope->as<StaticEvalScope>().setStrict();
-        script->setActiveEval();
-    }
 
     return ExecuteKernel(cx, script, *env, NullValue(), frame, rval.address());
 }
@@ -7922,7 +7913,7 @@ DebuggerGenericEval(JSContext* cx, const mozilla::Range<const char16_t> chars,
 {
     /* Either we're specifying the frame, or a global. */
     MOZ_ASSERT_IF(iter, !scope);
-    MOZ_ASSERT_IF(!iter, scope && IsGlobalLexicalScope(scope));
+    MOZ_ASSERT_IF(!iter, scope && IsGlobalLexicalEnvironment(scope));
 
     /*
      * Gather keys and values of bindings, if any. This must be done in the
@@ -7949,13 +7940,13 @@ DebuggerGenericEval(JSContext* cx, const mozilla::Range<const char16_t> chars,
 
     Maybe<AutoCompartment> ac;
     if (iter)
-        ac.emplace(cx, iter->scopeChain(cx));
+        ac.emplace(cx, iter->environmentChain(cx));
     else
         ac.emplace(cx, scope);
 
     Rooted<Env*> env(cx);
     if (iter) {
-        env = GetDebugScopeForFrame(cx, iter->abstractFramePtr(), iter->pc());
+        env = GetDebugEnvironmentForFrame(cx, iter->abstractFramePtr(), iter->pc());
         if (!env)
             return false;
     } else {
@@ -7978,15 +7969,15 @@ DebuggerGenericEval(JSContext* cx, const mozilla::Range<const char16_t> chars,
             }
         }
 
-        AutoObjectVector scopeChain(cx);
-        if (!scopeChain.append(nenv))
+        AutoObjectVector envChain(cx);
+        if (!envChain.append(nenv))
             return false;
 
-        RootedObject dynamicScope(cx);
-        if (!CreateScopeObjectsForScopeChain(cx, scopeChain, env, &dynamicScope))
+        RootedObject newEnv(cx);
+        if (!CreateObjectsForEnvironmentChain(cx, envChain, env, &newEnv))
             return false;
 
-        env = dynamicScope;
+        env = newEnv;
     }
 
     /* Run the code and produce the completion value. */
@@ -8370,7 +8361,7 @@ DebuggerObject::environmentGetter(JSContext* cx, unsigned argc, Value* vp)
     {
         AutoCompartment ac(cx, obj);
         RootedFunction fun(cx, &obj->as<JSFunction>());
-        env = GetDebugScopeForFunction(cx, fun);
+        env = GetDebugEnvironmentForFunction(cx, fun);
         if (!env)
             return false;
     }
@@ -8949,7 +8940,7 @@ DebuggerObject::asEnvironmentMethod(JSContext* cx, unsigned argc, Value* vp)
     Rooted<Env*> env(cx);
     {
         AutoCompartment ac(cx, referent);
-        env = GetDebugScopeForGlobalLexicalScope(cx);
+        env = GetDebugEnvironmentForGlobalLexicalEnvironment(cx);
         if (!env)
             return false;
     }
@@ -9298,16 +9289,13 @@ DebuggerObject::getParameterNames(JSContext* cx, Handle<DebuggerObject*> object,
         if (!script)
             return false;
 
-        MOZ_ASSERT(referent->nargs() == script->bindings.numArgs());
+        MOZ_ASSERT(referent->nargs() == script->numArgs());
 
         if (referent->nargs() > 0) {
-            BindingIter bi(script);
-            for (size_t i = 0; i < referent->nargs(); i++, bi++) {
-                MOZ_ASSERT(bi.argIndex() == i);
-                if (bi->name()->length() == 0)
-                    result[i].set(nullptr);
-                else
-                    result[i].set(bi->name());
+            PositionalFormalParameterIter fi(script);
+            for (size_t i = 0; i < referent->nargs(); i++, fi++) {
+                MOZ_ASSERT(fi.argumentSlot() == i);
+                result[i].set(fi.name());
             }
         }
     } else {
@@ -9752,7 +9740,7 @@ DebuggerObject::forceLexicalInitializationByName(JSContext* cx, Handle<DebuggerO
 
     Rooted<GlobalObject*> referent(cx, &object->referent()->as<GlobalObject>());
 
-    RootedObject globalLexical(cx, &referent->lexicalScope());
+    RootedObject globalLexical(cx, &referent->lexicalEnvironment());
     RootedObject pobj(cx);
     RootedShape shape(cx);
     if (!LookupProperty(cx, globalLexical, id, &pobj, &shape))
@@ -9780,7 +9768,7 @@ DebuggerObject::executeInGlobal(JSContext* cx, Handle<DebuggerObject*> object,
     Rooted<GlobalObject*> referent(cx, &object->referent()->as<GlobalObject>());
     Debugger* dbg = object->owner();
 
-    RootedObject globalLexical(cx, &referent->lexicalScope());
+    RootedObject globalLexical(cx, &referent->lexicalEnvironment());
     return DebuggerGenericEval(cx, chars, bindings, options, result, dbg, globalLexical,
                                nullptr);
 }
@@ -9990,15 +9978,16 @@ DebuggerEnvironment::construct(JSContext* cx, unsigned argc, Value* vp)
 static bool
 IsDeclarative(Env* env)
 {
-    return env->is<DebugScopeObject>() && env->as<DebugScopeObject>().isForDeclarative();
+    return env->is<DebugEnvironmentProxy>() &&
+           env->as<DebugEnvironmentProxy>().isForDeclarative();
 }
 
 template <typename T>
 static bool
-IsDebugScopeWrapper(Env* env)
+IsDebugEnvironmentWrapper(Env* env)
 {
-    return env->is<DebugScopeObject>() &&
-           env->as<DebugScopeObject>().scope().is<T>();
+    return env->is<DebugEnvironmentProxy>() &&
+           env->as<DebugEnvironmentProxy>().environment().is<T>();
 }
 
 bool
@@ -10057,7 +10046,7 @@ DebuggerEnvironment::objectGetter(JSContext* cx, unsigned argc, Value* vp)
         return false;
 
     if (environment->type() == DebuggerEnvironmentType::Declarative) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_DEBUG_NO_SCOPE_OBJECT);
+        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_DEBUG_NO_ENV_OBJECT);
         return false;
     }
 
@@ -10246,7 +10235,7 @@ DebuggerEnvironment::type() const
     /* Don't bother switching compartments just to check env's type. */
     if (IsDeclarative(referent()))
         return DebuggerEnvironmentType::Declarative;
-    else if (IsDebugScopeWrapper<DynamicWithObject>(referent()))
+    if (IsDebugEnvironmentWrapper<WithEnvironmentObject>(referent()))
         return DebuggerEnvironmentType::With;
     return DebuggerEnvironmentType::Object;
 }
@@ -10255,7 +10244,7 @@ bool
 DebuggerEnvironment::getParent(JSContext* cx, MutableHandle<DebuggerEnvironment*> result) const
 {
     /* Don't bother switching compartments just to get env's parent. */
-    Rooted<Env*> parent(cx, referent()->enclosingScope());
+    Rooted<Env*> parent(cx, referent()->enclosingEnvironment());
     if (!parent) {
         result.set(nullptr);
         return true;
@@ -10271,13 +10260,15 @@ DebuggerEnvironment::getObject(JSContext* cx, MutableHandle<DebuggerObject*> res
 
     /* Don't bother switching compartments just to get env's object. */
     RootedObject object(cx);
-    if (IsDebugScopeWrapper<DynamicWithObject>(referent())) {
-        object.set(&referent()->as<DebugScopeObject>().scope().as<DynamicWithObject>().object());
-    } else if (IsDebugScopeWrapper<NonSyntacticVariablesObject>(referent())) {
-        object.set(&referent()->as<DebugScopeObject>().scope().as<NonSyntacticVariablesObject>());
+    if (IsDebugEnvironmentWrapper<WithEnvironmentObject>(referent())) {
+        object.set(&referent()->as<DebugEnvironmentProxy>()
+                   .environment().as<WithEnvironmentObject>().object());
+    } else if (IsDebugEnvironmentWrapper<NonSyntacticVariablesObject>(referent())) {
+        object.set(&referent()->as<DebugEnvironmentProxy>()
+                   .environment().as<NonSyntacticVariablesObject>());
     } else {
         object.set(referent());
-        MOZ_ASSERT(!object->is<DebugScopeObject>());
+        MOZ_ASSERT(!object->is<DebugEnvironmentProxy>());
     }
 
     return owner()->wrapDebuggeeObject(cx, object, result);
@@ -10286,12 +10277,12 @@ DebuggerEnvironment::getObject(JSContext* cx, MutableHandle<DebuggerObject*> res
 bool
 DebuggerEnvironment::getCallee(JSContext* cx, MutableHandle<DebuggerObject*> result) const
 {
-    if (!referent()->is<DebugScopeObject>()) {
+    if (!referent()->is<DebugEnvironmentProxy>()) {
         result.set(nullptr);
         return true;
     }
 
-    JSObject& scope = referent()->as<DebugScopeObject>().scope();
+    JSObject& scope = referent()->as<DebugEnvironmentProxy>().environment();
     if (!scope.is<CallObject>()) {
         result.set(nullptr);
         return true;
@@ -10316,7 +10307,7 @@ bool
 DebuggerEnvironment::isDebuggee() const
 {
     MOZ_ASSERT(referent());
-    MOZ_ASSERT(!referent()->is<ScopeObject>());
+    MOZ_ASSERT(!referent()->is<EnvironmentObject>());
 
     return owner()->observesGlobal(&referent()->global());
 }
@@ -10324,7 +10315,8 @@ DebuggerEnvironment::isDebuggee() const
 bool
 DebuggerEnvironment::isOptimized() const
 {
-    return referent()->is<DebugScopeObject>() && referent()->as<DebugScopeObject>().isOptimizedOut();
+    return referent()->is<DebugEnvironmentProxy>() &&
+           referent()->as<DebugEnvironmentProxy>().isOptimizedOut();
 }
 
 /* static */ bool
@@ -10371,7 +10363,7 @@ DebuggerEnvironment::find(JSContext* cx, Handle<DebuggerEnvironment*> environmen
 
         /* This can trigger resolve hooks. */
         ErrorCopier ec(ac);
-        for (; env; env = env->enclosingScope()) {
+        for (; env; env = env->enclosingEnvironment()) {
             bool found;
             if (!HasProperty(cx, env, id, &found))
                 return false;
@@ -10412,12 +10404,12 @@ DebuggerEnvironment::getVariable(JSContext* cx, Handle<DebuggerEnvironment*> env
             return true;
         }
 
-        // For DebugScopeObjects, we get sentinel values for optimized out
+        // For DebugEnvironmentProxys, we get sentinel values for optimized out
         // slots and arguments instead of throwing (the default behavior).
         //
         // See wrapDebuggeeValue for how the sentinel values are wrapped.
-        if (referent->is<DebugScopeObject>()) {
-            if (!referent->as<DebugScopeObject>().getMaybeSentinelValue(cx, id, result))
+        if (referent->is<DebugEnvironmentProxy>()) {
+            if (!referent->as<DebugEnvironmentProxy>().getMaybeSentinelValue(cx, id, result))
                 return false;
         } else {
             if (!GetProperty(cx, referent, referent, id, result))

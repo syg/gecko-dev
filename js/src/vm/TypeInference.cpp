@@ -2589,7 +2589,7 @@ UpdatePropertyType(ExclusiveContext* cx, HeapTypeSet* types, NativeObject* obj, 
          * environments or the global lexical scope.
          */
         MOZ_ASSERT_IF(TypeSet::IsUntrackedValue(value),
-                      obj->is<LexicalScopeBase>() || IsExtensibleLexicalScope(obj));
+                      obj->is<VarEnvironmentObject>() || IsExtensibleLexicalEnvironment(obj));
         if ((indexed || !value.isUndefined() || !CanHaveEmptyPropertyTypesForOwnProperty(obj)) &&
             !TypeSet::IsUntrackedValue(value))
         {
