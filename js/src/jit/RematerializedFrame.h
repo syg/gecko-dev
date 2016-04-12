@@ -14,6 +14,7 @@
 #include "jit/JitFrameIterator.h"
 #include "jit/JitFrames.h"
 
+#include "vm/EnvironmentObject.h"
 #include "vm/Stack.h"
 
 namespace js {
@@ -52,7 +53,7 @@ class RematerializedFrame
     unsigned numActualArgs_;
 
     JSScript* script_;
-    JSObject* scopeChain_;
+    JSObject* envChain_;
     JSFunction* callee_;
     ArgumentsObject* argsObj_;
 
@@ -72,14 +73,11 @@ class RematerializedFrame
     static MOZ_MUST_USE bool RematerializeInlineFrames(JSContext* cx, uint8_t* top,
                                                        InlineFrameIterator& iter,
                                                        MaybeReadFallback& fallback,
-                                                       Vector<RematerializedFrame*>& frames);
+                                                       GCVector<RematerializedFrame*>& frames);
 
     // Free a vector of RematerializedFrames; takes care to call the
     // destructor. Also clears the vector.
-    static void FreeInVector(Vector<RematerializedFrame*>& frames);
-
-    // Mark a vector of RematerializedFrames.
-    static void MarkInVector(JSTracer* trc, Vector<RematerializedFrame*>& frames);
+    static void FreeInVector(GCVector<RematerializedFrame*>& frames);
 
     bool prevUpToDate() const {
         return prevUpToDate_;
@@ -119,14 +117,27 @@ class RematerializedFrame
         return frameNo_ > 0;
     }
 
-    JSObject* scopeChain() const {
-        return scopeChain_;
+    JSObject* environmentChain() const {
+        return envChain_;
     }
-    void pushOnScopeChain(ScopeObject& scope);
-    MOZ_MUST_USE bool initFunctionScopeObjects(JSContext* cx);
+
+    void pushOnEnvironmentChain(EnvironmentObject& env) {
+        MOZ_ASSERT(*environmentChain() == env.enclosingEnvironment());
+        envChain_ = &env;
+    }
+
+    template <typename SpecificEnvironment>
+    void popOffEnvironmentChain() {
+        MOZ_ASSERT(envChain_->is<SpecificEnvironment>());
+        envChain_ = &envChain_->as<SpecificEnvironment>().enclosingEnvironment();
+        if (mozilla::IsSame<SpecificEnvironment, CallObject>::value)
+            hasCallObj_ = false;
+    }
+
+    MOZ_MUST_USE bool initExtraFunctionEnvironmentObjects(JSContext* cx);
+    MOZ_MUST_USE bool pushCallObject(JSContext* cx);
 
     bool hasCallObj() const {
-        MOZ_ASSERT(callee()->needsCallObject());
         return hasCallObj_;
     }
     CallObject& callObj() const;
@@ -227,11 +238,34 @@ class RematerializedFrame
         return returnValue_;
     }
 
-    void mark(JSTracer* trc);
+    void trace(JSTracer* trc);
     void dump();
 };
 
 } // namespace jit
 } // namespace js
+
+namespace JS {
+
+template <>
+struct MapTypeToRootKind<js::jit::RematerializedFrame*>
+{
+    static const RootKind kind = RootKind::Traceable;
+};
+
+template <>
+struct GCPolicy<js::jit::RematerializedFrame*>
+{
+    static js::jit::RematerializedFrame* initial() {
+        return nullptr;
+    }
+
+    static void trace(JSTracer* trc, js::jit::RematerializedFrame** frame, const char* name) {
+        if (*frame)
+            (*frame)->trace(trc);
+    }
+};
+
+} // namespace JS
 
 #endif // jit_RematerializedFrame_h

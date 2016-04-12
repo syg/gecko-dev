@@ -17,9 +17,10 @@ using namespace js::jit;
 BytecodeAnalysis::BytecodeAnalysis(TempAllocator& alloc, JSScript* script)
   : script_(script),
     infos_(alloc),
-    usesScopeChain_(false),
+    usesEnvironmentChain_(false),
     hasTryFinally_(false),
-    hasSetArg_(false)
+    hasSetArg_(false),
+    hasLambdaInDefaultsWithCallObject_(false)
 {
 }
 
@@ -46,13 +47,15 @@ BytecodeAnalysis::init(TempAllocator& alloc, GSNCache& gsn)
     if (!infos_.growByUninitialized(script_->length()))
         return false;
 
-    // Initialize the scope chain slot if either the function needs a CallObject
-    // or the script uses the scope chain. The latter case is handled below.
-    usesScopeChain_ = script_->module() ||
-                      (script_->functionDelazifying() &&
-                       script_->functionDelazifying()->needsCallObject());
-    MOZ_ASSERT_IF(script_->hasAnyAliasedBindings(), usesScopeChain_);
+    // Initialize the env chain slot if either the function needs some
+    // EnvironmentObject (like a CallObject) or the script uses the env
+    // chain. The latter case is handled below.
+    usesEnvironmentChain_ = script_->module() || script_->callObjShape() ||
+                            (script_->functionDelazifying() &&
+                             script_->functionDelazifying()->needsSomeEnvironmentObject());
+    MOZ_ASSERT_IF(script_->hasAnyAliasedBindings(), usesEnvironmentChain_);
 
+    bool seenPushCallObj = false;
     jsbytecode* end = script_->codeEnd();
 
     // Clear all BytecodeInfo.
@@ -156,6 +159,17 @@ BytecodeAnalysis::init(TempAllocator& alloc, GSNCache& gsn)
             }
             break;
 
+          case JSOP_LAMBDA:
+          case JSOP_LAMBDA_ARROW:
+            if (!seenPushCallObj &&
+                script_->functionDelazifying() &&
+                script_->functionDelazifying()->needsCallObject())
+            {
+                hasLambdaInDefaultsWithCallObject_ = true;
+            }
+
+            MOZ_FALLTHROUGH;
+
           case JSOP_GETNAME:
           case JSOP_BINDNAME:
           case JSOP_BINDVAR:
@@ -164,18 +178,16 @@ BytecodeAnalysis::init(TempAllocator& alloc, GSNCache& gsn)
           case JSOP_DELNAME:
           case JSOP_GETALIASEDVAR:
           case JSOP_SETALIASEDVAR:
-          case JSOP_LAMBDA:
-          case JSOP_LAMBDA_ARROW:
           case JSOP_DEFFUN:
           case JSOP_DEFVAR:
-            usesScopeChain_ = true;
+            usesEnvironmentChain_ = true;
             break;
 
           case JSOP_GETGNAME:
           case JSOP_SETGNAME:
           case JSOP_STRICTSETGNAME:
             if (script_->hasNonSyntacticScope())
-                usesScopeChain_ = true;
+                usesEnvironmentChain_ = true;
             break;
 
           case JSOP_FINALLY:
@@ -184,6 +196,10 @@ BytecodeAnalysis::init(TempAllocator& alloc, GSNCache& gsn)
 
           case JSOP_SETARG:
             hasSetArg_ = true;
+            break;
+
+          case JSOP_PUSHCALLOBJ:
+            seenPushCallObj = true;
             break;
 
           default:
