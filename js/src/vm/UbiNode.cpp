@@ -25,8 +25,9 @@
 #include "js/Utility.h"
 #include "js/Vector.h"
 #include "vm/Debugger.h"
+#include "vm/EnvironmentObject.h"
 #include "vm/GlobalObject.h"
-#include "vm/ScopeObject.h"
+#include "vm/Scope.h"
 #include "vm/Shape.h"
 #include "vm/String.h"
 #include "vm/Symbol.h"
@@ -195,7 +196,7 @@ Node::exposeToJS() const
 
     if (is<JSObject>()) {
         JSObject& obj = *as<JSObject>();
-        if (obj.is<js::ScopeObject>()) {
+        if (obj.is<js::EnvironmentObject>()) {
             v.setUndefined();
         } else if (obj.is<JSFunction>() && js::IsInternalFunctionObject(obj)) {
             v.setUndefined();
@@ -385,6 +386,8 @@ template<> const char16_t TracerConcrete<js::BaseShape>::concreteTypeName[] =
     MOZ_UTF16("js::BaseShape");
 template<> const char16_t TracerConcrete<js::ObjectGroup>::concreteTypeName[] =
     MOZ_UTF16("js::ObjectGroup");
+template<> const char16_t TracerConcrete<js::Scope>::concreteTypeName[] =
+    MOZ_UTF16("js::Scope");
 
 
 // Instantiate all the TracerConcrete and templates here, where
@@ -400,6 +403,7 @@ template class TracerConcrete<js::jit::JitCode>;
 template class TracerConcreteWithCompartment<js::Shape>;
 template class TracerConcreteWithCompartment<js::BaseShape>;
 template class TracerConcrete<js::ObjectGroup>;
+template class TracerConcrete<js::Scope>;
 } // namespace ubi
 } // namespace JS
 

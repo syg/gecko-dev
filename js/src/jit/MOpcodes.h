@@ -47,7 +47,7 @@ namespace jit {
     _(Phi)                                                                  \
     _(Beta)                                                                 \
     _(OsrValue)                                                             \
-    _(OsrScopeChain)                                                        \
+    _(OsrEnvironmentChain)                                                  \
     _(OsrReturnValue)                                                       \
     _(OsrArgumentsObject)                                                   \
     _(ReturnFromCtor)                                                       \

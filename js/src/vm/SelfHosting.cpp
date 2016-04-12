@@ -2965,10 +2965,9 @@ CloneObject(JSContext* cx, HandleNativeObject selfHostedObject)
                                  ? gc::AllocKind::FUNCTION_EXTENDED
                                  : selfHostedFunction->getAllocKind();
         MOZ_ASSERT(!CanReuseScriptForClone(cx->compartment(), selfHostedFunction, cx->global()));
-        Rooted<ClonedBlockObject*> globalLexical(cx, &cx->global()->lexicalScope());
-        RootedObject staticGlobalLexical(cx, &globalLexical->staticBlock());
+        Rooted<LexicalEnvironmentObject*> globalLexical(cx, &cx->global()->lexicalEnvironment());
         clone = CloneFunctionAndScript(cx, selfHostedFunction, globalLexical,
-                                       staticGlobalLexical, kind);
+                                       cx->emptyGlobalScope(), kind);
         // To be able to re-lazify the cloned function, its name in the
         // self-hosting compartment has to be stored on the clone.
         if (clone && hasName) {
@@ -3092,9 +3091,9 @@ JSRuntime::cloneSelfHostedFunctionScript(JSContext* cx, HandlePropertyName name,
     // by the parser when parsing self-hosted code. The fact they have the
     // global lexical scope on the scope chain is for uniformity and engine
     // invariants.
-    MOZ_ASSERT(IsStaticGlobalLexicalScope(sourceScript->enclosingStaticScope()));
-    Rooted<StaticScope*> enclosingScope(cx, &cx->global()->lexicalScope().staticBlock());
-    if (!CloneScriptIntoFunction(cx, enclosingScope, targetFun, sourceScript))
+    MOZ_ASSERT(sourceScript->bodyScope()->enclosing()->kind() == ScopeKind::Global);
+    MOZ_ASSERT(emptyGlobalScope);
+    if (!CloneScriptIntoFunction(cx, emptyGlobalScope, targetFun, sourceScript))
         return false;
     MOZ_ASSERT(!targetFun->isInterpretedLazy());
 

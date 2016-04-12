@@ -45,7 +45,6 @@
 #include "jsobjinlines.h"
 
 #include "frontend/ParseNode-inl.h"
-#include "frontend/Parser-inl.h"
 #include "vm/ArrayBufferObject-inl.h"
 
 using namespace js;
@@ -650,8 +649,11 @@ FunctionName(ParseNode* fn)
 static inline ParseNode*
 FunctionStatementList(ParseNode* fn)
 {
-    MOZ_ASSERT(fn->pn_body->isKind(PNK_ARGSBODY));
+    MOZ_ASSERT(fn->pn_body->isKind(PNK_PARAMSBODY));
     ParseNode* last = fn->pn_body->last();
+    MOZ_ASSERT(last->isKind(PNK_LEXICALSCOPE));
+    MOZ_ASSERT(last->isEmptyScope());
+    last = last->scopeBody();
     MOZ_ASSERT(last->isKind(PNK_STATEMENTLIST));
     return last;
 }
@@ -679,16 +681,9 @@ ObjectNormalFieldInitializer(ExclusiveContext* cx, ParseNode* pn)
     return BinaryRight(pn);
 }
 
-static inline bool
-IsDefinition(ParseNode* pn)
-{
-    return pn->isKind(PNK_NAME) && pn->isDefn();
-}
-
 static inline ParseNode*
-MaybeDefinitionInitializer(ParseNode* pn)
+MaybeInitializer(ParseNode* pn)
 {
-    MOZ_ASSERT(IsDefinition(pn));
     return pn->expr();
 }
 
@@ -1687,7 +1682,8 @@ class MOZ_STACK_CLASS ModuleValidator
         asmJSMetadata_->minHeapLength = RoundUpToNextValidAsmJSHeapLength(0);
         asmJSMetadata_->srcStart = moduleFunctionNode_->pn_body->pn_pos.begin;
         asmJSMetadata_->srcBodyStart = parser_.tokenStream.currentToken().pos.end;
-        asmJSMetadata_->strict = parser_.pc->sc->strict() && !parser_.pc->sc->hasExplicitUseStrict();
+        asmJSMetadata_->strict = parser_.pc->sc()->strict() &&
+                                 !parser_.pc->sc()->hasExplicitUseStrict();
         asmJSMetadata_->scriptSource.reset(parser_.ss);
 
         if (!globalMap_.init() || !sigMap_.init() || !importMap_.init())
@@ -3162,8 +3158,6 @@ static bool
 CheckArgument(ModuleValidator& m, ParseNode* arg, PropertyName** name)
 {
     *name = nullptr;
-    if (!IsDefinition(arg))
-        return m.fail(arg, "duplicate argument name not allowed");
 
     if (arg->isKind(PNK_ASSIGN))
         return m.fail(arg, "default arguments not allowed");
@@ -3191,7 +3185,7 @@ static bool
 CheckModuleArguments(ModuleValidator& m, ParseNode* fn)
 {
     unsigned numFormals;
-    ParseNode* arg1 = FunctionArgsList(fn, &numFormals);
+    ParseNode* arg1 = FunctionFormalParametersList(fn, &numFormals);
     ParseNode* arg2 = arg1 ? NextNode(arg1) : nullptr;
     ParseNode* arg3 = arg2 ? NextNode(arg2) : nullptr;
 
@@ -3614,13 +3608,10 @@ CheckGlobalDotImport(ModuleValidator& m, PropertyName* varName, ParseNode* initN
 static bool
 CheckModuleGlobal(ModuleValidator& m, ParseNode* var, bool isConst)
 {
-    if (!IsDefinition(var))
-        return m.fail(var, "import variable names must be unique");
-
     if (!CheckModuleLevelName(m, var, var->name()))
         return false;
 
-    ParseNode* initNode = MaybeDefinitionInitializer(var);
+    ParseNode* initNode = MaybeInitializer(var);
     if (!initNode)
         return m.fail(var, "module import needs initializer");
 
@@ -3733,7 +3724,7 @@ CheckArguments(FunctionValidator& f, ParseNode** stmtIter, ValTypeVector* argTyp
     ParseNode* stmt = *stmtIter;
 
     unsigned numFormals;
-    ParseNode* argpn = FunctionArgsList(f.fn(), &numFormals);
+    ParseNode* argpn = FunctionFormalParametersList(f.fn(), &numFormals);
 
     for (unsigned i = 0; i < numFormals; i++, argpn = NextNode(argpn), stmt = NextNode(stmt)) {
         PropertyName* name;
@@ -3795,15 +3786,12 @@ CheckFinalReturn(FunctionValidator& f, ParseNode* lastNonEmptyStmt)
 static bool
 CheckVariable(FunctionValidator& f, ParseNode* var, ValTypeVector* types, Vector<NumLit>* inits)
 {
-    if (!IsDefinition(var))
-        return f.fail(var, "local variable names must not restate argument names");
-
     PropertyName* name = var->name();
 
     if (!CheckIdentifier(f.m(), var, name))
         return false;
 
-    ParseNode* initNode = MaybeDefinitionInitializer(var);
+    ParseNode* initNode = MaybeInitializer(var);
     if (!initNode)
         return f.failName(var, "var '%s' needs explicit type declaration via an initial value", name);
 
@@ -6906,6 +6894,7 @@ CheckStatement(FunctionValidator& f, ParseNode* stmt)
       case PNK_STATEMENTLIST: return CheckStatementList(f, stmt);
       case PNK_BREAK:         return CheckBreakOrContinue(f, true, stmt);
       case PNK_CONTINUE:      return CheckBreakOrContinue(f, false, stmt);
+      case PNK_LEXICALSCOPE:  return CheckStatement(f, stmt->scopeBody());
       default:;
     }
 
@@ -6943,18 +6932,21 @@ ParseFunction(ModuleValidator& m, ParseNode** fnOut, unsigned* line)
     fun->setAtom(name);
     fun->setArgCount(0);
 
-    AsmJSParseContext* outerpc = m.parser().pc;
+    ParseContext* outerpc = m.parser().pc;
     Directives directives(outerpc);
-    FunctionBox* funbox = m.parser().newFunctionBox(fn, fun, outerpc, directives, NotGenerator);
+    FunctionBox* funbox = m.parser().newFunctionBox(fn, fun, directives, NotGenerator,
+                                                    /* tryAnnexB = */ false);
     if (!funbox)
         return false;
+    funbox->initWithEnclosingContext(outerpc->sc(), frontend::Statement,
+                                     /* isGenexpLambda = */ false);
 
     Directives newDirectives = directives;
-    AsmJSParseContext funpc(&m.parser(), outerpc, fn, funbox, &newDirectives);
-    if (!funpc.init(m.parser()))
+    ParseContext funpc(&m.parser(), funbox, &newDirectives);
+    if (!funpc.init())
         return false;
 
-    if (!m.parser().functionArgsAndBodyGeneric(InAllowed, YieldIsName, fn, fun, Statement)) {
+    if (!m.parser().functionFormalParametersAndBody(InAllowed, YieldIsName, fn, Statement)) {
         if (tokenStream.hadError() || directives == newDirectives)
             return false;
 
@@ -6963,8 +6955,6 @@ ParseFunction(ModuleValidator& m, ParseNode** fnOut, unsigned* line)
 
     MOZ_ASSERT(!tokenStream.hadError());
     MOZ_ASSERT(directives == newDirectives);
-
-    fn->pn_blockid = outerpc->blockid();
 
     *fnOut = fn;
     return true;
@@ -7061,10 +7051,7 @@ CheckFunctions(ModuleValidator& m)
 static bool
 CheckFuncPtrTable(ModuleValidator& m, ParseNode* var)
 {
-    if (!IsDefinition(var))
-        return m.fail(var, "function-pointer table name must be unique");
-
-    ParseNode* arrayLiteral = MaybeDefinitionInitializer(var);
+    ParseNode* arrayLiteral = MaybeInitializer(var);
     if (!arrayLiteral || !arrayLiteral->isKind(PNK_ARRAY))
         return m.fail(var, "function-pointer table's initializer must be an array literal");
 
@@ -7208,11 +7195,6 @@ CheckModuleReturn(ModuleValidator& m)
             return false;
     }
 
-    // Function statements are not added to the lexical scope in ParseContext
-    // (since cx->tempLifoAlloc is marked/released after each function
-    // statement) and thus all the identifiers in the return statement will be
-    // mistaken as free variables and added to lexdeps. Clear these now.
-    m.parser().pc->lexdeps->clear();
     return true;
 }
 
@@ -7235,7 +7217,7 @@ CheckModule(ExclusiveContext* cx, AsmJSParser& parser, ParseNode* stmtList, unsi
 {
     int64_t before = PRMJ_Now();
 
-    ParseNode* moduleFunctionNode = parser.pc->maybeFunction;
+    ParseNode* moduleFunctionNode = parser.pc->functionBox()->functionNode;
     MOZ_ASSERT(moduleFunctionNode);
 
     ModuleValidator m(cx, parser, moduleFunctionNode);
@@ -8126,7 +8108,7 @@ class ModuleChars
 
   public:
     static uint32_t beginOffset(AsmJSParser& parser) {
-        return parser.pc->maybeFunction->pn_pos.begin;
+        return parser.pc->functionBox()->functionNode->pn_pos.begin;
     }
 
     static uint32_t endOffset(AsmJSParser& parser) {
@@ -8174,10 +8156,11 @@ class ModuleCharsForStore : ModuleChars
         // For functions created with 'new Function', function arguments are
         // not present in the source so we must manually explicitly serialize
         // and match the formals as a Vector of PropertyName.
-        isFunCtor_ = parser.pc->isFunctionConstructorBody();
+        isFunCtor_ = parser.pc->isStandaloneFunctionBody();
         if (isFunCtor_) {
             unsigned numArgs;
-            ParseNode* arg = FunctionArgsList(parser.pc->maybeFunction, &numArgs);
+            ParseNode* functionNode = parser.pc->functionBox()->functionNode;
+            ParseNode* arg = FunctionFormalParametersList(functionNode, &numArgs);
             for (unsigned i = 0; i < numArgs; i++, arg = arg->pn_next) {
                 UniqueChars name = StringToNewUTF8CharsZ(nullptr, *arg->name());
                 if (!name || !funCtorArgs_.append(Move(name)))
@@ -8244,7 +8227,7 @@ class ModuleCharsForLookup : ModuleChars
             return false;
         if (!PodEqual(chars_.begin(), parseBegin, chars_.length()))
             return false;
-        if (isFunCtor_ != parser.pc->isFunctionConstructorBody())
+        if (isFunCtor_ != parser.pc->isStandaloneFunctionBody())
             return false;
         if (isFunCtor_) {
             // For function statements, the closing } is included as the last
@@ -8257,7 +8240,8 @@ class ModuleCharsForLookup : ModuleChars
             if (parseBegin + chars_.length() != parseLimit)
                 return false;
             unsigned numArgs;
-            ParseNode* arg = FunctionArgsList(parser.pc->maybeFunction, &numArgs);
+            ParseNode* functionNode = parser.pc->functionBox()->functionNode;
+            ParseNode* arg = FunctionFormalParametersList(functionNode, &numArgs);
             if (funCtorArgs_.length() != numArgs)
                 return false;
             for (unsigned i = 0; i < funCtorArgs_.length(); i++, arg = arg->pn_next) {
@@ -8390,9 +8374,9 @@ LookupAsmJSModuleInCache(ExclusiveContext* cx, AsmJSParser& parser, bool* loaded
         return false;
 
     // See AsmJSMetadata comment as well as ModuleValidator::init().
-    asmJSMetadata->srcStart = parser.pc->maybeFunction->pn_body->pn_pos.begin;
+    asmJSMetadata->srcStart = parser.pc->functionBox()->functionNode->pn_body->pn_pos.begin;
     asmJSMetadata->srcBodyStart = parser.tokenStream.currentToken().pos.end;
-    asmJSMetadata->strict = parser.pc->sc->strict() && !parser.pc->sc->hasExplicitUseStrict();
+    asmJSMetadata->strict = parser.pc->sc()->strict() && !parser.pc->sc()->hasExplicitUseStrict();
     asmJSMetadata->scriptSource.reset(parser.ss);
 
     bool atEnd = cursor == entry.memory + entry.serializedSize;
@@ -8556,7 +8540,7 @@ js::CompileAsmJS(ExclusiveContext* cx, AsmJSParser& parser, ParseNode* stmtList,
 
     // The module function dynamically links the AsmJSModule when called and
     // generates a set of functions wrapping all the exports.
-    FunctionBox* funbox = parser.pc->maybeFunction->pn_funbox;
+    FunctionBox* funbox = parser.pc->functionBox();
     RootedFunction moduleFun(cx, NewAsmJSModuleFunction(cx, funbox->function(), moduleObj));
     if (!moduleFun)
         return false;

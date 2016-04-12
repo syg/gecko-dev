@@ -5006,7 +5006,7 @@ MFunctionEnvironment::foldsTo(TempAllocator& alloc)
     if (!input()->isLambda())
         return this;
 
-    return input()->toLambda()->scopeChain();
+    return input()->toLambda()->environmentChain();
 }
 
 static bool

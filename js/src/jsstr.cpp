@@ -38,13 +38,13 @@
 #if ENABLE_INTL_API
 #include "unicode/unorm.h"
 #endif
+#include "vm/EnvironmentObject.h"
 #include "vm/GlobalObject.h"
 #include "vm/Interpreter.h"
 #include "vm/Opcodes.h"
 #include "vm/Printer.h"
 #include "vm/RegExpObject.h"
 #include "vm/RegExpStatics.h"
-#include "vm/ScopeObject.h"
 #include "vm/StringBuffer.h"
 
 #include "vm/Interpreter-inl.h"

@@ -184,6 +184,7 @@ namespace jit {
     _(JSOP_PUSHBLOCKSCOPE)     \
     _(JSOP_POPBLOCKSCOPE)      \
     _(JSOP_FRESHENBLOCKSCOPE)  \
+    _(JSOP_RECREATEBLOCKSCOPE) \
     _(JSOP_DEBUGLEAVEBLOCK)    \
     _(JSOP_EXCEPTION)          \
     _(JSOP_DEBUGGER)           \
@@ -217,6 +218,7 @@ namespace jit {
     _(JSOP_SPREADSUPERCALL)    \
     _(JSOP_THROWSETCONST)      \
     _(JSOP_THROWSETALIASEDCONST) \
+    _(JSOP_THROWSETCALLEE) \
     _(JSOP_INITHIDDENPROP_GETTER) \
     _(JSOP_INITHIDDENPROP_SETTER) \
     _(JSOP_INITHIDDENELEM)     \
@@ -298,7 +300,7 @@ class BaselineCompiler : public BaselineCompilerSpecific
     void emitProfilerEnterFrame();
     void emitProfilerExitFrame();
 
-    MOZ_MUST_USE bool initScopeChain();
+    MOZ_MUST_USE bool initEnvironmentChain();
 
     void storeValue(const StackValue* source, const Address& dest,
                     const ValueOperand& scratch);
@@ -336,9 +338,9 @@ class BaselineCompiler : public BaselineCompilerSpecific
 
     MOZ_MUST_USE bool addYieldOffset();
 
-    void getScopeCoordinateObject(Register reg);
-    Address getScopeCoordinateAddressFromObject(Register objReg, Register reg);
-    Address getScopeCoordinateAddress(Register reg);
+    void getEnvironmentCoordinateObject(Register reg);
+    Address getEnvironmentCoordinateAddressFromObject(Register objReg, Register reg);
+    Address getEnvironmentCoordinateAddress(Register reg);
 };
 
 extern const VMFunction NewArrayCopyOnWriteInfo;

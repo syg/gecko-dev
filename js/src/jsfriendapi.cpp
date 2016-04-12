@@ -30,8 +30,8 @@
 #include "jsobjinlines.h"
 #include "jsscriptinlines.h"
 
+#include "vm/EnvironmentObject-inl.h"
 #include "vm/NativeObject-inl.h"
-#include "vm/ScopeObject-inl.h"
 
 using namespace js;
 
@@ -419,9 +419,9 @@ js::GetOutermostEnclosingFunctionOfScriptedCaller(JSContext* cx)
         return nullptr;
 
     RootedFunction curr(cx, iter.callee(cx));
-    for (StaticScopeIter<NoGC> i(curr); !i.done(); i++) {
-        if (i.type() == StaticScopeIter<NoGC>::Function)
-            curr = &i.fun();
+    for (ScopeIter si(curr->nonLazyScript()); si; si++) {
+        if (si.kind() == ScopeKind::Function)
+            curr = si.scope()->as<FunctionScope>().canonicalFunction();
     }
 
     assertSameCompartment(cx, curr);
@@ -783,8 +783,8 @@ FormatFrame(JSContext* cx, const ScriptFrameIter& iter, char* buf, int num,
     RootedScript script(cx, iter.script());
     jsbytecode* pc = iter.pc();
 
-    RootedObject scopeChain(cx, iter.scopeChain(cx));
-    JSAutoCompartment ac(cx, scopeChain);
+    RootedObject envChain(cx, iter.environmentChain(cx));
+    JSAutoCompartment ac(cx, envChain);
 
     const char* filename = script->filename();
     unsigned lineno = PCToLineNumber(script, pc);
@@ -822,10 +822,10 @@ FormatFrame(JSContext* cx, const ScriptFrameIter& iter, char* buf, int num,
         bool first = true;
         for (unsigned i = 0; i < iter.numActualArgs(); i++) {
             RootedValue arg(cx);
-            if (i < iter.numFormalArgs() && script->formalIsAliased(i)) {
-                for (AliasedFormalIter fi(script); ; fi++) {
-                    if (fi.frameIndex() == i) {
-                        arg = iter.callObj(cx).aliasedVar(fi);
+            if (i < iter.numFormalArgs()) {
+                for (ClosedOverArgumentSlotIter fi(script); ; fi++) {
+                    if (fi.argumentSlot() == i) {
+                        arg = iter.callObj(cx).aliasedBinding(fi);
                         break;
                     }
                 }
@@ -854,8 +854,8 @@ FormatFrame(JSContext* cx, const ScriptFrameIter& iter, char* buf, int num,
             const char* name = nullptr;
 
             if (i < iter.numFormalArgs()) {
-                MOZ_ASSERT(i == bi.argIndex());
-                name = nameBytes.encodeLatin1(cx, bi->name());
+                MOZ_ASSERT(bi.argumentSlot() == i);
+                name = nameBytes.encodeLatin1(cx, bi.name());
                 if (!name)
                     return nullptr;
                 bi++;

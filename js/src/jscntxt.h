@@ -213,6 +213,10 @@ class ExclusiveContext : public ContextFriendFields,
         return perThreadData->dtoaState;
     }
 
+    frontend::NameMapPools& frontendMapPool() {
+        return perThreadData->frontendMapPool;
+    }
+
     /*
      * "Entering" a compartment changes cx->compartment (which changes
      * cx->global). Note that this does not push any InterpreterFrame which means
@@ -268,10 +272,18 @@ class ExclusiveContext : public ContextFriendFields,
     // AutoCompartment from which it's called.
     inline js::Handle<js::GlobalObject*> global() const;
 
-    // Methods to access runtime data that must be protected by locks.
-    frontend::ParseMapPool& parseMapPool(AutoLockForExclusiveAccess& lock) {
-        return runtime_->parseMapPool(lock);
+    // The cached empty global scopes on the runtime. This is only safe if
+    // called after the first GlobalObject has been created.
+    js::Handle<js::GlobalScope*> emptyGlobalScope() const {
+        MOZ_ASSERT(runtime_->emptyGlobalScope);
+        return runtime_->emptyGlobalScope;
     }
+    js::Handle<js::GlobalScope*> emptyNonSyntacticScope() const {
+        MOZ_ASSERT(runtime_->emptyNonSyntacticScope);
+        return runtime_->emptyNonSyntacticScope;
+    }
+
+    // Methods to access runtime data that must be protected by locks.
     AtomSet& atoms(js::AutoLockForExclusiveAccess& lock) {
         return runtime_->atoms(lock);
     }
