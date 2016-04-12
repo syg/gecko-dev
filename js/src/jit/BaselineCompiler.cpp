@@ -3031,6 +3031,12 @@ BaselineCompiler::emit_JSOP_THROWSETALIASEDCONST()
 }
 
 bool
+BaselineCompiler::emit_JSOP_THROWSETCALLEE()
+{
+    return emitThrowConstAssignment();
+}
+
+bool
 BaselineCompiler::emitUninitializedLexicalCheck(const ValueOperand& val)
 {
     Label done;

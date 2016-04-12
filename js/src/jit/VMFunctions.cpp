@@ -702,10 +702,10 @@ DebugEpilogue(JSContext* cx, BaselineFrame* frame, jsbytecode* pc, bool ok)
     // In both cases we have to pop debug scopes.
     ok = Debugger::onLeaveFrame(cx, frame, pc, ok);
 
-    // Unwind to the outermost scope and set pc to the end of the script,
-    // regardless of error.
-    ScopeIter si(cx, frame, pc);
-    UnwindAllScopesInFrame(cx, si);
+    // Unwind to the outermost environment and set pc to the end of the
+    // script, regardless of error.
+    EnvironmentIter ei(cx, frame, pc);
+    UnwindAllEnvironmentsInFrame(cx, ei);
     JSScript* script = frame->script();
     frame->setOverridePc(script->lastPC());
 

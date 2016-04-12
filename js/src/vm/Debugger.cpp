@@ -4232,8 +4232,8 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
             if (p) {
                 /* Is our newly found script deeper than the last one we found? */
                 JSScript* incumbent = p->value();
-                if (StaticScopeChainLength(script->innermostStaticScope()) >
-                    StaticScopeChainLength(incumbent->innermostStaticScope()))
+                if (ScopeChainLength(script->innermostScope()) >
+                    ScopeChainLength(incumbent->innermostScope()))
                 {
                     p->value() = script;
                 }
@@ -5346,7 +5346,7 @@ DebuggerScript_getChildScripts(JSContext* cx, unsigned argc, Value* vp)
         RootedFunction fun(cx);
         RootedScript funScript(cx);
         RootedObject obj(cx), s(cx);
-        for (uint32_t i = script->innerObjectsStart(); i < objects->length; i++) {
+        for (uint32_t i = 0; i < objects->length; i++) {
             obj = objects->vector[i];
             if (obj->is<JSFunction>()) {
                 fun = &obj->as<JSFunction>();
@@ -7423,43 +7423,8 @@ EvaluateInEnv(JSContext* cx, Handle<Env*> env, AbstractFramePtr frame,
     assertSameCompartment(cx, env, frame);
     MOZ_ASSERT_IF(frame, pc);
 
-    /*
-     * Pass in a StaticEvalScope *not* linked to env for evalStaticScope, as
-     * ScopeIter should stop at any non-ScopeObject or non-syntactic With
-     * boundaries, and we are putting a DebugScopeProxy or non-syntactic With on
-     * the scope chain.
-     */
-    Rooted<StaticScope*> enclosingStaticScope(cx);
-    if (!IsGlobalLexicalScope(env)) {
-        // If we are doing a global evalWithBindings, we will still need to
-        // link the static global lexical scope to the static non-syntactic
-        // scope.
-        if (IsGlobalLexicalScope(env->enclosingScope()))
-            enclosingStaticScope = &cx->global()->lexicalScope().staticBlock();
-        enclosingStaticScope = StaticNonSyntacticScope::create(cx, enclosingStaticScope);
-        if (!enclosingStaticScope)
-            return false;
-    } else {
-        enclosingStaticScope = &cx->global()->lexicalScope().staticBlock();
-    }
-
-    // Do not consider executeInGlobal{WithBindings} as an eval, but instead
-    // as executing a series of statements at the global level. This is to
-    // circumvent the fresh lexical scope that all eval have, so that the
-    // users of executeInGlobal, like the web console, may add new bindings to
-    // the global scope.
-    Rooted<StaticScope*> staticScope(cx);
-    if (frame) {
-        staticScope = StaticEvalScope::create(cx, enclosingStaticScope);
-        if (!staticScope)
-            return false;
-    } else {
-        staticScope = enclosingStaticScope;
-    }
-
     CompileOptions options(cx);
     options.setIsRunOnce(true)
-           .setForEval(true)
            .setNoScriptRval(false)
            .setFileAndLine(filename, lineno)
            .setCanLazilyParse(false)
@@ -7467,18 +7432,26 @@ EvaluateInEnv(JSContext* cx, Handle<Env*> env, AbstractFramePtr frame,
            .maybeMakeStrictMode(frame ? frame.script()->strict() : false);
     RootedScript callerScript(cx, frame ? frame.script() : nullptr);
     SourceBufferHolder srcBuf(chars.start().get(), chars.length(), SourceBufferHolder::NoOwnership);
-    RootedScript script(cx, frontend::CompileScript(cx, &cx->tempLifoAlloc(), env, staticScope,
-                                                    callerScript, options, srcBuf,
-                                                    /* source = */ nullptr));
+    RootedScript script(cx);
+    ScopeKind scopeKind = IsGlobalLexicalScope(env) ? ScopeKind::Global : ScopeKind::NonSyntactic;
+
+    if (frame) {
+        script = frontend::CompileEvalScript(cx, &cx->tempLifoAlloc(), env, cx->emptyGlobalScope(),
+                                             options, srcBuf);
+        if (script)
+            script->setActiveEval();
+    } else {
+        // Do not consider executeInGlobal{WithBindings} as an eval, but instead
+        // as executing a series of statements at the global level. This is to
+        // circumvent the fresh lexical scope that all eval have, so that the
+        // users of executeInGlobal, like the web console, may add new bindings to
+        // the global scope.
+        script = frontend::CompileGlobalScript(cx, &cx->tempLifoAlloc(), scopeKind, options,
+                                               srcBuf);
+    }
+
     if (!script)
         return false;
-
-    // Again, executeInGlobal is not considered eval.
-    if (frame) {
-        if (script->strict())
-            staticScope->as<StaticEvalScope>().setStrict();
-        script->setActiveEval();
-    }
 
     return ExecuteKernel(cx, script, *env, NullValue(), frame, rval.address());
 }
@@ -7884,14 +7857,14 @@ DebuggerObject_getParameterNames(JSContext* cx, unsigned argc, Value* vp)
         MOZ_ASSERT(fun->nargs() == script->bindings.numArgs());
 
         if (fun->nargs() > 0) {
-            BindingIter bi(script);
-            for (size_t i = 0; i < fun->nargs(); i++, bi++) {
-                MOZ_ASSERT(bi.argIndex() == i);
+            SimpleFormalParameterIter fi(script);
+            for (size_t i = 0; i < fun->nargs(); i++, fi++) {
+                MOZ_ASSERT(fi.position() == i);
                 Value v;
-                if (bi->name()->length() == 0)
+                if (fi.name()->length() == 0)
                     v = UndefinedValue();
                 else
-                    v = StringValue(bi->name());
+                    v = StringValue(fi.name());
                 result->setDenseElement(i, v);
             }
         }

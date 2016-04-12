@@ -385,6 +385,8 @@ template<> const char16_t TracerConcrete<js::BaseShape>::concreteTypeName[] =
     MOZ_UTF16("js::BaseShape");
 template<> const char16_t TracerConcrete<js::ObjectGroup>::concreteTypeName[] =
     MOZ_UTF16("js::ObjectGroup");
+template<> const char16_t TracerConcrete<js::Scope>::concreteTypeName[] =
+    MOZ_UTF16("js::Scope");
 
 
 // Instantiate all the TracerConcrete and templates here, where

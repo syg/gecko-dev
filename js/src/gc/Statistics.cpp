@@ -155,6 +155,7 @@ static const PhaseInfo phases[] = {
         { PHASE_SWEEP_OBJECT, "Sweep Object", PHASE_SWEEP, 33 },
         { PHASE_SWEEP_STRING, "Sweep String", PHASE_SWEEP, 34 },
         { PHASE_SWEEP_SCRIPT, "Sweep Script", PHASE_SWEEP, 35 },
+        { PHASE_SWEEP_SCOPE, "Sweep Scope", PHASE_SWEEP, 59 },
         { PHASE_SWEEP_SHAPE, "Sweep Shape", PHASE_SWEEP, 36 },
         { PHASE_SWEEP_JITCODE, "Sweep JIT code", PHASE_SWEEP, 37 },
         { PHASE_FINALIZE_END, "Finalize End Callback", PHASE_SWEEP, 38 },

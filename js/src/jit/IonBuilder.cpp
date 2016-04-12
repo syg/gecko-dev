@@ -106,12 +106,8 @@ jit::NewBaselineFrameInspector(TempAllocator* temp, BaselineFrame* frame, Compil
     if (!inspector->varTypes.reserve(frame->numValueSlots()))
         return nullptr;
     for (size_t i = 0; i < frame->numValueSlots(); i++) {
-        if (info->isSlotAliasedAtOsr(i + info->firstLocalSlot())) {
-            inspector->varTypes.infallibleAppend(TypeSet::UndefinedType());
-        } else {
-            TypeSet::Type type = TypeSet::GetMaybeUntrackedValueType(*frame->valueSlot(i));
-            inspector->varTypes.infallibleAppend(type);
-        }
+        TypeSet::Type type = TypeSet::GetMaybeUntrackedValueType(*frame->valueSlot(i));
+        inspector->varTypes.infallibleAppend(type);
     }
 
     return inspector;
@@ -1400,7 +1396,7 @@ IonBuilder::maybeAddOsrTypeBarriers()
         // Aliased slots are never accessed, since they need to go through
         // the callobject. The typebarriers are added there and can be
         // discarded here.
-        if (info().isSlotAliasedAtOsr(slot))
+        if (info().isSlotAliased(slot))
             continue;
 
         MInstruction* def = osrBlock->getSlot(slot)->toInstruction();
@@ -1797,6 +1793,7 @@ IonBuilder::inspectOpcode(JSOp op)
 
       case JSOP_THROWSETCONST:
       case JSOP_THROWSETALIASEDCONST:
+      case JSOP_THROWSETCALLEE:
         return jsop_throwsetconst();
 
       case JSOP_CHECKLEXICAL:
@@ -7877,11 +7874,11 @@ IonBuilder::newOsrPreheader(MBasicBlock* predecessor, jsbytecode* loopEntry, jsb
     for (uint32_t i = info().startArgSlot(); i < osrBlock->stackDepth(); i++) {
         MDefinition* existing = current->getSlot(i);
         MDefinition* def = osrBlock->getSlot(i);
-        MOZ_ASSERT_IF(!needsArgsObj || !info().isSlotAliasedAtOsr(i), def->type() == MIRType::Value);
+        MOZ_ASSERT_IF(!needsArgsObj || !info().isSlotAliased(i), def->type() == MIRType::Value);
 
         // Aliased slots are never accessed, since they need to go through
         // the callobject. No need to type them here.
-        if (info().isSlotAliasedAtOsr(i))
+        if (info().isSlotAliased(i))
             continue;
 
         def->setResultType(existing->type());
@@ -7927,7 +7924,7 @@ IonBuilder::newPendingLoopHeader(MBasicBlock* predecessor, jsbytecode* pc, bool 
 
             // The value of aliased args and slots are in the callobject. So we can't
             // the value from the baseline frame.
-            if (info().isSlotAliasedAtOsr(i))
+            if (info().isSlotAliased(i))
                 continue;
 
             MPhi* phi = block->getSlot(i)->toPhi();

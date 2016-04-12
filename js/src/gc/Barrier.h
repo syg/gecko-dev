@@ -881,6 +881,7 @@ class ArrayBufferObject;
 class NestedScopeObject;
 class DebugScopeObject;
 class GlobalObject;
+class Scope;
 class ScriptSourceObject;
 class Shape;
 class BaseShape;
@@ -916,6 +917,7 @@ typedef GCPtr<Shape*> GCPtrShape;
 typedef GCPtr<UnownedBaseShape*> GCPtrUnownedBaseShape;
 typedef GCPtr<jit::JitCode*> GCPtrJitCode;
 typedef GCPtr<ObjectGroup*> GCPtrObjectGroup;
+typedef GCPtr<Scope*> GCPtrScope;
 
 typedef PreBarriered<Value> PreBarrieredValue;
 typedef GCPtr<Value> GCPtrValue;

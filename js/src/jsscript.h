@@ -46,7 +46,6 @@ namespace jit {
 # define BASELINE_DISABLED_SCRIPT ((js::jit::BaselineScript*)0x1)
 
 class BreakpointSite;
-class BindingIter;
 class Debugger;
 class LazyScript;
 class ModuleObject;
@@ -103,7 +102,7 @@ namespace js {
 
 // A block scope has a range in bytecode: it is entered at some offset, and left
 // at some later offset.  Scopes can be nested.  Given an offset, the
-// BlockScopeNote containing that offset whose with the highest start value
+// ScopeNote containing that offset whose with the highest start value
 // indicates the block scope.  The block scope list is sorted by increasing
 // start value.
 //
@@ -112,13 +111,13 @@ namespace js {
 // are popping the block chain in preparation for a goto.  These exits are also
 // nested with respect to outer scopes.  The scopes in these exits are indicated
 // by the "index" field, just like any other block.  If a nonlocal exit pops the
-// last block scope, the index will be NoBlockScopeIndex.
+// last block scope, the index will be NoScopeIndex.
 //
-struct BlockScopeNote {
-    static const uint32_t NoBlockScopeIndex = UINT32_MAX;
+struct ScopeNote {
+    static const uint32_t NoScopeIndex = UINT32_MAX;
 
     uint32_t        index;      // Index of NestedStaticScope in the object
-                                // array, or NoBlockScopeIndex if there is no
+                                // array, or NoScopeIndex if there is no
                                 // block scope in this range.
     uint32_t        start;      // Bytecode offset at which this scope starts,
                                 // from script->main().
@@ -136,14 +135,19 @@ struct ObjectArray {
     uint32_t length;            // Count of indexed objects.
 };
 
+struct ScopeArray {
+    js::GCPtrScope* vector;     // Array of indexed scopes.
+    uint32_t        length;     // Count of indexed scopes.
+};
+
 struct TryNoteArray {
     JSTryNote*      vector;     // Array of indexed try notes.
     uint32_t        length;     // Count of indexed try notes.
 };
 
-struct BlockScopeArray {
-    BlockScopeNote* vector;     // Array of indexed BlockScopeNote records.
-    uint32_t        length;     // Count of indexed try notes.
+struct ScopeNoteArray {
+    ScopeNote* vector;          // Array of indexed ScopeNote records.
+    uint32_t   length;          // Count of indexed try notes.
 };
 
 class YieldOffsetArray {
@@ -335,10 +339,6 @@ class Bindings
 
     /* Return the initial shape of call objects created for this scope. */
     Shape* callObjShape() const { return callObjShape_; }
-
-    /* Convenience method to get the var index of 'arguments' or 'this'. */
-    static BindingIter argumentsBinding(ExclusiveContext* cx, HandleScript script);
-    static BindingIter thisBinding(ExclusiveContext* cx, HandleScript script);
 
     /* Return whether the binding at bindingIndex is aliased. */
     bool bindingIsAliased(uint32_t bindingIndex);
@@ -1002,7 +1002,10 @@ class JSScript : public js::gc::TenuredCell
 
     js::GCPtrFunction function_;
     js::GCPtrModuleObject module_;
-    js::GCPtrObject enclosingStaticScope_;
+
+    // The body scope of the script. GlobalScope, FunctionScope, EvalScope, or
+    // ModuleScope.
+    js::GCPtrScope bodyScope_;
 
     /*
      * Information attached by Ion. Nexto a valid IonScript this could be
@@ -1068,8 +1071,9 @@ class JSScript : public js::gc::TenuredCell
     enum ArrayKind {
         CONSTS,
         OBJECTS,
+        SCOPES,
         TRYNOTES,
-        BLOCK_SCOPES,
+        SCOPENOTES,
         ARRAY_KIND_BITS
     };
 
@@ -1085,9 +1089,6 @@ class JSScript : public js::gc::TenuredCell
 
     // No need for result value of last expression statement.
     bool noScriptRval_:1;
-
-    // Can call getCallerFunction().
-    bool savedCallerFun_:1;
 
     // Code is in strict mode.
     bool strict_:1;
@@ -1210,7 +1211,6 @@ class JSScript : public js::gc::TenuredCell
 
   public:
     static JSScript* Create(js::ExclusiveContext* cx,
-                            js::HandleObject enclosingScope, bool savedCallerFun,
                             const JS::ReadOnlyCompileOptions& options,
                             js::HandleObject sourceObject, uint32_t sourceStart,
                             uint32_t sourceEnd);
@@ -1222,8 +1222,9 @@ class JSScript : public js::gc::TenuredCell
     // successfully creating any kind (function or other) of new JSScript.
     // However, callers of fullyInitFromEmitter() do not need to do this.
     static bool partiallyInit(js::ExclusiveContext* cx, JS::Handle<JSScript*> script,
-                              uint32_t nconsts, uint32_t nobjects, uint32_t ntrynotes,
-                              uint32_t nblockscopes, uint32_t nyieldoffsets, uint32_t nTypeSets);
+                              uint32_t nconsts, uint32_t nobjects, uint32_t nscopes,
+                              uint32_t ntrynotes, uint32_t nscopenotes, uint32_t nyieldoffsets,
+                              uint32_t nTypeSets);
     static bool fullyInitFromEmitter(js::ExclusiveContext* cx, JS::Handle<JSScript*> script,
                                      js::frontend::BytecodeEmitter* bce);
     static void linkToFunctionFromEmitter(js::ExclusiveContext* cx, JS::Handle<JSScript*> script,
@@ -1350,8 +1351,6 @@ class JSScript : public js::gc::TenuredCell
     bool noScriptRval() const {
         return noScriptRval_;
     }
-
-    bool savedCallerFun() const { return savedCallerFun_; }
 
     bool strict() const {
         return strict_;
@@ -1679,7 +1678,7 @@ class JSScript : public js::gc::TenuredCell
     bool isForEval() const { return isCachedEval() || isActiveEval(); }
 
     /* Return whether this is a 'direct eval' script in a function scope. */
-    bool isDirectEvalInFunction() const { return isForEval() && savedCallerFun(); }
+    bool isDirectEvalInFunction() const { return isForEval(); /* TODOshu check scope for caller fun */ }
 
     /*
      * Return whether this script is a top-level script.
@@ -1703,9 +1702,14 @@ class JSScript : public js::gc::TenuredCell
     inline js::GlobalObject& global() const;
     js::GlobalObject& uninlinedGlobal() const;
 
+    js::Scope* bodyScope() const {
+        return bodyScope_;
+    }
+
     /* See StaticScopeIter comment. */
     JSObject* enclosingStaticScope() const {
-        return enclosingStaticScope_;
+        // TODOshu remove
+        return nullptr;
     }
 
     // Switch the script over from the off-thread compartment's static
@@ -1765,19 +1769,21 @@ class JSScript : public js::gc::TenuredCell
     void setHasArray(ArrayKind kind) { hasArrayBits |= (1 << kind); }
     void cloneHasArray(JSScript* script) { hasArrayBits = script->hasArrayBits; }
 
-    bool hasConsts() const        { return hasArray(CONSTS);      }
-    bool hasObjects() const       { return hasArray(OBJECTS);     }
-    bool hasTrynotes() const      { return hasArray(TRYNOTES);    }
-    bool hasBlockScopes() const   { return hasArray(BLOCK_SCOPES); }
-    bool hasYieldOffsets() const  { return isGenerator(); }
+    bool hasConsts() const       { return hasArray(CONSTS); }
+    bool hasObjects() const      { return hasArray(OBJECTS); }
+    bool hasScopes() const       { return hasArray(SCOPES); }
+    bool hasTrynotes() const     { return hasArray(TRYNOTES); }
+    bool hasScopeNotes() const   { return hasArray(SCOPENOTES); }
+    bool hasYieldOffsets() const { return isGenerator(); }
 
     #define OFF(fooOff, hasFoo, t)   (fooOff() + (hasFoo() ? sizeof(t) : 0))
 
     size_t constsOffset() const       { return 0; }
-    size_t objectsOffset() const      { return OFF(constsOffset,      hasConsts,      js::ConstArray);      }
-    size_t trynotesOffset() const     { return OFF(objectsOffset,     hasObjects,     js::ObjectArray);     }
-    size_t blockScopesOffset() const  { return OFF(trynotesOffset,    hasTrynotes,    js::TryNoteArray);    }
-    size_t yieldOffsetsOffset() const { return OFF(blockScopesOffset, hasBlockScopes, js::BlockScopeArray); }
+    size_t objectsOffset() const      { return OFF(constsOffset,     hasConsts,     js::ConstArray); }
+    size_t scopesOffset() const       { return OFF(objectsOffset,    hasObjects,    js::ObjectArray); }
+    size_t trynotesOffset() const     { return OFF(scopesOffset,     hasScopes,     js::ScopeArray); }
+    size_t scopeNotesOffset() const   { return OFF(trynotesOffset,   hasTrynotes,   js::TryNoteArray); }
+    size_t yieldOffsetsOffset() const { return OFF(scopeNotesOffset, hasScopeNotes, js::ScopeNoteArray); }
 
     size_t dataSize() const { return dataSize_; }
 
@@ -1791,14 +1797,19 @@ class JSScript : public js::gc::TenuredCell
         return reinterpret_cast<js::ObjectArray*>(data + objectsOffset());
     }
 
+    js::ScopeArray* scopes() {
+        MOZ_ASSERT(hasScopes());
+        return reinterpret_cast<js::ScopeArray*>(data + scopesOffset());
+    }
+
     js::TryNoteArray* trynotes() const {
         MOZ_ASSERT(hasTrynotes());
         return reinterpret_cast<js::TryNoteArray*>(data + trynotesOffset());
     }
 
-    js::BlockScopeArray* blockScopes() {
-        MOZ_ASSERT(hasBlockScopes());
-        return reinterpret_cast<js::BlockScopeArray*>(data + blockScopesOffset());
+    js::ScopeNoteArray* scopeNotes() {
+        MOZ_ASSERT(hasScopeNotes());
+        return reinterpret_cast<js::ScopeNoteArray*>(data + scopeNotesOffset());
     }
 
     js::YieldOffsetArray& yieldOffsets() {
@@ -1836,14 +1847,15 @@ class JSScript : public js::gc::TenuredCell
         return arr->vector[index];
     }
 
-    size_t innerObjectsStart() {
-        // The first object contains the caller if savedCallerFun is used.
-        return savedCallerFun() ? 1 : 0;
-    }
-
     JSObject* getObject(jsbytecode* pc) {
         MOZ_ASSERT(containsPC(pc) && containsPC(pc + sizeof(uint32_t)));
         return getObject(GET_UINT32_INDEX(pc));
+    }
+
+    js::Scope* getScope(size_t index) {
+        js::ScopeArray* array = scopes();
+        MOZ_ASSERT(index < array->length);
+        return array->vector[index];
     }
 
     JSVersion getVersion() const {
@@ -1851,8 +1863,7 @@ class JSScript : public js::gc::TenuredCell
     }
 
     inline JSFunction* getFunction(size_t index);
-    inline JSFunction* getCallerFunction();
-    inline JSFunction* functionOrCallerFunction();
+    inline JSFunction* function();
 
     inline js::RegExpObject* getRegExp(size_t index);
     inline js::RegExpObject* getRegExp(jsbytecode* pc);
@@ -1866,17 +1877,12 @@ class JSScript : public js::gc::TenuredCell
     // The following 4 functions find the static scope just before the
     // execution of the instruction pointed to by pc.
 
-    js::NestedStaticScope* getStaticBlockScope(jsbytecode* pc);
-
-    // Returns the innermost static scope at pc if it falls within the extent
-    // of the script. Returns nullptr otherwise.
-    JSObject* innermostStaticScopeInScript(jsbytecode* pc);
+    js::Scope* getScope(jsbytecode* pc);
 
     // As innermostStaticScopeInScript, but returns the enclosing static scope
     // if the innermost static scope falls without the extent of the script.
-    JSObject* innermostStaticScope(jsbytecode* pc);
-
-    JSObject* innermostStaticScope() { return innermostStaticScope(main()); }
+    js::Scope* innermostScope(jsbytecode* pc);
+    js::Scope* innermostScope() { return innermostScope(main()); }
 
     /*
      * The isEmpty method tells whether this script has code that computes any
@@ -1893,10 +1899,8 @@ class JSScript : public js::gc::TenuredCell
         return JSOp(*pc) == JSOP_RETRVAL;
     }
 
-    bool bindingIsAliased(const js::BindingIter& bi);
     bool formalIsAliased(unsigned argSlot);
     bool formalLivesInArgumentsObject(unsigned argSlot);
-    bool localIsAliased(unsigned localSlot);
 
   private:
     /* Change this->stepMode to |newValue|. */
@@ -1992,95 +1996,6 @@ static_assert(sizeof(JSScript) % js::gc::CellSize == 0,
 namespace js {
 
 /*
- * Iterator over a script's bindings (formals and variables).
- * The order of iteration is:
- *  - first, formal arguments, from index 0 to numArgs
- *  - next, variables, from index 0 to numLocals
- */
-class BindingIter
-{
-    Binding* bindingArray_;
-    uint32_t numArgs_;
-    uint32_t count_;
-    uint32_t i_;
-    uint32_t unaliasedLocal_;
-
-    friend class ::JSScript;
-    friend class Bindings;
-
-    void init(const Bindings& bindings) {
-        // Bindings contained in a JSScript may be moved by the GC.  Copy the
-        // necessary fields into this object.
-        bindingArray_ = bindings.bindingArray();
-        numArgs_ = bindings.numArgs();
-        count_ = bindings.count();
-    }
-
-  public:
-    explicit BindingIter(Handle<Bindings> bindings)
-      : i_(0), unaliasedLocal_(0)
-    {
-        init(bindings);
-    }
-
-    explicit BindingIter(HandleScript script)
-      : i_(0), unaliasedLocal_(0)
-    {
-        init(script->bindings);
-    }
-
-    bool done() const { return i_ == count_; }
-    explicit operator bool() const { return !done(); }
-    BindingIter& operator++() { (*this)++; return *this; }
-
-    void operator++(int) {
-        MOZ_ASSERT(!done());
-        const Binding& binding = **this;
-        if (binding.kind() != Binding::ARGUMENT && !binding.aliased())
-            unaliasedLocal_++;
-        i_++;
-    }
-
-    // Stack slots are assigned to arguments (aliased and unaliased) and
-    // unaliased locals. frameIndex() returns the slot index. It's invalid to
-    // call this method when the iterator is stopped on an aliased local, as it
-    // has no stack slot.
-    uint32_t frameIndex() const {
-        MOZ_ASSERT(!done());
-        if (i_ < numArgs_)
-            return i_;
-        MOZ_ASSERT(!(*this)->aliased());
-        return unaliasedLocal_;
-    }
-
-    // If the current binding is an argument, argIndex() returns its index.
-    // It returns the same value as frameIndex(), as slots are allocated for
-    // both unaliased and aliased arguments.
-    uint32_t argIndex() const {
-        MOZ_ASSERT(!done());
-        MOZ_ASSERT(i_ < numArgs_);
-        return i_;
-    }
-    uint32_t argOrLocalIndex() const {
-        MOZ_ASSERT(!done());
-        return i_ < numArgs_ ? i_ : i_ - numArgs_;
-    }
-    uint32_t localIndex() const {
-        MOZ_ASSERT(!done());
-        MOZ_ASSERT(i_ >= numArgs_);
-        return i_ - numArgs_;
-    }
-    bool isBodyLevelLexical() const {
-        MOZ_ASSERT(!done());
-        const Binding& binding = **this;
-        return binding.kind() != Binding::ARGUMENT;
-    }
-
-    const Binding& operator*() const { MOZ_ASSERT(!done()); return bindingArray_[i_]; }
-    const Binding* operator->() const { MOZ_ASSERT(!done()); return &bindingArray_[i_]; }
-};
-
-/*
  * Iterator over the aliased formal bindings in ascending index order. This can
  * be veiwed as a filtering of BindingIter with predicate
  *   bi->aliased() && bi->kind() == Binding::ARGUMENT
@@ -2114,34 +2029,6 @@ class AliasedFormalIter
 // bytecode from its source.
 class LazyScript : public gc::TenuredCell
 {
-  public:
-    class FreeVariable
-    {
-        // Variable name is stored as a tagged JSAtom pointer.
-        uintptr_t bits_;
-
-        static const uintptr_t HOISTED_USE_BIT = 0x1;
-        static const uintptr_t MASK = ~HOISTED_USE_BIT;
-
-      public:
-        explicit FreeVariable()
-          : bits_(0)
-        { }
-
-        explicit FreeVariable(JSAtom* name)
-          : bits_(uintptr_t(name))
-        {
-            // We rely on not requiring any write barriers so we can tag the
-            // pointer. This code needs to change if we start allocating
-            // JSAtoms inside the nursery.
-            MOZ_ASSERT(!IsInsideNursery(name));
-        }
-
-        JSAtom* atom() const { return (JSAtom*)(bits_ & MASK); }
-        void setIsHoistedUse() { bits_ |= HOISTED_USE_BIT; }
-        bool isHoistedUse() const { return bool(bits_ & HOISTED_USE_BIT); }
-    };
-
   private:
     // If non-nullptr, the script has been compiled and this is a forwarding
     // pointer to the result. This is a weak pointer: after relazification, we
@@ -2151,8 +2038,8 @@ class LazyScript : public gc::TenuredCell
     // Original function with which the lazy script is associated.
     GCPtrFunction function_;
 
-    // Function or block chain in which the script is nested, or nullptr.
-    GCPtrObject enclosingScope_;
+    // Scope in which the script is nested.
+    GCPtrScope enclosingScope_;
 
     // ScriptSourceObject. We leave this set to nullptr until we generate
     // bytecode for our immediate parent. This is never a CCW; we don't clone
@@ -2215,13 +2102,13 @@ class LazyScript : public gc::TenuredCell
                                  uint32_t lineno, uint32_t column);
 
   public:
-    // Create a LazyScript without initializing the freeVariables and the
-    // innerFunctions. To be GC-safe, the caller must initialize both vectors
-    // with valid atoms and functions.
-    static LazyScript* CreateRaw(ExclusiveContext* cx, HandleFunction fun,
-                                 uint32_t numFreeVariables, uint32_t numInnerFunctions,
-                                 JSVersion version, uint32_t begin, uint32_t end,
-                                 uint32_t lineno, uint32_t column);
+    // Create a LazyScript and initialize freeVariables and innerFunctions
+    // with the provided vectors.
+    static LazyScript* Create(ExclusiveContext* cx, HandleFunction fun,
+                              Handle<GCVector<JSAtom*>> freeVariables,
+                              Handle<GCVector<JSFunction*>> innerFunctions,
+                              JSVersion version, uint32_t begin, uint32_t end,
+                              uint32_t lineno, uint32_t column);
 
     // Create a LazyScript and initialize the freeVariables and the
     // innerFunctions with dummy values to be replaced in a later initialization
@@ -2233,7 +2120,7 @@ class LazyScript : public gc::TenuredCell
     // The sourceObjectScript argument must be non-null and is the script that
     // should be used to get the sourceObject_ of this lazyScript.
     static LazyScript* Create(ExclusiveContext* cx, HandleFunction fun,
-                              HandleScript script, HandleObject enclosingScope,
+                              HandleScript script, HandleScope enclosingScope,
                               HandleScript sourceObjectScript,
                               uint64_t packedData, uint32_t begin, uint32_t end,
                               uint32_t lineno, uint32_t column);
@@ -2258,7 +2145,7 @@ class LazyScript : public gc::TenuredCell
         return bool(script_);
     }
 
-    JSObject* enclosingScope() const {
+    Scope* enclosingScope() const {
         return enclosingScope_;
     }
 
@@ -2279,13 +2166,13 @@ class LazyScript : public gc::TenuredCell
         return (p_.version == JS_BIT(8) - 1) ? JSVERSION_UNKNOWN : JSVersion(p_.version);
     }
 
-    void setEnclosingScopeAndSource(JSObject* enclosingScope, ScriptSourceObject* sourceObject);
+    void setEnclosingScopeAndSource(Scope* enclosingScope, ScriptSourceObject* sourceObject);
 
     uint32_t numFreeVariables() const {
         return p_.numFreeVariables;
     }
-    FreeVariable* freeVariables() {
-        return (FreeVariable*)table_;
+    JSAtom** freeVariables() {
+        return (JSAtom**)table_;
     }
 
     uint32_t numInnerFunctions() const {
@@ -2538,7 +2425,7 @@ DescribeScriptedCallerForCompilation(JSContext* cx, MutableHandleScript maybeScr
                                      LineOption opt = NOT_CALLED_FROM_JSOP_EVAL);
 
 JSScript*
-CloneScriptIntoFunction(JSContext* cx, HandleObject enclosingScope, HandleFunction fun,
+CloneScriptIntoFunction(JSContext* cx, HandleScope enclosingScope, HandleFunction fun,
                         HandleScript src);
 
 JSScript*

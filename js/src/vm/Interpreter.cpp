@@ -40,6 +40,7 @@
 #include "vm/Debugger.h"
 #include "vm/GeneratorObject.h"
 #include "vm/Opcodes.h"
+#include "vm/Scope.h"
 #include "vm/Shape.h"
 #include "vm/Stopwatch.h"
 #include "vm/TraceLogging.h"
@@ -944,37 +945,39 @@ js::EnterWithOperation(JSContext* cx, AbstractFramePtr frame, HandleValue val,
 }
 
 static void
-PopScope(JSContext* cx, ScopeIter& si)
+PopEnvironment(JSContext* cx, EnvironmentIter& ei)
 {
-    switch (si.type()) {
-      case ScopeIter::Block:
+    switch (ei.type()) {
+      case EnvironmentIter::Block:
         if (cx->compartment()->isDebuggee())
-            DebugScopes::onPopBlock(cx, si);
-        if (si.staticBlock().needsClone())
-            si.initialFrame().popBlock(cx);
+            DebugScopes::onPopBlock(cx, ei);
+        if (ei.staticBlock().needsClone())
+            ei.initialFrame().popBlock(cx);
         break;
-      case ScopeIter::With:
-        si.initialFrame().popWith(cx);
+      case EnvironmentIter::With:
+        ei.initialFrame().popWith(cx);
         break;
-      case ScopeIter::Module:
-      case ScopeIter::Call:
-      case ScopeIter::Eval:
-      case ScopeIter::NonSyntactic:
+      case EnvironmentIter::Module:
+      case EnvironmentIter::Call:
+      case EnvironmentIter::Eval:
+      case EnvironmentIter::NonSyntactic:
         break;
     }
 }
 
-// Unwind scope chain and iterator to match the static scope corresponding to
+// Unwind environment chain and iterator to match the scope corresponding to
 // the given bytecode position.
 void
-js::UnwindScope(JSContext* cx, ScopeIter& si, jsbytecode* pc)
+js::UnwindEnvironment(JSContext* cx, EnvironmentIter& ei, jsbytecode* pc)
 {
-    if (!si.withinInitialFrame())
+    if (!ei.withinInitialFrame())
         return;
 
-    RootedObject staticScope(cx, si.initialFrame().script()->innermostStaticScope(pc));
-    for (; si.maybeStaticScope() != staticScope; ++si)
-        PopScope(cx, si);
+    RootedScope scope(cx, ei.initialFrame().script()->innermostScope(pc));
+    /* TODOshu
+    for (; ei.maybeStaticScope() != staticScope; ++ei)
+        PopEnvironment(cx, ei);
+    */
 }
 
 // Unwind all scopes. This is needed because block scopes may cover the
@@ -985,10 +988,10 @@ js::UnwindScope(JSContext* cx, ScopeIter& si, jsbytecode* pc)
 // will have no pc location distinguishing the first block scope from the
 // outermost function scope.
 void
-js::UnwindAllScopesInFrame(JSContext* cx, ScopeIter& si)
+js::UnwindAllEnvironmentsInFrame(JSContext* cx, EnvironmentIter& ei)
 {
-    for (; si.withinInitialFrame(); ++si)
-        PopScope(cx, si);
+    for (; ei.withinInitialFrame(); ++ei)
+        PopEnvironment(cx, ei);
 }
 
 // Compute the pc needed to unwind the scope to the beginning of a try
@@ -1000,7 +1003,7 @@ js::UnwindAllScopesInFrame(JSContext* cx, ScopeIter& si)
 // will have no pc location distinguishing the try block scope from the inner
 // let block scope.
 jsbytecode*
-js::UnwindScopeToTryPc(JSScript* script, JSTryNote* tn)
+js::UnwindEnvironmentToTryPc(JSScript* script, JSTryNote* tn)
 {
     jsbytecode* pc = script->main() + tn->start;
     if (tn->kind == JSTRY_CATCH || tn->kind == JSTRY_FINALLY) {
@@ -1011,10 +1014,10 @@ js::UnwindScopeToTryPc(JSScript* script, JSTryNote* tn)
 }
 
 static bool
-ForcedReturn(JSContext* cx, ScopeIter& si, InterpreterRegs& regs, bool frameOk = true)
+ForcedReturn(JSContext* cx, EnvironmentIter& ei, InterpreterRegs& regs, bool frameOk = true)
 {
     bool ok = Debugger::onLeaveFrame(cx, regs.fp(), regs.pc, frameOk);
-    UnwindAllScopesInFrame(cx, si);
+    UnwindAllEnvironmentsInFrame(cx, ei);
     // Point the frame to the end of the script, regardless of error. The
     // caller must jump to the correct continuation depending on 'ok'.
     regs.setToEndOfScript();
@@ -1024,15 +1027,15 @@ ForcedReturn(JSContext* cx, ScopeIter& si, InterpreterRegs& regs, bool frameOk =
 static bool
 ForcedReturn(JSContext* cx, InterpreterRegs& regs)
 {
-    ScopeIter si(cx, regs.fp(), regs.pc);
-    return ForcedReturn(cx, si, regs);
+    EnvironmentIter ei(cx, regs.fp(), regs.pc);
+    return ForcedReturn(cx, ei, regs);
 }
 
 static void
-SettleOnTryNote(JSContext* cx, JSTryNote* tn, ScopeIter& si, InterpreterRegs& regs)
+SettleOnTryNote(JSContext* cx, JSTryNote* tn, EnvironmentIter& ei, InterpreterRegs& regs)
 {
-    // Unwind the scope to the beginning of the JSOP_TRY.
-    UnwindScope(cx, si, UnwindScopeToTryPc(regs.fp()->script(), tn));
+    // Unwind the environment to the beginning of the JSOP_TRY.
+    UnwindEnvironment(cx, ei, UnwindEnvironmentToTryPc(regs.fp()->script(), tn));
 
     // Set pc to the first bytecode after the the try note to point
     // to the beginning of catch or finally.
@@ -1081,7 +1084,7 @@ enum HandleErrorContinuation
 };
 
 static HandleErrorContinuation
-ProcessTryNotes(JSContext* cx, ScopeIter& si, InterpreterRegs& regs)
+ProcessTryNotes(JSContext* cx, EnvironmentIter& ei, InterpreterRegs& regs)
 {
     for (TryNoteIterInterpreter tni(cx, regs); !tni.done(); ++tni) {
         JSTryNote* tn = *tni;
@@ -1091,11 +1094,11 @@ ProcessTryNotes(JSContext* cx, ScopeIter& si, InterpreterRegs& regs)
             /* Catch cannot intercept the closing of a generator. */
             if (cx->isClosingGenerator())
                 break;
-            SettleOnTryNote(cx, tn, si, regs);
+            SettleOnTryNote(cx, tn, ei, regs);
             return CatchContinuation;
 
           case JSTRY_FINALLY:
-            SettleOnTryNote(cx, tn, si, regs);
+            SettleOnTryNote(cx, tn, ei, regs);
             return FinallyContinuation;
 
           case JSTRY_FOR_IN: {
@@ -1110,7 +1113,7 @@ ProcessTryNotes(JSContext* cx, ScopeIter& si, InterpreterRegs& regs)
                 // onExceptionUnwind should be called anew with the new
                 // location of the throw (the iterator). Indeed, we must
                 // settle to avoid infinitely handling the same exception.
-                SettleOnTryNote(cx, tn, si, regs);
+                SettleOnTryNote(cx, tn, ei, regs);
                 return ErrorReturnContinuation;
             }
             break;
@@ -1156,7 +1159,7 @@ HandleError(JSContext* cx, InterpreterRegs& regs)
             counts->numExec()++;
     }
 
-    ScopeIter si(cx, regs.fp(), regs.pc);
+    EnvironmentIter ei(cx, regs.fp(), regs.pc);
     bool ok = false;
 
   again:
@@ -1174,7 +1177,7 @@ HandleError(JSContext* cx, InterpreterRegs& regs)
 
               case JSTRAP_RETURN:
                 UnwindIteratorsForUncatchableException(cx, regs);
-                if (!ForcedReturn(cx, si, regs))
+                if (!ForcedReturn(cx, ei, regs))
                     return ErrorReturnContinuation;
                 return SuccessfulReturnContinuation;
 
@@ -1183,7 +1186,7 @@ HandleError(JSContext* cx, InterpreterRegs& regs)
             }
         }
 
-        HandleErrorContinuation res = ProcessTryNotes(cx, si, regs);
+        HandleErrorContinuation res = ProcessTryNotes(cx, ei, regs);
         switch (res) {
           case SuccessfulReturnContinuation:
             break;
@@ -1205,7 +1208,7 @@ HandleError(JSContext* cx, InterpreterRegs& regs)
         // callback, which cannot easily force a return.
         if (MOZ_UNLIKELY(cx->isPropagatingForcedReturn())) {
             cx->clearPropagatingForcedReturn();
-            if (!ForcedReturn(cx, si, regs))
+            if (!ForcedReturn(cx, ei, regs))
                 return ErrorReturnContinuation;
             return SuccessfulReturnContinuation;
         }
@@ -1215,7 +1218,7 @@ HandleError(JSContext* cx, InterpreterRegs& regs)
 
     // After this point, we will pop the frame regardless. Settle the frame on
     // the end of the script.
-    UnwindAllScopesInFrame(cx, si);
+    UnwindAllEnvironmentsInFrame(cx, ei);
     regs.setToEndOfScript();
 
     return ok ? SuccessfulReturnContinuation : ErrorReturnContinuation;
@@ -1432,12 +1435,14 @@ SetObjectElementOperation(JSContext* cx, HandleObject obj, HandleId id, HandleVa
  * ES6 12.3.5.3 MakeSuperPropertyReference() also uses this code.
  */
 static JSFunction&
-GetSuperEnvFunction(JSContext *cx, InterpreterRegs& regs)
+GetSuperEnvFunction(JSContext* cx, InterpreterRegs& regs)
 {
-    ScopeIter si(cx, regs.fp()->scopeChain(), regs.fp()->script()->innermostStaticScope(regs.pc));
-    for (; !si.done(); ++si) {
-        if (si.hasSyntacticScopeObject() && si.type() == ScopeIter::Call) {
-            JSFunction& callee = si.scope().as<CallObject>().callee();
+    JSObject* environment = regs.fp()->scopeChain();
+    //Scope* scope = regs.fp()->script()->innermostScope(regs.pc);
+    // TODOshu fix EnvironmentIter.
+    for (EnvironmentIter ei(cx, environment, nullptr); !ei.done(); ++ei) {
+        if (ei.hasSyntacticScopeObject() && ei.type() == EnvironmentIter::Call) {
+            JSFunction& callee = ei.scope().as<CallObject>().callee();
 
             // Arrow functions don't have the information we're looking for,
             // their enclosing scopes do. Nevertheless, they might have call
@@ -1794,7 +1799,6 @@ CASE(JSOP_NOP_DESTRUCTURING)
 CASE(JSOP_UNUSED14)
 CASE(JSOP_UNUSED65)
 CASE(JSOP_UNUSED149)
-CASE(JSOP_UNUSED179)
 CASE(JSOP_UNUSED180)
 CASE(JSOP_UNUSED181)
 CASE(JSOP_UNUSED182)
@@ -3205,12 +3209,13 @@ CASE(JSOP_SETALIASEDVAR)
 {
     ScopeCoordinate sc = ScopeCoordinate(REGS.pc);
     ScopeObject& obj = REGS.fp()->aliasedVarScope(sc);
-    SetAliasedVarOperation(cx, script, REGS.pc, obj, sc, REGS.sp[-1], CheckLexical);
+    SetAliasedVarOperation(cx, script, REGS.pc, obj, sc, REGS.sp[-1], CheckTDZ);
 }
 END_CASE(JSOP_SETALIASEDVAR)
 
 CASE(JSOP_THROWSETCONST)
 CASE(JSOP_THROWSETALIASEDCONST)
+CASE(JSOP_THROWSETCALLEE)
 {
     ReportRuntimeConstAssignment(cx, script, REGS.pc);
     goto error;
@@ -3246,7 +3251,7 @@ CASE(JSOP_INITALIASEDLEXICAL)
 {
     ScopeCoordinate sc = ScopeCoordinate(REGS.pc);
     ScopeObject& obj = REGS.fp()->aliasedVarScope(sc);
-    SetAliasedVarOperation(cx, script, REGS.pc, obj, sc, REGS.sp[-1], DontCheckLexical);
+    SetAliasedVarOperation(cx, script, REGS.pc, obj, sc, REGS.sp[-1], DontCheckTDZ);
 }
 END_CASE(JSOP_INITALIASEDLEXICAL)
 
@@ -3695,7 +3700,8 @@ END_CASE(JSOP_PUSHBLOCKSCOPE)
 
 CASE(JSOP_POPBLOCKSCOPE)
 {
-#ifdef DEBUG
+#if 0
+    // TODOshu
     // Pop block from scope chain.
     NestedStaticScope* scope = script->getStaticBlockScope(REGS.pc);
     MOZ_ASSERT(scope && scope->is<StaticBlockScope>());
@@ -3713,9 +3719,9 @@ END_CASE(JSOP_POPBLOCKSCOPE)
 
 CASE(JSOP_DEBUGLEAVEBLOCK)
 {
-    MOZ_ASSERT(script->getStaticBlockScope(REGS.pc));
-    MOZ_ASSERT(script->getStaticBlockScope(REGS.pc)->is<StaticBlockScope>());
-    MOZ_ASSERT(!script->getStaticBlockScope(REGS.pc)->as<StaticBlockScope>().needsClone());
+    MOZ_ASSERT(script->getScope(REGS.pc));
+    MOZ_ASSERT(script->getScope(REGS.pc)->is<LexicalScope>());
+    MOZ_ASSERT(!script->getScope(REGS.pc)->as<LexicalScope>().environmentShape());
 
     // FIXME: This opcode should not be necessary.  The debugger shouldn't need
     // help from bytecode to do its job.  See bug 927782.
@@ -4868,40 +4874,35 @@ js::ReportRuntimeLexicalError(JSContext* cx, unsigned errorNumber,
                op == JSOP_CHECKALIASEDLEXICAL ||
                op == JSOP_THROWSETCONST ||
                op == JSOP_THROWSETALIASEDCONST ||
+               op == JSOP_THROWSETCALLEE ||
                op == JSOP_GETIMPORT);
 
     RootedPropertyName name(cx);
 
-    if (IsLocalOp(op)) {
+    if (op == JSOP_THROWSETCALLEE) {
+        name = script->functionNonDelazifying()->name()->asPropertyName();
+    } else if (IsLocalOp(op)) {
         uint32_t slot = GET_LOCALNO(pc);
-
-        // First search for a name among body-level lets.
-        for (BindingIter bi(script); bi; bi++) {
-            if (bi->kind() != Binding::ARGUMENT && !bi->aliased() && bi.frameIndex() == slot) {
-                name = bi->name();
-                break;
-            }
-        }
 
         // Failing that, it must be a block-local let.
         if (!name) {
             // Skip to the right scope.
-            Rooted<NestedStaticScope*> scope(cx, script->getStaticBlockScope(pc));
-            MOZ_ASSERT(scope && scope->is<StaticBlockScope>());
-            Rooted<StaticBlockScope*> block(cx, &scope->as<StaticBlockScope>());
-            while (slot < block->localOffset())
-                block = &block->enclosingNestedScope()->as<StaticBlockScope>();
+            RootedScope scope(cx, script->getScope(pc));
+            MOZ_ASSERT(scope && scope->is<LexicalScope>());
+            Rooted<LexicalScope*> lexicalScope(cx, &scope->as<LexicalScope>());
+            while (slot < lexicalScope->computeFirstFrameSlot())
+                lexicalScope = &lexicalScope->enclosing()->as<LexicalScope>();
 
-            // Translate the frame slot to the block slot, then find the name
-            // of the slot.
-            uint32_t blockSlot = block->localIndexToSlot(slot);
-            RootedShape shape(cx, block->lastProperty());
-            Shape::Range<CanGC> r(cx, shape);
-            while (r.front().slot() != blockSlot)
-                r.popFront();
-            jsid id = r.front().propidRaw();
-            MOZ_ASSERT(JSID_IS_ATOM(id));
-            name = JSID_TO_ATOM(id)->asPropertyName();
+            // Get the name of the slot.
+            for (BindingIter bi(lexicalScope); bi; bi++) {
+                BindingLocation loc = bi.location();
+                if (loc.kind() == BindingLocation::Kind::Frame && loc.slot() == slot) {
+                    name = bi.name()->asPropertyName();
+                    break;
+                }
+            }
+
+            MOZ_ASSERT(name);
         }
     } else if (IsAtomOp(op)) {
         name = script->getName(pc);
@@ -4914,18 +4915,17 @@ js::ReportRuntimeLexicalError(JSContext* cx, unsigned errorNumber,
 }
 
 void
-js::ReportRuntimeRedeclaration(JSContext* cx, HandlePropertyName name,
-                               frontend::Definition::Kind declKind)
+js::ReportRuntimeRedeclaration(JSContext* cx, HandlePropertyName name, BindingKind bindKind)
 {
     JSAutoByteString printable;
     if (AtomToPrintableString(cx, name, &printable)) {
         // We cannot distinguish 'var' declarations from manually defined,
         // non-configurable global properties.
         const char* kindStr;
-        if (declKind == frontend::Definition::VAR)
+        if (bindKind == BindingKind::Var)
             kindStr = "non-configurable global property";
         else
-            kindStr = frontend::Definition::kindString(declKind);
+            kindStr = BindingKindString(bindKind);
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_REDECLARED_VAR,
                              kindStr, printable.ptr());
     }
@@ -4940,7 +4940,9 @@ js::ThrowUninitializedThis(JSContext* cx, AbstractFramePtr frame)
     } else {
         MOZ_ASSERT(frame.isEvalFrame());
         MOZ_ASSERT(frame.script()->isDirectEvalInFunction());
-        fun = frame.script()->getCallerFunction();
+        fun = nullptr;
+        // TODOshu use ScopeIter and eval scopes
+        // fun = frame.script()->getCallerFunction();
     }
 
     if (fun->isDerivedClassConstructor()) {

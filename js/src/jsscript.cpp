@@ -67,27 +67,6 @@ using mozilla::PodCopy;
 using mozilla::PodZero;
 using mozilla::RotateLeft;
 
-static BindingIter
-GetBinding(HandleScript script, HandlePropertyName name)
-{
-    BindingIter bi(script);
-    while (bi->name() != name)
-        bi++;
-    return bi;
-}
-
-/* static */ BindingIter
-Bindings::argumentsBinding(ExclusiveContext* cx, HandleScript script)
-{
-    return GetBinding(script, cx->names().arguments);
-}
-
-/* static */ BindingIter
-Bindings::thisBinding(ExclusiveContext* cx, HandleScript script)
-{
-    return GetBinding(script, cx->names().dotThis);
-}
-
 bool
 Bindings::initWithTemporaryStorage(ExclusiveContext* cx, MutableHandle<Bindings> self,
                                    uint32_t numArgs, uint32_t numVars,
@@ -139,6 +118,7 @@ Bindings::initWithTemporaryStorage(ExclusiveContext* cx, MutableHandle<Bindings>
     // Unless there are aliased body-level lexical bindings at all, set the
     // begin index to an impossible slot number.
     uint32_t aliasedBodyLevelLexicalBegin = LOCALNO_LIMIT;
+    /* TODOshu
     for (BindingIter bi(self); bi; bi++) {
         if (bi->aliased()) {
             // Per ES6, lexical bindings cannot be accessed until
@@ -156,6 +136,7 @@ Bindings::initWithTemporaryStorage(ExclusiveContext* cx, MutableHandle<Bindings>
             nslots++;
         }
     }
+    */
     self.setAliasedBodyLevelLexicalBegin(aliasedBodyLevelLexicalBegin);
 
     // Put as many of nslots inline into the object header as possible.
@@ -180,6 +161,7 @@ Bindings::initWithTemporaryStorage(ExclusiveContext* cx, MutableHandle<Bindings>
 #endif
 
     uint32_t slot = CallObject::RESERVED_SLOTS;
+    /*
     for (BindingIter bi(self); bi; bi++) {
         if (!bi->aliased())
             continue;
@@ -210,6 +192,7 @@ Bindings::initWithTemporaryStorage(ExclusiveContext* cx, MutableHandle<Bindings>
         MOZ_ASSERT(slot < nslots);
         slot++;
     }
+    */
     MOZ_ASSERT(slot == nslots);
 
     MOZ_ASSERT(!shape->inDictionary());
@@ -281,13 +264,13 @@ XDRScriptBindings(XDRState<mode>* xdr, LifoAllocScope& las, uint16_t numArgs, ui
 
     if (mode == XDR_ENCODE) {
         for (BindingIter bi(script); bi; bi++) {
-            RootedAtom atom(cx, bi->name());
+            RootedAtom atom(cx, bi.name());
             if (!XDRAtom(xdr, &atom))
                 return false;
         }
 
         for (BindingIter bi(script); bi; bi++) {
-            uint8_t u8 = (uint8_t(bi->kind()) << 1) | uint8_t(bi->aliased());
+            uint8_t u8 = (uint8_t(bi.kind()) << 1) | uint8_t(bi.closedOver());
             if (!xdr->codeUint8(&u8))
                 return false;
         }
@@ -494,25 +477,17 @@ XDRLazyFreeVariables(XDRState<mode>* xdr, MutableHandle<LazyScript*> lazy)
 {
     JSContext* cx = xdr->cx();
     RootedAtom atom(cx);
-    uint8_t isHoistedUse;
-    LazyScript::FreeVariable* freeVariables = lazy->freeVariables();
+    JSAtom** freeVariables = lazy->freeVariables();
     size_t numFreeVariables = lazy->numFreeVariables();
     for (size_t i = 0; i < numFreeVariables; i++) {
-        if (mode == XDR_ENCODE) {
-            atom = freeVariables[i].atom();
-            isHoistedUse = freeVariables[i].isHoistedUse();
-        }
+        if (mode == XDR_ENCODE)
+            atom = freeVariables[i];
 
         if (!XDRAtom(xdr, &atom))
             return false;
-        if (!xdr->codeUint8(&isHoistedUse))
-            return false;
 
-        if (mode == XDR_DECODE) {
-            freeVariables[i] = LazyScript::FreeVariable(atom);
-            if (isHoistedUse)
-                freeVariables[i].setIsHoistedUse();
-        }
+        if (mode == XDR_DECODE)
+            freeVariables[i] = atom;
     }
 
     return true;
@@ -552,6 +527,8 @@ XDRRelazificationInfo(XDRState<mode>* xdr, HandleFunction fun, HandleScript scri
             return false;
 
         if (mode == XDR_DECODE) {
+            // TODOshu
+            RootedScope enclosingScope(cx);
             lazy.set(LazyScript::Create(cx, fun, script, enclosingScope, script,
                                         packedFields, begin, end, lineno, column));
 
@@ -608,7 +585,6 @@ js::XDRScript(XDRState<mode>* xdr, HandleObject enclosingScopeArg, HandleScript 
 
     enum ScriptBits {
         NoScriptRval,
-        SavedCallerFun,
         Strict,
         ContainsDynamicNameAccess,
         FunHasExtensibleScope,
@@ -636,7 +612,7 @@ js::XDRScript(XDRState<mode>* xdr, HandleObject enclosingScopeArg, HandleScript 
 
     uint32_t length, lineno, column, nslots;
     uint32_t natoms, nsrcnotes, i;
-    uint32_t nconsts, nobjects, nregexps, ntrynotes, nblockscopes, nyieldoffsets;
+    uint32_t nconsts, nobjects, nscopes, nregexps, ntrynotes, nscopenotes, nyieldoffsets;
     uint32_t prologueLength, version;
     uint32_t funLength = 0;
     uint32_t nTypeSets = 0;
@@ -646,7 +622,7 @@ js::XDRScript(XDRState<mode>* xdr, HandleObject enclosingScopeArg, HandleScript 
     RootedScript script(cx);
     RootedObject enclosingScope(cx, enclosingScopeArg);
     natoms = nsrcnotes = 0;
-    nconsts = nobjects = nregexps = ntrynotes = nblockscopes = nyieldoffsets = 0;
+    nconsts = nobjects = nscopes = nregexps = ntrynotes = nscopenotes = nyieldoffsets = 0;
 
     /* XDR arguments and vars. */
     uint16_t nargs = 0;
@@ -717,10 +693,12 @@ js::XDRScript(XDRState<mode>* xdr, HandleObject enclosingScopeArg, HandleScript 
             nconsts = script->consts()->length;
         if (script->hasObjects())
             nobjects = script->objects()->length;
+        if (script->hasScopes())
+            nscopes = script->scopes()->length;
         if (script->hasTrynotes())
             ntrynotes = script->trynotes()->length;
-        if (script->hasBlockScopes())
-            nblockscopes = script->blockScopes()->length;
+        if (script->hasScopeNotes())
+            nscopenotes = script->scopeNotes()->length;
         if (script->hasYieldOffsets())
             nyieldoffsets = script->yieldOffsets().length();
 
@@ -729,8 +707,6 @@ js::XDRScript(XDRState<mode>* xdr, HandleObject enclosingScopeArg, HandleScript 
 
         if (script->noScriptRval())
             scriptBits |= (1 << NoScriptRval);
-        if (script->savedCallerFun())
-            scriptBits |= (1 << SavedCallerFun);
         if (script->strict())
             scriptBits |= (1 << Strict);
         if (script->explicitUseStrict())
@@ -793,9 +769,11 @@ js::XDRScript(XDRState<mode>* xdr, HandleObject enclosingScopeArg, HandleScript 
         return false;
     if (!xdr->codeUint32(&nobjects))
         return false;
+    if (!xdr->codeUint32(&nscopes))
+        return false;
     if (!xdr->codeUint32(&ntrynotes))
         return false;
-    if (!xdr->codeUint32(&nblockscopes))
+    if (!xdr->codeUint32(&nscopenotes))
         return false;
     if (!xdr->codeUint32(&nyieldoffsets))
         return false;
@@ -852,8 +830,8 @@ js::XDRScript(XDRState<mode>* xdr, HandleObject enclosingScopeArg, HandleScript 
                 return false;
         }
 
-        script = JSScript::Create(cx, enclosingScope, !!(scriptBits & (1 << SavedCallerFun)),
-                                  options, sourceObject, 0, 0);
+        // TODOshu bodyscope
+        script = JSScript::Create(cx, options, sourceObject, 0, 0);
         if (!script)
             return false;
 
@@ -872,8 +850,8 @@ js::XDRScript(XDRState<mode>* xdr, HandleObject enclosingScopeArg, HandleScript 
         return false;
 
     if (mode == XDR_DECODE) {
-        if (!JSScript::partiallyInit(cx, script, nconsts, nobjects, ntrynotes,
-                                     nblockscopes, nyieldoffsets, nTypeSets))
+        if (!JSScript::partiallyInit(cx, script, nconsts, nobjects, nscopes, ntrynotes,
+                                     nscopenotes, nyieldoffsets, nTypeSets))
         {
             return false;
         }
@@ -1097,15 +1075,17 @@ js::XDRScript(XDRState<mode>* xdr, HandleObject enclosingScopeArg, HandleScript 
             if (mode == XDR_ENCODE) {
                 RootedFunction function(cx, &(*objp)->as<JSFunction>());
 
+                /* TODOshu
                 if (function->isInterpretedLazy())
                     funEnclosingScope = function->lazyScript()->enclosingScope();
                 else if (function->isInterpreted())
-                    funEnclosingScope = function->nonLazyScript()->enclosingStaticScope();
+                    funEnclosingScope = function->nonLazyScript()->bodyScope()->enclosingScope();
                 else {
+                */
                     MOZ_ASSERT(function->isAsmJSNative());
                     JS_ReportError(cx, "AsmJS modules are not yet supported in XDR serialization.");
                     return false;
-                }
+                    //}
 
                 StaticScopeIter<NoGC> ssi(funEnclosingScope);
 
@@ -1190,8 +1170,8 @@ js::XDRScript(XDRState<mode>* xdr, HandleObject enclosingScopeArg, HandleScript 
         } while (tn != tnfirst);
     }
 
-    for (i = 0; i < nblockscopes; ++i) {
-        BlockScopeNote* note = &script->blockScopes()->vector[i];
+    for (i = 0; i < nscopenotes; ++i) {
+        ScopeNote* note = &script->scopeNotes()->vector[i];
         if (!xdr->codeUint32(&note->index) ||
             !xdr->codeUint32(&note->start) ||
             !xdr->codeUint32(&note->length) ||
@@ -1274,7 +1254,8 @@ js::XDRLazyScript(XDRState<mode>* xdr, HandleObject enclosingScope, HandleScript
         }
 
         if (mode == XDR_DECODE) {
-            lazy.set(LazyScript::Create(cx, fun, nullptr, enclosingScope, enclosingScript,
+            // TODOshu enclosing scope
+            lazy.set(LazyScript::Create(cx, fun, nullptr, nullptr, enclosingScript,
                                         packedFields, begin, end, lineno, column));
             if (!lazy)
                 return false;
@@ -2570,13 +2551,13 @@ js::FreeScriptData(JSRuntime* rt, AutoLockForExclusiveAccess& lock)
  * present array header can be computed. Each header has an accessor function
  * in JSScript that encapsulates this offset computation.
  *
- * Array type       Array elements  Accessor
- * ----------       --------------  --------
- * ConstArray       Consts          consts()
- * ObjectArray      Objects         objects()
- * ObjectArray      Regexps         regexps()
- * TryNoteArray     Try notes       trynotes()
- * BlockScopeArray  Scope notes     blockScopes()
+ * Array type      Array elements  Accessor
+ * ----------      --------------  --------
+ * ConstArray      Consts          consts()
+ * ObjectArray     Objects         objects()
+ * ObjectArray     Regexps         regexps()
+ * TryNoteArray    Try notes       trynotes()
+ * ScopeNoteArray  Scope notes     scopeNotes()
  *
  * Then are the elements of several arrays.
  * - Most of these arrays have headers listed above (if present). For each of
@@ -2592,7 +2573,7 @@ js::FreeScriptData(JSRuntime* rt, AutoLockForExclusiveAccess& lock)
  * Objects          objects()->vector     objects()->length
  * Regexps          regexps()->vector     regexps()->length
  * Try notes        trynotes()->vector    trynotes()->length
- * Scope notes      blockScopes()->vector blockScopes()->length
+ * Scope notes      scopeNotes()->vector  scopeNotes()->length
  *
  * IMPORTANT: This layout has two key properties.
  * - It ensures that everything has sufficient alignment; in particular, the
@@ -2638,7 +2619,7 @@ js::FreeScriptData(JSRuntime* rt, AutoLockForExclusiveAccess& lock)
 JS_STATIC_ASSERT(KEEPS_JSVAL_ALIGNMENT(ConstArray));
 JS_STATIC_ASSERT(KEEPS_JSVAL_ALIGNMENT(ObjectArray));       /* there are two of these */
 JS_STATIC_ASSERT(KEEPS_JSVAL_ALIGNMENT(TryNoteArray));
-JS_STATIC_ASSERT(KEEPS_JSVAL_ALIGNMENT(BlockScopeArray));
+JS_STATIC_ASSERT(KEEPS_JSVAL_ALIGNMENT(ScopeNoteArray));
 
 /* These assertions ensure there is no padding required between array elements. */
 JS_STATIC_ASSERT(HAS_JSVAL_ALIGNMENT(GCPtrValue));
@@ -2648,15 +2629,15 @@ JS_STATIC_ASSERT(NO_PADDING_BETWEEN_ENTRIES(GCPtrObject, JSTryNote));
 JS_STATIC_ASSERT(NO_PADDING_BETWEEN_ENTRIES(JSTryNote, uint32_t));
 JS_STATIC_ASSERT(NO_PADDING_BETWEEN_ENTRIES(uint32_t, uint32_t));
 
-JS_STATIC_ASSERT(NO_PADDING_BETWEEN_ENTRIES(GCPtrValue, BlockScopeNote));
-JS_STATIC_ASSERT(NO_PADDING_BETWEEN_ENTRIES(BlockScopeNote, BlockScopeNote));
-JS_STATIC_ASSERT(NO_PADDING_BETWEEN_ENTRIES(JSTryNote, BlockScopeNote));
-JS_STATIC_ASSERT(NO_PADDING_BETWEEN_ENTRIES(GCPtrObject, BlockScopeNote));
-JS_STATIC_ASSERT(NO_PADDING_BETWEEN_ENTRIES(BlockScopeNote, uint32_t));
+JS_STATIC_ASSERT(NO_PADDING_BETWEEN_ENTRIES(GCPtrValue, ScopeNote));
+JS_STATIC_ASSERT(NO_PADDING_BETWEEN_ENTRIES(ScopeNote, ScopeNote));
+JS_STATIC_ASSERT(NO_PADDING_BETWEEN_ENTRIES(JSTryNote, ScopeNote));
+JS_STATIC_ASSERT(NO_PADDING_BETWEEN_ENTRIES(GCPtrObject, ScopeNote));
+JS_STATIC_ASSERT(NO_PADDING_BETWEEN_ENTRIES(ScopeNote, uint32_t));
 
 static inline size_t
-ScriptDataSize(uint32_t nbindings, uint32_t nconsts, uint32_t nobjects,
-               uint32_t ntrynotes, uint32_t nblockscopes, uint32_t nyieldoffsets)
+ScriptDataSize(uint32_t nbindings, uint32_t nconsts, uint32_t nobjects, uint32_t nscopes,
+               uint32_t ntrynotes, uint32_t nscopenotes, uint32_t nyieldoffsets)
 {
     size_t size = 0;
 
@@ -2664,10 +2645,12 @@ ScriptDataSize(uint32_t nbindings, uint32_t nconsts, uint32_t nobjects,
         size += sizeof(ConstArray) + nconsts * sizeof(Value);
     if (nobjects != 0)
         size += sizeof(ObjectArray) + nobjects * sizeof(NativeObject*);
+    if (nscopes != 0)
+        size += sizeof(ScopeArray) + nscopes * sizeof(Scope*);
     if (ntrynotes != 0)
         size += sizeof(TryNoteArray) + ntrynotes * sizeof(JSTryNote);
-    if (nblockscopes != 0)
-        size += sizeof(BlockScopeArray) + nblockscopes * sizeof(BlockScopeNote);
+    if (nscopenotes != 0)
+        size += sizeof(ScopeNoteArray) + nscopenotes * sizeof(ScopeNote);
     if (nyieldoffsets != 0)
         size += sizeof(YieldOffsetArray) + nyieldoffsets * sizeof(uint32_t);
 
@@ -2686,9 +2669,8 @@ JSScript::initCompartment(ExclusiveContext* cx)
 }
 
 /* static */ JSScript*
-JSScript::Create(ExclusiveContext* cx, HandleObject enclosingScope, bool savedCallerFun,
-                 const ReadOnlyCompileOptions& options, HandleObject sourceObject,
-                 uint32_t bufStart, uint32_t bufEnd)
+JSScript::Create(ExclusiveContext* cx, const ReadOnlyCompileOptions& options,
+                 HandleObject sourceObject, uint32_t bufStart, uint32_t bufEnd)
 {
     MOZ_ASSERT(bufStart <= bufEnd);
 
@@ -2699,19 +2681,13 @@ JSScript::Create(ExclusiveContext* cx, HandleObject enclosingScope, bool savedCa
     PodZero(script.get());
     new (&script->bindings) Bindings;
 
-    script->enclosingStaticScope_ = enclosingScope;
-    script->savedCallerFun_ = savedCallerFun;
+    // TODOshu
+    //script->enclosingStaticScope_ = enclosingScope;
     script->initCompartment(cx);
 
     script->selfHosted_ = options.selfHostingMode;
     script->noScriptRval_ = options.noScriptRval;
     script->treatAsRunOnce_ = options.isRunOnce;
-
-    // Compute whether this script is under a non-syntactic scope. We don't
-    // need to walk the entire static scope chain if the script is nested in a
-    // function. In that case, we can propagate the cached value from the
-    // outer script.
-    script->hasNonSyntacticScope_ = HasNonSyntacticStaticScopeChain(enclosingScope);
 
     script->version = options.version;
     MOZ_ASSERT(script->getVersion() == options.version);     // assert that no overflow occurred
@@ -2738,11 +2714,11 @@ AllocScriptData(JS::Zone* zone, size_t size)
 
 /* static */ bool
 JSScript::partiallyInit(ExclusiveContext* cx, HandleScript script, uint32_t nconsts,
-                        uint32_t nobjects, uint32_t ntrynotes,
-                        uint32_t nblockscopes, uint32_t nyieldoffsets, uint32_t nTypeSets)
+                        uint32_t nobjects, uint32_t nscopes, uint32_t ntrynotes,
+                        uint32_t nscopenotes, uint32_t nyieldoffsets, uint32_t nTypeSets)
 {
-    size_t size = ScriptDataSize(script->bindings.count(), nconsts, nobjects, ntrynotes,
-                                 nblockscopes, nyieldoffsets);
+    size_t size = ScriptDataSize(script->bindings.count(), nconsts, nobjects, nscopes,
+                                 ntrynotes, nscopenotes, nyieldoffsets);
     script->data = AllocScriptData(script->zone(), size);
     if (size && !script->data) {
         ReportOutOfMemory(cx);
@@ -2762,13 +2738,17 @@ JSScript::partiallyInit(ExclusiveContext* cx, HandleScript script, uint32_t ncon
         script->setHasArray(OBJECTS);
         cursor += sizeof(ObjectArray);
     }
+    if (nscopes != 0) {
+        script->setHasArray(SCOPES);
+        cursor += sizeof(ScopeArray);
+    }
     if (ntrynotes != 0) {
         script->setHasArray(TRYNOTES);
         cursor += sizeof(TryNoteArray);
     }
-    if (nblockscopes != 0) {
-        script->setHasArray(BLOCK_SCOPES);
-        cursor += sizeof(BlockScopeArray);
+    if (nscopenotes != 0) {
+        script->setHasArray(SCOPENOTES);
+        cursor += sizeof(ScopeNoteArray);
     }
 
     YieldOffsetArray* yieldOffsets = nullptr;
@@ -2790,6 +2770,12 @@ JSScript::partiallyInit(ExclusiveContext* cx, HandleScript script, uint32_t ncon
         cursor += nobjects * sizeof(script->objects()->vector[0]);
     }
 
+    if (nscopes != 0) {
+        script->scopes()->length = nscopes;
+        script->scopes()->vector = (GCPtrScope*)cursor;
+        cursor += nscopes * sizeof(script->scopes()->vector[0]);
+    }
+
     if (ntrynotes != 0) {
         script->trynotes()->length = ntrynotes;
         script->trynotes()->vector = reinterpret_cast<JSTryNote*>(cursor);
@@ -2800,10 +2786,10 @@ JSScript::partiallyInit(ExclusiveContext* cx, HandleScript script, uint32_t ncon
         cursor += vectorSize;
     }
 
-    if (nblockscopes != 0) {
-        script->blockScopes()->length = nblockscopes;
-        script->blockScopes()->vector = reinterpret_cast<BlockScopeNote*>(cursor);
-        size_t vectorSize = nblockscopes * sizeof(script->blockScopes()->vector[0]);
+    if (nscopenotes != 0) {
+        script->scopeNotes()->length = nscopenotes;
+        script->scopeNotes()->vector = reinterpret_cast<ScopeNote*>(cursor);
+        size_t vectorSize = nscopenotes * sizeof(script->scopeNotes()->vector[0]);
 #ifdef DEBUG
         memset(cursor, 0, vectorSize);
 #endif
@@ -2836,7 +2822,7 @@ JSScript::fullyInitTrivial(ExclusiveContext* cx, Handle<JSScript*> script)
     if (!Bindings::initTrivialForScript(cx, script))
         return false;
 
-    if (!partiallyInit(cx, script, 0, 0, 0, 0, 0, 0))
+    if (!partiallyInit(cx, script, 0, 0, 0, 0, 0, 0, 0))
         return false;
 
     SharedScriptData* ssd = SharedScriptData::new_(cx, 1, 1, 0);
@@ -2906,11 +2892,22 @@ JSScript::linkToModuleFromEmitter(js::ExclusiveContext* cx, JS::Handle<JSScript*
     script->setModule(module);
 }
 
+static void
+InitAtomMap(frontend::AtomIndexMap& indices, GCPtrAtom* atoms)
+{
+    for (AtomIndexMap::Range r = indices.all(); !r.empty(); r.popFront()) {
+        JSAtom* atom = r.front().key();
+        jsatomid index = r.front().value();
+        MOZ_ASSERT(index < indices.count());
+        atoms[index].init(atom);
+    }
+}
+
 /* static */ bool
 JSScript::fullyInitFromEmitter(ExclusiveContext* cx, HandleScript script, BytecodeEmitter* bce)
 {
     /* The counts of indexed things must be checked during code generation. */
-    MOZ_ASSERT(bce->atomIndices->count() <= INDEX_LIMIT);
+    MOZ_ASSERT(bce->atomIndices.count() <= INDEX_LIMIT);
     MOZ_ASSERT(bce->objectList.length <= INDEX_LIMIT);
 
     uint32_t mainLength = bce->offset();
@@ -2918,10 +2915,10 @@ JSScript::fullyInitFromEmitter(ExclusiveContext* cx, HandleScript script, Byteco
     uint32_t nsrcnotes;
     if (!bce->finishTakingSrcNotes(&nsrcnotes))
         return false;
-    uint32_t natoms = bce->atomIndices->count();
+    uint32_t natoms = bce->atomIndices.count();
     if (!partiallyInit(cx, script,
-                       bce->constList.length(), bce->objectList.length,
-                       bce->tryNoteList.length(), bce->blockScopeList.length(),
+                       bce->constList.length(), bce->objectList.length, bce->scopeList.length(),
+                       bce->tryNoteList.length(), bce->scopeNoteList.length(),
                        bce->yieldOffsetList.length(), bce->typesetCount))
     {
         return false;
@@ -2942,19 +2939,29 @@ JSScript::fullyInitFromEmitter(ExclusiveContext* cx, HandleScript script, Byteco
     PodCopy<jsbytecode>(code, bce->prologue.code.begin(), prologueLength);
     PodCopy<jsbytecode>(code + prologueLength, bce->main.code.begin(), mainLength);
     bce->copySrcNotes((jssrcnote*)(code + script->length()), nsrcnotes);
-    InitAtomMap(bce->atomIndices.getMap(), ssd->atoms());
+    InitAtomMap(bce->atomIndices, ssd->atoms());
 
     if (!SaveSharedScriptData(cx, script, ssd, nsrcnotes))
         return false;
+
+    script->bodyScope_ = bce->bodyScope();
+
+    // Compute whether this script is under a non-syntactic scope. We don't
+    // need to walk the entire static scope chain if the script is nested in a
+    // function. In that case, we can propagate the cached value from the
+    // outer script.
+    script->hasNonSyntacticScope_ = HasNonSyntacticScopeChain(bce->bodyScope());
 
     if (bce->constList.length() != 0)
         bce->constList.finish(script->consts());
     if (bce->objectList.length != 0)
         bce->objectList.finish(script->objects());
+    if (bce->scopeList.length() != 0)
+        bce->scopeList.finish(script->scopes());
     if (bce->tryNoteList.length() != 0)
         bce->tryNoteList.finish(script->trynotes());
-    if (bce->blockScopeList.length() != 0)
-        bce->blockScopeList.finish(script->blockScopes(), prologueLength);
+    if (bce->scopeNoteList.length() != 0)
+        bce->scopeNoteList.finish(script->scopeNotes(), prologueLength);
     script->strict_ = bce->sc->strict();
     script->explicitUseStrict_ = bce->sc->hasExplicitUseStrict();
     script->bindingsAccessedDynamically_ = bce->sc->bindingsAccessedDynamically();
@@ -3119,15 +3126,19 @@ JSScript::uninlinedGlobal() const
 void
 JSScript::fixEnclosingStaticGlobalLexicalScope()
 {
+    /* TODOshu
     MOZ_ASSERT(IsStaticGlobalLexicalScope(enclosingStaticScope_));
     enclosingStaticScope_ = &global().lexicalScope().staticBlock();
+    */
 }
 
 void
 LazyScript::fixEnclosingStaticGlobalLexicalScope()
 {
+    /* TODOshu
     MOZ_ASSERT(IsStaticGlobalLexicalScope(enclosingScope_));
     enclosingScope_ = &function_->global().lexicalScope().staticBlock();
+    */
 }
 
 void
@@ -3434,7 +3445,8 @@ CloneInnerInterpretedFunction(JSContext* cx, HandleObject enclosingScope, Handle
     JSScript::AutoDelazify srcScript(cx, srcFun);
     if (!srcScript)
         return nullptr;
-    JSScript* cloneScript = CloneScriptIntoFunction(cx, enclosingScope, clone, srcScript);
+    // TODOshu
+    JSScript* cloneScript = CloneScriptIntoFunction(cx, nullptr, clone, srcScript);
     if (!cloneScript)
         return nullptr;
 
@@ -3461,8 +3473,9 @@ js::detail::CopyScript(JSContext* cx, HandleObject scriptStaticScope, HandleScri
 
     uint32_t nconsts   = src->hasConsts()   ? src->consts()->length   : 0;
     uint32_t nobjects  = src->hasObjects()  ? src->objects()->length  : 0;
+    uint32_t nscopes   = src->hasScopes()   ? src->scopes()->length   : 0;
     uint32_t ntrynotes = src->hasTrynotes() ? src->trynotes()->length : 0;
-    uint32_t nblockscopes = src->hasBlockScopes() ? src->blockScopes()->length : 0;
+    uint32_t nscopenotes = src->hasScopeNotes() ? src->scopeNotes()->length : 0;
     uint32_t nyieldoffsets = src->hasYieldOffsets() ? src->yieldOffsets().length() : 0;
 
     /* Script data */
@@ -3556,6 +3569,8 @@ js::detail::CopyScript(JSContext* cx, HandleObject scriptStaticScope, HandleScri
         }
     }
 
+    // TODOshu copy scopes.
+
     /* Now that all fallible allocation is complete, do the copying. */
 
     dst->bindings = bindings;
@@ -3611,10 +3626,11 @@ js::detail::CopyScript(JSContext* cx, HandleObject scriptStaticScope, HandleScri
         for (unsigned i = 0; i < nobjects; ++i)
             vector[i].init(&objects[i]->as<NativeObject>());
     }
+    // TODOshu clone scopes
     if (ntrynotes != 0)
         dst->trynotes()->vector = Rebase<JSTryNote>(dst, src, src->trynotes()->vector);
-    if (nblockscopes != 0)
-        dst->blockScopes()->vector = Rebase<BlockScopeNote>(dst, src, src->blockScopes()->vector);
+    if (nscopenotes != 0)
+        dst->scopeNotes()->vector = Rebase<ScopeNote>(dst, src, src->scopeNotes()->vector);
     if (nyieldoffsets != 0)
         dst->yieldOffsets().vector_ = Rebase<uint32_t>(dst, src, src->yieldOffsets().vector_);
 
@@ -3639,7 +3655,7 @@ js::detail::CopyScript(JSContext* cx, HandleObject scriptStaticScope, HandleScri
 }
 
 static JSScript*
-CreateEmptyScriptForClone(JSContext* cx, HandleObject enclosingScope, HandleScript src)
+CreateEmptyScriptForClone(JSContext* cx, HandleScript src)
 {
     /*
      * Wrap the script source object as needed. Self-hosted scripts may be
@@ -3670,8 +3686,7 @@ CreateEmptyScriptForClone(JSContext* cx, HandleObject enclosingScope, HandleScri
            .setNoScriptRval(src->noScriptRval())
            .setVersion(src->getVersion());
 
-    return JSScript::Create(cx, enclosingScope, src->savedCallerFun(),
-                            options, sourceObject, src->sourceStart(), src->sourceEnd());
+    return JSScript::Create(cx, options, sourceObject, src->sourceStart(), src->sourceEnd());
 }
 
 JSScript*
@@ -3680,7 +3695,7 @@ js::CloneGlobalScript(JSContext* cx, Handle<StaticScope*> enclosingScope, Handle
     MOZ_ASSERT(IsStaticGlobalLexicalScope(enclosingScope) ||
                enclosingScope->is<StaticNonSyntacticScope>());
 
-    RootedScript dst(cx, CreateEmptyScriptForClone(cx, enclosingScope, src));
+    RootedScript dst(cx, CreateEmptyScriptForClone(cx, src));
     if (!dst)
         return nullptr;
 
@@ -3691,7 +3706,7 @@ js::CloneGlobalScript(JSContext* cx, Handle<StaticScope*> enclosingScope, Handle
 }
 
 JSScript*
-js::CloneScriptIntoFunction(JSContext* cx, HandleObject enclosingScope, HandleFunction fun,
+js::CloneScriptIntoFunction(JSContext* cx, HandleScope enclosingScope, HandleFunction fun,
                             HandleScript src)
 {
     MOZ_ASSERT(fun->isInterpreted());
@@ -3702,7 +3717,7 @@ js::CloneScriptIntoFunction(JSContext* cx, HandleObject enclosingScope, HandleFu
     // This is so that when cloning nested functions, they can walk the static
     // scope chain via fun and correctly compute the presence of a
     // non-syntactic global.
-    RootedScript dst(cx, CreateEmptyScriptForClone(cx, enclosingScope, src));
+    RootedScript dst(cx, CreateEmptyScriptForClone(cx, src));
     if (!dst)
         return nullptr;
 
@@ -3951,7 +3966,7 @@ JSScript::traceChildren(JSTracer* trc)
     TraceNullableEdge(trc, &function_, "function");
     TraceNullableEdge(trc, &module_, "module");
 
-    TraceNullableEdge(trc, &enclosingStaticScope_, "enclosingStaticScope");
+    TraceNullableEdge(trc, &bodyScope_, "body scope");
 
     if (maybeLazyScript())
         TraceManuallyBarrieredEdge(trc, &lazyScript, "lazyScript");
@@ -3979,6 +3994,7 @@ JSScript::calculateLiveFixed(jsbytecode* pc)
 {
     size_t nlivefixed = nbodyfixed();
 
+    /* TODOshu
     if (nfixed() != nlivefixed) {
         NestedStaticScope* staticScope = getStaticBlockScope(pc);
         if (staticScope)
@@ -3994,6 +4010,7 @@ JSScript::calculateLiveFixed(jsbytecode* pc)
             nlivefixed = blockScope.localOffset() + blockScope.numVariables();
         }
     }
+    */
 
     MOZ_ASSERT(nlivefixed <= nfixed());
     MOZ_ASSERT(nlivefixed >= nbodyfixed());
@@ -4001,26 +4018,26 @@ JSScript::calculateLiveFixed(jsbytecode* pc)
     return nlivefixed;
 }
 
-NestedStaticScope*
-JSScript::getStaticBlockScope(jsbytecode* pc)
+Scope*
+JSScript::getScope(jsbytecode* pc)
 {
     MOZ_ASSERT(containsPC(pc));
 
-    if (!hasBlockScopes())
+    if (!hasScopeNotes())
         return nullptr;
 
     size_t offset = pc - code();
 
-    BlockScopeArray* scopes = blockScopes();
-    NestedStaticScope* blockChain = nullptr;
+    ScopeNoteArray* notes = scopeNotes();
+    Scope* scope = nullptr;
 
     // Find the innermost block chain using a binary search.
     size_t bottom = 0;
-    size_t top = scopes->length;
+    size_t top = notes->length;
 
     while (bottom < top) {
         size_t mid = bottom + (top - bottom) / 2;
-        const BlockScopeNote* note = &scopes->vector[mid];
+        const ScopeNote* note = &notes->vector[mid];
         if (note->start <= offset) {
             // Block scopes are ordered in the list by their starting offset, and since
             // blocks form a tree ones earlier in the list may cover the pc even if
@@ -4029,15 +4046,15 @@ JSScript::getStaticBlockScope(jsbytecode* pc)
             // the searched range for coverage.
             size_t check = mid;
             while (check >= bottom) {
-                const BlockScopeNote* checkNote = &scopes->vector[check];
+                const ScopeNote* checkNote = &notes->vector[check];
                 MOZ_ASSERT(checkNote->start <= offset);
                 if (offset < checkNote->start + checkNote->length) {
                     // We found a matching block chain but there may be inner ones
                     // at a higher block chain index than mid. Continue the binary search.
-                    if (checkNote->index == BlockScopeNote::NoBlockScopeIndex)
-                        blockChain = nullptr;
+                    if (checkNote->index == ScopeNote::NoScopeIndex)
+                        scope = nullptr;
                     else
-                        blockChain = &getObject(checkNote->index)->as<NestedStaticScope>();
+                        scope = getScope(checkNote->index);
                     break;
                 }
                 if (checkNote->parent == UINT32_MAX)
@@ -4050,25 +4067,15 @@ JSScript::getStaticBlockScope(jsbytecode* pc)
         }
     }
 
-    return blockChain;
+    return scope;
 }
 
-JSObject*
-JSScript::innermostStaticScopeInScript(jsbytecode* pc)
+Scope*
+JSScript::innermostScope(jsbytecode* pc)
 {
-    if (JSObject* scope = getStaticBlockScope(pc))
+    if (Scope* scope = getScope(pc))
         return scope;
-    if (module())
-        return module();
-    return functionNonDelazifying();
-}
-
-JSObject*
-JSScript::innermostStaticScope(jsbytecode* pc)
-{
-    if (JSObject* scope = innermostStaticScopeInScript(pc))
-        return scope;
-    return enclosingStaticScope();
+    return bodyScope_;
 }
 
 void
@@ -4095,6 +4102,8 @@ js::SetFrameArgumentsObject(JSContext* cx, AbstractFramePtr frame,
      * object. Note that 'arguments' may have already been overwritten.
      */
 
+#if 0
+    TODOshu
     BindingIter bi = Bindings::argumentsBinding(cx, script);
 
     if (script->bindingIsAliased(bi)) {
@@ -4117,6 +4126,7 @@ js::SetFrameArgumentsObject(JSContext* cx, AbstractFramePtr frame,
         if (IsOptimizedPlaceholderMagicValue(frame.unaliasedLocal(bi.frameIndex())))
             frame.unaliasedLocal(bi.frameIndex()) = ObjectValue(*argsobj);
     }
+#endif
 }
 
 /* static */ bool
@@ -4186,22 +4196,13 @@ JSScript::argumentsOptimizationFailed(JSContext* cx, HandleScript script)
 }
 
 bool
-JSScript::bindingIsAliased(const BindingIter& bi)
-{
-    return bindings.bindingIsAliased(bi.i_);
-}
-
-bool
 JSScript::formalIsAliased(unsigned argSlot)
 {
-    MOZ_ASSERT(argSlot < bindings.numArgs());
-    return bindings.bindingIsAliased(argSlot);
-}
-
-bool
-JSScript::localIsAliased(unsigned localSlot)
-{
-    return bindings.bindingIsAliased(bindings.numArgs() + localSlot);
+    for (SimpleFormalParameterIter fi(bodyScope()); !fi.done(); fi++) {
+        if (fi.position() == argSlot)
+            return fi.closedOver();
+    }
+    MOZ_CRASH("Argument slot not found");
 }
 
 bool
@@ -4241,9 +4242,8 @@ LazyScript::resetScript()
 }
 
 void
-LazyScript::setEnclosingScopeAndSource(JSObject* enclosingScope, ScriptSourceObject* sourceObject)
+LazyScript::setEnclosingScopeAndSource(Scope* enclosingScope, ScriptSourceObject* sourceObject)
 {
-    MOZ_ASSERT_IF(enclosingScope, function_->compartment() == enclosingScope->compartment());
     MOZ_ASSERT(function_->compartment() == sourceObject->compartment());
     // This method may be called to update the enclosing scope. See comment
     // above the callsite in BytecodeEmitter::emitFunction.
@@ -4282,7 +4282,7 @@ LazyScript::CreateRaw(ExclusiveContext* cx, HandleFunction fun,
     p.hasBeenCloned = false;
     p.treatAsRunOnce = false;
 
-    size_t bytes = (p.numFreeVariables * sizeof(FreeVariable))
+    size_t bytes = (p.numFreeVariables * sizeof(JSAtom*))
                  + (p.numInnerFunctions * sizeof(GCPtrFunction));
 
     ScopedJSFreePtr<uint8_t> table(bytes ? fun->zone()->pod_malloc<uint8_t>(bytes) : nullptr);
@@ -4301,9 +4301,11 @@ LazyScript::CreateRaw(ExclusiveContext* cx, HandleFunction fun,
 }
 
 /* static */ LazyScript*
-LazyScript::CreateRaw(ExclusiveContext* cx, HandleFunction fun,
-                      uint32_t numFreeVariables, uint32_t numInnerFunctions, JSVersion version,
-                      uint32_t begin, uint32_t end, uint32_t lineno, uint32_t column)
+LazyScript::Create(ExclusiveContext* cx, HandleFunction fun,
+                   Handle<GCVector<JSAtom*>> freeVariables,
+                   Handle<GCVector<JSFunction*>> innerFunctions,
+                   JSVersion version,
+                   uint32_t begin, uint32_t end, uint32_t lineno, uint32_t column)
 {
     union {
         PackedView p;
@@ -4311,8 +4313,8 @@ LazyScript::CreateRaw(ExclusiveContext* cx, HandleFunction fun,
     };
 
     p.version = version;
-    p.numFreeVariables = numFreeVariables;
-    p.numInnerFunctions = numInnerFunctions;
+    p.numFreeVariables = freeVariables.length();
+    p.numInnerFunctions = innerFunctions.length();
     p.generatorKindBits = GeneratorKindAsBits(NotGenerator);
     p.strict = false;
     p.bindingsAccessedDynamically = false;
@@ -4323,13 +4325,22 @@ LazyScript::CreateRaw(ExclusiveContext* cx, HandleFunction fun,
     p.needsHomeObject = false;
 
     LazyScript* res = LazyScript::CreateRaw(cx, fun, packedFields, begin, end, lineno, column);
+
+    JSAtom** resFreeVariables = res->freeVariables();
+    for (size_t i = 0; i < res->numFreeVariables(); i++)
+        resFreeVariables[i] = freeVariables[i];
+
+    GCPtrFunction* resInnerFunctions = res->innerFunctions();
+    for (size_t i = 0; i < res->numInnerFunctions(); i++)
+        resInnerFunctions[i].init(innerFunctions[i]);
+
     MOZ_ASSERT_IF(res, res->version() == version);
     return res;
 }
 
 /* static */ LazyScript*
 LazyScript::Create(ExclusiveContext* cx, HandleFunction fun,
-                   HandleScript script, HandleObject enclosingScope,
+                   HandleScript script, HandleScope enclosingScope,
                    HandleScript sourceObjectScript,
                    uint64_t packedFields, uint32_t begin, uint32_t end,
                    uint32_t lineno, uint32_t column)
@@ -4348,9 +4359,9 @@ LazyScript::Create(ExclusiveContext* cx, HandleFunction fun,
     // Fill with dummies, to be GC-safe after the initialization of the free
     // variables and inner functions.
     size_t i, num;
-    FreeVariable* variables = res->freeVariables();
+    JSAtom** variables = res->freeVariables();
     for (i = 0, num = res->numFreeVariables(); i < num; i++)
-        variables[i] = FreeVariable(dummyAtom);
+        variables[i] = dummyAtom;
 
     GCPtrFunction* functions = res->innerFunctions();
     for (i = 0, num = res->numInnerFunctions(); i < num; i++)
@@ -4392,11 +4403,11 @@ LazyScript::hasUncompiledEnclosingScript() const
     // If the enclosing scope is a function with a null script or has a script
     // without code, it was not successfully compiled.
 
-    if (!enclosingScope() || !enclosingScope()->is<JSFunction>())
+    if (!enclosingScope() || !enclosingScope()->is<FunctionScope>())
         return false;
 
-    JSFunction& fun = enclosingScope()->as<JSFunction>();
-    return !fun.hasScript() || fun.hasUncompiledScript() || !fun.nonLazyScript()->code();
+    JSFunction* fun = enclosingScope()->as<FunctionScope>().canonicalFunction();
+    return !fun->hasScript() || fun->hasUncompiledScript() || !fun->nonLazyScript()->code();
 }
 
 void

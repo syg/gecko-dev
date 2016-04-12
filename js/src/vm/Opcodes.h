@@ -119,7 +119,7 @@
      *   Operands: uint32_t staticWithIndex
      *   Stack: val =>
      */ \
-    macro(JSOP_ENTERWITH, 3,  "enterwith",  NULL,         5,  1,  0, JOF_OBJECT) \
+    macro(JSOP_ENTERWITH, 3,  "enterwith",  NULL,         5,  1,  0, JOF_SCOPE) \
     /*
      * Pops the scope chain object pushed by JSOP_ENTERWITH.
      *   Category: Statements
@@ -1816,7 +1816,19 @@
      *   Stack: arr => arr optimized
      */ \
     macro(JSOP_OPTIMIZE_SPREADCALL,178,"optimize-spreadcall", NULL, 1,  1,  2,  JOF_BYTE) \
-    macro(JSOP_UNUSED179,     179,"unused179",  NULL,     1,  0,  0,  JOF_BYTE) \
+    /*
+     * Throws a runtime TypeError for invalid assignment to the callee in a
+     * named lambda, which is always a 'const' binding. This is a different
+     * bytecode than JSOP_SETCONST because the named lambda callee, if not
+     * closed over, does not have a frame slot to look up the name with for
+     * the error message.
+     *
+     *   Category: Variables and Scopes
+     *   Type: Local Variables
+     *   Operands:
+     *   Stack: =>
+     */ \
+    macro(JSOP_THROWSETCALLEE,     179, "throwsetcallee",        NULL, 1,  1,  1, JOF_SET|JOF_BYTE) \
     macro(JSOP_UNUSED180,     180,"unused180",  NULL,     1,  0,  0,  JOF_BYTE) \
     macro(JSOP_UNUSED181,     181,"unused181",  NULL,     1,  0,  0,  JOF_BYTE) \
     macro(JSOP_UNUSED182,     182,"unused182",  NULL,     1,  0,  0,  JOF_BYTE) \
@@ -1957,7 +1969,7 @@
      *   Operands: uint32_t staticBlockObjectIndex
      *   Stack: =>
      */ \
-    macro(JSOP_PUSHBLOCKSCOPE,198,"pushblockscope", NULL, 5,  0,  0,  JOF_OBJECT) \
+    macro(JSOP_PUSHBLOCKSCOPE,198,"pushblockscope", NULL, 5,  0,  0,  JOF_SCOPE) \
     /*
      * Pops block from the scope chain.
      *   Category: Variables and Scopes

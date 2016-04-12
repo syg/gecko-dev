@@ -14,13 +14,100 @@
 #include "jstypes.h"
 
 #include "builtin/ModuleObject.h"
-#include "frontend/ParseMaps.h"
+#include "ds/InlineTable.h"
 #include "frontend/ParseNode.h"
 #include "frontend/TokenStream.h"
 #include "vm/ScopeObject.h"
 
 namespace js {
 namespace frontend {
+
+enum class StatementKind : uint8_t
+{
+    Label,
+    Block,
+    If,
+    Switch,
+    With,
+    Catch,
+    Try,
+    Finally,
+    ForLoop,
+    ForInLoop,
+    ForOfLoop,
+    DoLoop,
+    WhileLoop,
+
+    // Used only by BytecodeEmitter.
+    Spread
+};
+
+static inline bool
+StatementKindIsLoop(StatementKind kind)
+{
+    return kind == StatementKind::ForLoop ||
+           kind == StatementKind::ForInLoop ||
+           kind == StatementKind::ForOfLoop ||
+           kind == StatementKind::DoLoop ||
+           kind == StatementKind::WhileLoop ||
+           kind == StatementKind::Spread;
+}
+
+static inline bool
+StatementKindIsUnlabeledBreakTarget(StatementKind kind)
+{
+    return StatementKindIsLoop(kind) || kind == StatementKind::Switch;
+}
+
+// A base class for nestable structures in the frontend, such as statements
+// and scopes.
+template <typename Concrete>
+class MOZ_STACK_CLASS Nestable
+{
+    Concrete** stack_;
+    Concrete*  enclosing_;
+
+  protected:
+    explicit Nestable(Concrete** stack)
+      : stack_(stack),
+        enclosing_(*stack)
+    {
+        *stack_ = static_cast<Concrete*>(this);
+    }
+
+    // These method are protected. Some derived classes, such as ParseContext,
+    // do not expose the ability to walk the stack.
+    Concrete* enclosing() const {
+        return enclosing_;
+    }
+
+    template <typename Predicate /* (Concrete*) -> bool */>
+    static Concrete* findNearest(Concrete* it, Predicate predicate) {
+        while (it && !predicate(it))
+            it = it->enclosing();
+        return it;
+    }
+
+    template <typename T>
+    static T* findNearest(Concrete* it) {
+        while (it && !it->template is<T>())
+            it = it->enclosing();
+        return it ? &it->template as<T>() : nullptr;
+    }
+
+    template <typename T, typename Predicate /* (T*) -> bool */>
+    static T* findNearest(Concrete* it, Predicate predicate) {
+        while (it && !it->template is<T>() && !predicate(&it->template as<T>()))
+            it = it->enclosing();
+        return it ? &it->template as<T>() : nullptr;
+    }
+
+  public:
+    ~Nestable() {
+        MOZ_ASSERT(*stack_ == static_cast<Concrete*>(this));
+        *stack_ = enclosing_;
+    }
+};
 
 // These flags apply to both global and function contexts.
 class AnyContextFlags
@@ -40,18 +127,14 @@ class AnyContextFlags
     // since both effectively allow any name to be accessed. Non-examples are:
     //  - upvars of nested functions
     //  - function statement
-    // since the set of assigned name is known dynamically. 'with' could be in
-    // the non-example category, provided the set of all free variables within
-    // the with block was noted. However, we do not optimize 'with' so, for
-    // simplicity, 'with' is treated like eval.
+    // since the set of assigned name is known dynamically.
     //
     // Note: access through the arguments object is not considered dynamic
     // binding access since it does not go through the normal name lookup
     // mechanism. This is debatable and could be changed (although care must be
     // taken not to turn off the whole 'arguments' optimization). To answer the
     // more general "is this argument aliased" question, script->needsArgsObj
-    // should be tested (see JSScript::argIsAlised).
-    //
+    // should be tested (see JSScript::argIsAliased).
     bool            bindingsAccessedDynamically:1;
 
     // Whether this script, or any of its inner scripts contains a debugger
@@ -155,7 +238,7 @@ class Directives
 
   public:
     explicit Directives(bool strict) : strict_(strict), asmJS_(false) {}
-    template <typename ParseHandler> explicit Directives(ParseContext<ParseHandler>* parent);
+    explicit Directives(ParseContext* parent);
 
     void setStrict() { strict_ = true; }
     bool strict() const { return strict_; }
@@ -182,11 +265,13 @@ class Directives
 // be any value.
 enum class ThisBinding { Global, Function, Module };
 
+class GlobalSharedContext;
+class EvalSharedContext;
+
 /*
  * The struct SharedContext is part of the current parser context (see
  * ParseContext). It stores information that is reused between the parser and
- * the bytecode emitter. Note however, that this information is not shared
- * between the two; they simply reuse the same data structure.
+ * the bytecode emitter.
  */
 class SharedContext
 {
@@ -197,7 +282,15 @@ class SharedContext
     bool localStrict;
     bool extraWarnings;
 
-  private:
+  protected:
+    enum class Kind {
+        ObjectBox,
+        Global,
+        Eval
+    };
+
+    Kind kind_;
+
     ThisBinding thisBinding_;
 
     bool allowNewTarget_;
@@ -205,42 +298,41 @@ class SharedContext
     bool allowSuperCall_;
     bool inWith_;
     bool needsThisTDZChecks_;
-    bool superScopeAlreadyNeedsHomeObject_;
+
+    void computeAllowSyntax(Scope* scope);
+    void computeInWith(Scope* scope);
+    void computeThisBinding(Scope* scope);
 
   public:
-    SharedContext(ExclusiveContext* cx, Directives directives,
-                  bool extraWarnings)
+    SharedContext(ExclusiveContext* cx, Kind kind, Directives directives, bool extraWarnings)
       : context(cx),
         anyCxFlags(),
         strictScript(directives.strict()),
         localStrict(false),
         extraWarnings(extraWarnings),
+        kind_(kind),
         thisBinding_(ThisBinding::Global),
         allowNewTarget_(false),
         allowSuperProperty_(false),
         allowSuperCall_(false),
         inWith_(false),
-        needsThisTDZChecks_(false),
-        superScopeAlreadyNeedsHomeObject_(false)
+        needsThisTDZChecks_(false)
     { }
 
-    // The unfortunate reason that staticScope() is a virtual is because
-    // GlobalSharedContext and FunctionBox have different lifetimes.
-    // GlobalSharedContexts are stack allocated and thus may use RootedObject
-    // for the static scope. FunctionBoxes are LifoAlloc'd and need to
-    // manually trace their static scope.
-    virtual JSObject* staticScope() const = 0;
-    void computeAllowSyntax(JSObject* staticScope);
-    void computeInWith(JSObject* staticScope);
-    void computeThisBinding(JSObject* staticScope);
+    // If this is the outermost SharedContext, the Scope that encloses
+    // it. Otherwise nullptr.
+    virtual Scope* compilationEnclosingScope() const = 0;
 
     virtual ObjectBox* toObjectBox() { return nullptr; }
-    bool isObjectBox() { return toObjectBox() != nullptr; }
+    bool isObjectBox() { return toObjectBox(); }
     bool isFunctionBox() { return isObjectBox() && toObjectBox()->isFunctionBox(); }
     inline FunctionBox* asFunctionBox();
     bool isModuleBox() { return isObjectBox() && toObjectBox()->isModuleBox(); }
     inline ModuleBox* asModuleBox();
-    bool isGlobalContext() { return !toObjectBox(); }
+    bool isGlobalContext() { return kind_ == Kind::Global; }
+    inline GlobalSharedContext* asGlobalContext();
+    bool isEvalContext() { return kind_ == Kind::Eval; }
+    inline EvalSharedContext* asEvalContext();
 
     ThisBinding thisBinding()          const { return thisBinding_; }
 
@@ -249,8 +341,6 @@ class SharedContext
     bool allowSuperCall()              const { return allowSuperCall_; }
     bool inWith()                      const { return inWith_; }
     bool needsThisTDZChecks()          const { return needsThisTDZChecks_; }
-
-    void markSuperScopeNeedsHomeObject();
 
     bool hasExplicitUseStrict()        const { return anyCxFlags.hasExplicitUseStrict; }
     bool bindingsAccessedDynamically() const { return anyCxFlags.bindingsAccessedDynamically; }
@@ -262,7 +352,7 @@ class SharedContext
     void setHasDebuggerStatement()        { anyCxFlags.hasDebuggerStatement        = true; }
     void setHasDirectEval()               { anyCxFlags.hasDirectEval               = true; }
 
-    inline bool allLocalsAliased();
+    inline bool closeOverAllBindings();
 
     bool strict() const {
         return strictScript || localStrict;
@@ -285,34 +375,70 @@ class SharedContext
 
 class MOZ_STACK_CLASS GlobalSharedContext : public SharedContext
 {
-    Rooted<StaticScope*> staticScope_;
+    ScopeKind scopeKind_;
 
   public:
-    GlobalSharedContext(ExclusiveContext* cx, StaticScope* staticScope, Directives directives,
-                        bool extraWarnings, JSFunction* maybeEvalCaller = nullptr)
-      : SharedContext(cx, directives, extraWarnings),
-        staticScope_(cx, staticScope)
-    {
-        computeAllowSyntax(staticScope);
-        computeInWith(staticScope);
+    GlobalScope::Data* bindings;
 
-        // If we're executing a Debugger eval-in-frame, staticScope is always a
-        // non-function scope, so we have to compute our ThisBinding based on
-        // the actual callee.
-        if (maybeEvalCaller)
-            computeThisBinding(maybeEvalCaller);
-        else
-            computeThisBinding(staticScope);
+    GlobalSharedContext(ExclusiveContext* cx, ScopeKind scopeKind, Directives directives,
+                        bool extraWarnings)
+      : SharedContext(cx, Kind::Global, directives, extraWarnings),
+        scopeKind_(scopeKind),
+        bindings(nullptr)
+    {
+        MOZ_ASSERT(scopeKind == ScopeKind::Global || scopeKind == ScopeKind::NonSyntactic);
+        thisBinding_ = ThisBinding::Global;
     }
 
-    JSObject* staticScope() const override { return staticScope_; }
+    Scope* compilationEnclosingScope() const override {
+        return nullptr;
+    }
+
+    ScopeKind scopeKind() const {
+        return scopeKind_;
+    }
+};
+
+class MOZ_STACK_CLASS EvalSharedContext : public SharedContext
+{
+    RootedScope enclosingScope_;
+
+  public:
+    EvalScope::Data* bindings;
+
+    EvalSharedContext(ExclusiveContext* cx, Scope* enclosingScope, Directives directives,
+                      bool extraWarnings)
+      : SharedContext(cx, Kind::Eval, directives, extraWarnings),
+        enclosingScope_(cx, enclosingScope),
+        bindings(nullptr)
+    {
+        computeAllowSyntax(enclosingScope);
+        computeInWith(enclosingScope);
+        computeThisBinding(enclosingScope);
+    }
+
+    Scope* compilationEnclosingScope() const override {
+        return enclosingScope_;
+    }
 };
 
 class FunctionBox : public ObjectBox, public SharedContext
 {
+    void initWithEnclosingScope(Scope* enclosingScope);
+
   public:
-    Bindings        bindings;               /* bindings for this function */
-    JSObject*       enclosingStaticScope_;
+    // Names from the named lambda scope, if a named lambda.
+    LexicalScope::Data* declEnvBindings;
+
+    // Names from the scope for parameter default expressions, if any.
+    LexicalScope::Data* defaultsScopeBindings;
+    FreeNameArray* defaultsScopeFreeNames;
+
+    // Names from the 'var' scope of the function.
+    FunctionScope::Data* funScopeBindings;
+    FreeNameArray* funScopeFreeNames;
+
+    ParseNode*      functionNode;           /* back pointer used by asm.js for error messages */
     uint32_t        bufStart;
     uint32_t        bufEnd;
     uint32_t        startLine;
@@ -334,15 +460,25 @@ class FunctionBox : public ObjectBox, public SharedContext
 
     FunctionContextFlags funCxFlags;
 
-    template <typename ParseHandler>
-    FunctionBox(ExclusiveContext* cx, ObjectBox* traceListHead, JSFunction* fun,
-                JSObject* enclosingStaticScope, ParseContext<ParseHandler>* pc,
+    FunctionBox(ExclusiveContext* cx, LifoAlloc& alloc, ObjectBox* traceListHead, JSFunction* fun,
                 Directives directives, bool extraWarnings, GeneratorKind generatorKind);
+
+    void initFromLazyFunction();
+    void initStandaloneFunction();
+    void initWithEnclosingContext(SharedContext* enclosing, FunctionSyntaxKind kind,
+                                  bool isGenexpLambda);
 
     ObjectBox* toObjectBox() override { return this; }
     JSFunction* function() const { return &object->as<JSFunction>(); }
-    JSObject* staticScope() const override { return function(); }
-    JSObject* enclosingStaticScope() const { return enclosingStaticScope_; }
+
+    Scope* compilationEnclosingScope() const override {
+        // This method is used to distinguish the outermost SharedContext. If
+        // a FunctionBox is the outermost SharedContext, it must be a lazy
+        // function.
+        if (function()->lazyScript())
+            return function()->lazyScript()->enclosingScope();
+        return nullptr;
+    }
 
     bool isLikelyConstructorWrapper() const {
         return usesArguments && usesApply && usesThis && !usesReturn;
@@ -405,19 +541,6 @@ class FunctionBox : public ObjectBox, public SharedContext
         startLine = tokenStream.getLineno();
         startColumn = tokenStream.getColumn();
     }
-
-    bool needsCallObject()
-    {
-        // Note: this should be kept in sync with JSFunction::needsCallObject().
-        return bindings.hasAnyAliasedBindings() ||
-               hasExtensibleScope() ||
-               needsDeclEnvObject() ||
-               needsHomeObject()    ||
-               isDerivedClassConstructor() ||
-               isGenerator();
-    }
-
-    void trace(JSTracer* trc) override;
 };
 
 class ModuleBox : public ObjectBox, public SharedContext
@@ -426,13 +549,12 @@ class ModuleBox : public ObjectBox, public SharedContext
     Bindings bindings;
     ModuleBuilder& builder;
 
-    template <typename ParseHandler>
     ModuleBox(ExclusiveContext* cx, ObjectBox* traceListHead, ModuleObject* module,
-              ModuleBuilder& builder, ParseContext<ParseHandler>* pc);
+              ModuleBuilder& builder);
 
     ObjectBox* toObjectBox() override { return this; }
     ModuleObject* module() const { return &object->as<ModuleObject>(); }
-    JSObject* staticScope() const override { return module(); }
+    Scope* compilationEnclosingScope() const override { return nullptr; }
 
     void trace(JSTracer* trc) override;
 };
@@ -451,194 +573,33 @@ SharedContext::asModuleBox()
     return static_cast<ModuleBox*>(this);
 }
 
+inline GlobalSharedContext*
+SharedContext::asGlobalContext()
+{
+    MOZ_ASSERT(isGlobalContext());
+    return static_cast<GlobalSharedContext*>(this);
+}
 
-// In generators, we treat all locals as aliased so that they get stored on the
-// heap.  This way there is less information to copy off the stack when
-// suspending, and back on when resuming.  It also avoids the need to create and
-// invalidate DebugScope proxies for unaliased locals in a generator frame, as
-// the generator frame will be copied out to the heap and released only by GC.
+inline EvalSharedContext*
+SharedContext::asEvalContext()
+{
+    MOZ_ASSERT(isEvalContext());
+    return static_cast<EvalSharedContext*>(this);
+}
+
+// In generators, we treat all bindings as closed so that they get stored on
+// the heap.  This way there is less information to copy off the stack when
+// suspending, and back on when resuming.  It also avoids the need to create
+// and invalidate DebugScope proxies for unaliased locals in a generator
+// frame, as the generator frame will be copied out to the heap and released
+// only by GC.
 inline bool
-SharedContext::allLocalsAliased()
+SharedContext::closeOverAllBindings()
 {
     return bindingsAccessedDynamically() || (isFunctionBox() && asFunctionBox()->isGenerator());
 }
 
-// NOTE: If you add a new type of statement that is a scope, add it between
-//       WITH and CATCH, or you'll break StmtInfoBase::linksScope.  If you add
-//       a non-looping statement type, add it before DO_LOOP or you'll break
-//       StmtInfoBase::isLoop().
-#define FOR_EACH_STATEMENT_TYPE(macro) \
-    macro(LABEL, "label statement") \
-    macro(IF, "if statement") \
-    macro(ELSE, "else statement") \
-    macro(SEQ, "destructuring body") \
-    macro(BLOCK, "block") \
-    macro(SWITCH, "switch statement") \
-    macro(WITH, "with statement") \
-    macro(CATCH, "catch block") \
-    macro(TRY, "try block") \
-    macro(FINALLY, "finally block") \
-    macro(SUBROUTINE, "finally block") \
-    macro(DO_LOOP, "do loop") \
-    macro(FOR_LOOP, "for loop") \
-    macro(FOR_IN_LOOP, "for/in loop") \
-    macro(FOR_OF_LOOP, "for/of loop") \
-    macro(WHILE_LOOP, "while loop") \
-    macro(SPREAD, "spread")
-
-enum class StmtType : uint16_t {
-#define DECLARE_STMTTYPE_ENUM(name, desc) name,
-    FOR_EACH_STATEMENT_TYPE(DECLARE_STMTTYPE_ENUM)
-#undef DECLARE_STMTTYPE_ENUM
-    LIMIT
-};
-
-/*
- * A comment on the encoding of the js::StmtType enum and StmtInfoBase
- * type-testing methods:
- *
- * StmtInfoBase::maybeScope() tells whether a statement type is always, or may
- * become, a lexical scope. It therefore includes block and switch (the two
- * low-numbered "maybe" scope types) and excludes with (with has dynamic scope
- * pending the "reformed with" in ES4/JS2). It includes all try-catch-finally
- * types, which are high-numbered maybe-scope types.
- *
- * StmtInfoBase::linksScope() tells whether a js::StmtInfo{PC,BCE} of the given
- * type eagerly links to other scoping statement info records. It excludes the
- * two early "maybe" types, block and switch, as well as the try and both
- * finally types, since try and the other trailing maybe-scope types don't need
- * block scope unless they contain let declarations.
- *
- * We treat WITH as a static scope because it prevents lexical binding from
- * continuing further up the static scope chain. With the lost "reformed with"
- * proposal for ES4, we would be able to model it statically, too.
- */
-
-// StmtInfoPC is used by the Parser.  StmtInfoBCE is used by the
-// BytecodeEmitter.  The two types have some overlap, encapsulated by
-// StmtInfoBase.
-
-struct StmtInfoBase
-{
-    // Statement type (StmtType).
-    StmtType type;
-
-    // True if type is StmtType::BLOCK, StmtType::TRY, StmtType::SWITCH, or
-    // StmtType::FINALLY and the block contains at least one let-declaration,
-    // or if type is StmtType::CATCH.
-    bool isBlockScope:1;
-
-    // for (let ...) induced block scope
-    bool isForLetBlock:1;
-
-    // Block label.
-    RootedAtom      label;
-
-    // Compile-time scope chain node for this scope.
-    Rooted<NestedStaticScope*> staticScope;
-
-    explicit StmtInfoBase(ExclusiveContext* cx)
-        : isBlockScope(false), isForLetBlock(false),
-          label(cx), staticScope(cx)
-    {}
-
-    bool maybeScope() const {
-        return StmtType::BLOCK <= type && type <= StmtType::SUBROUTINE &&
-               type != StmtType::WITH;
-    }
-
-    bool linksScope() const {
-        return !!staticScope;
-    }
-
-    bool canBeBlockScope() {
-        return type == StmtType::BLOCK ||
-               type == StmtType::SWITCH ||
-               type == StmtType::TRY ||
-               type == StmtType::FINALLY ||
-               type == StmtType::CATCH;
-    }
-
-    StaticBlockScope& staticBlock() const {
-        MOZ_ASSERT(staticScope);
-        MOZ_ASSERT(isBlockScope);
-        return staticScope->as<StaticBlockScope>();
-    }
-
-    bool isLoop() const {
-        return type >= StmtType::DO_LOOP;
-    }
-
-    bool isTrying() const {
-        return StmtType::TRY <= type && type <= StmtType::SUBROUTINE;
-    }
-};
-
-template <class StmtInfo>
-class MOZ_STACK_CLASS StmtInfoStack
-{
-    // Top of the stack.
-    StmtInfo* innermostStmt_;
-
-    // Top scope statement with a nested scope.
-    StmtInfo* innermostScopeStmt_;
-
-  public:
-    explicit StmtInfoStack(ExclusiveContext* cx)
-      : innermostStmt_(nullptr),
-        innermostScopeStmt_(nullptr)
-    { }
-
-    StmtInfo* innermost() const { return innermostStmt_; }
-    StmtInfo* innermostScopeStmt() const { return innermostScopeStmt_; }
-    StmtInfo* innermostNonLabel() const {
-        StmtInfo* stmt = innermost();
-        while (stmt && stmt->type == StmtType::LABEL)
-            stmt = stmt->enclosing;
-        return stmt;
-    }
-
-    void push(StmtInfo* stmt, StmtType type) {
-        stmt->type = type;
-        stmt->isBlockScope = false;
-        stmt->isForLetBlock = false;
-        stmt->label = nullptr;
-        stmt->staticScope = nullptr;
-        stmt->enclosing = innermostStmt_;
-        stmt->enclosingScope = nullptr;
-        innermostStmt_ = stmt;
-    }
-
-    void pushNestedScope(StmtInfo* stmt, StmtType type, NestedStaticScope& staticScope) {
-        push(stmt, type);
-        linkAsInnermostScopeStmt(stmt, staticScope);
-    }
-
-    void pop() {
-        StmtInfo* stmt = innermostStmt_;
-        innermostStmt_ = stmt->enclosing;
-        if (stmt->linksScope())
-            innermostScopeStmt_ = stmt->enclosingScope;
-    }
-
-    void linkAsInnermostScopeStmt(StmtInfo* stmt, NestedStaticScope& staticScope) {
-        MOZ_ASSERT(stmt != innermostScopeStmt_);
-        MOZ_ASSERT(!stmt->enclosingScope);
-        stmt->enclosingScope = innermostScopeStmt_;
-        innermostScopeStmt_ = stmt;
-        stmt->staticScope = &staticScope;
-    }
-
-    void makeInnermostLexicalScope(StaticBlockScope& blockScope) {
-        MOZ_ASSERT(!innermostStmt_->isBlockScope);
-        MOZ_ASSERT(innermostStmt_->canBeBlockScope());
-        innermostStmt_->isBlockScope = true;
-        linkAsInnermostScopeStmt(innermostStmt_, blockScope);
-    }
-};
-
 } // namespace frontend
-
 } // namespace js
 
 #endif /* frontend_SharedContext_h */

@@ -240,9 +240,9 @@ SetIntrinsicOperation(JSContext* cx, JSScript* script, jsbytecode* pc, HandleVal
 inline void
 SetAliasedVarOperation(JSContext* cx, JSScript* script, jsbytecode* pc,
                        ScopeObject& obj, ScopeCoordinate sc, const Value& val,
-                       MaybeCheckLexical checkLexical)
+                       MaybeCheckTDZ checkTDZ)
 {
-    MOZ_ASSERT_IF(checkLexical, !IsUninitializedLexical(obj.aliasedVar(sc)));
+    MOZ_ASSERT_IF(checkTDZ, !IsUninitializedLexical(obj.aliasedVar(sc)));
 
     // Avoid computing the name if no type updates are needed, as this may be
     // expensive on scopes with large numbers of variables.

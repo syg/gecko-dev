@@ -268,10 +268,14 @@ class ExclusiveContext : public ContextFriendFields,
     // AutoCompartment from which it's called.
     inline js::Handle<js::GlobalObject*> global() const;
 
-    // Methods to access runtime data that must be protected by locks.
-    frontend::ParseMapPool& parseMapPool(AutoLockForExclusiveAccess& lock) {
-        return runtime_->parseMapPool(lock);
+    // The cached empty global scope on the runtime. This is only safe if
+    // called after the first GlobalObject has been created.
+    js::Handle<js::GlobalScope*> emptyGlobalScope() const {
+        MOZ_ASSERT(runtime_->emptyGlobalScope);
+        return runtime_->emptyGlobalScope;
     }
+
+    // Methods to access runtime data that must be protected by locks.
     AtomSet& atoms(js::AutoLockForExclusiveAccess& lock) {
         return runtime_->atoms(lock);
     }

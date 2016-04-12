@@ -27,7 +27,6 @@
 #endif
 #include "builtin/AtomicsObject.h"
 #include "ds/FixedSizeHash.h"
-#include "frontend/ParseMaps.h"
 #include "gc/GCRuntime.h"
 #include "gc/Tracer.h"
 #include "irregexp/RegExpStack.h"
@@ -43,6 +42,7 @@
 #include "vm/CommonPropertyNames.h"
 #include "vm/DateTime.h"
 #include "vm/MallocProvider.h"
+#include "vm/Scope.h"
 #include "vm/SharedImmutableStringsCache.h"
 #include "vm/SPSProfiler.h"
 #include "vm/Stack.h"
@@ -759,6 +759,12 @@ struct JSRuntime : public JS::shadow::Runtime,
      */
     js::EnterDebuggeeNoExecute* noExecuteDebuggerTop;
 
+    /*
+     * A cached empty global scope to avoid needlessly creating the final node
+     * in scope chains. Created by the first GlobalObject.
+     */
+    JS::PersistentRooted<js::GlobalScope*> emptyGlobalScope;
+
     js::Activation* const* addressOfActivation() const {
         return &activation_;
     }
@@ -1336,13 +1342,8 @@ struct JSRuntime : public JS::shadow::Runtime,
     // with an ExclusiveContext and requires a lock. Active compilations
     // prevent the pool from being purged during GCs.
   private:
-    js::frontend::ParseMapPool parseMapPool_;
     unsigned activeCompilations_;
   public:
-    js::frontend::ParseMapPool& parseMapPool(js::AutoLockForExclusiveAccess& lock) {
-        MOZ_ASSERT(currentThreadHasExclusiveAccess());
-        return parseMapPool_;
-    }
     bool hasActiveCompilations() {
         return activeCompilations_ != 0;
     }

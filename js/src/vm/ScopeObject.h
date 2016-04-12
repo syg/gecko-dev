@@ -20,7 +20,6 @@
 namespace js {
 
 namespace frontend {
-struct Definition;
 class FunctionBox;
 class ModuleBox;
 }
@@ -292,34 +291,6 @@ class StaticBlockScope : public NestedStaticScope
         setBlockFlags(IsForCatchParametersFlag);
     }
 
-    /*
-     * Frontend compilation temporarily uses the object's slots to link
-     * a let var to its associated Definition parse node.
-     */
-    void setDefinitionParseNode(unsigned i, frontend::Definition* def) {
-        MOZ_ASSERT(slotValue(i).isUndefined());
-        setSlotValue(i, PrivateValue(def));
-    }
-
-    // XXXshu Used only for phasing in block-scope function early
-    // XXXshu errors.
-    // XXXshu
-    // XXXshu Back out when major version >= 50. See [1].
-    // XXXshu
-    // XXXshu [1] https://bugzilla.mozilla.org/show_bug.cgi?id=1235590#c10
-    void updateDefinitionParseNode(unsigned i,
-                                   frontend::Definition* oldDef,
-                                   frontend::Definition* newDef)
-    {
-        MOZ_ASSERT(definitionParseNode(i) == oldDef);
-        setSlotValue(i, PrivateValue(newDef));
-    }
-
-    frontend::Definition* definitionParseNode(unsigned i) {
-        Value v = slotValue(i);
-        return reinterpret_cast<frontend::Definition*>(v.toPrivate());
-    }
-
     // Called by BytecodeEmitter to mark regular block scopes as
     // non-extensible. By contrast, the global lexical scope is extensible.
     bool makeNonExtensible(ExclusiveContext* cx);
@@ -568,7 +539,6 @@ class StaticScopeIter
     StaticNonSyntacticScope& nonSyntactic() const;
     JSScript* funScript() const;
     JSFunction& fun() const;
-    frontend::FunctionBox* maybeFunctionBox() const;
     JSScript* moduleScript() const;
     ModuleObject& module() const;
 };
@@ -1099,13 +1069,13 @@ CloneNestedScopeObject(JSContext* cx, HandleObject enclosingScope,
 
 /*****************************************************************************/
 
-// A scope iterator describes the active scopes starting from a dynamic scope,
-// static scope pair. This pair may be derived from the current point of
-// execution in a frame. If derived in such a fashion, the ScopeIter tracks
-// whether the current scope is within the extent of this initial frame.
-// Here, "frame" means a single activation of: a function, eval, or global
-// code.
-class MOZ_RAII ScopeIter
+// A environment iterator describes the active environments starting from an
+// environment, scope pair. This pair may be derived from the current point of
+// execution in a frame. If derived in such a fashion, the EnvironmentIter
+// tracks whether the current scope is within the extent of this initial
+// frame.  Here, "frame" means a single activation of: a function, eval, or
+// global code.
+class MOZ_RAII EnvironmentIter
 {
     StaticScopeIter<CanGC> ssi_;
     RootedObject scope_;
@@ -1115,25 +1085,25 @@ class MOZ_RAII ScopeIter
     void settle();
 
     // No value semantics.
-    ScopeIter(const ScopeIter& si) = delete;
+    EnvironmentIter(const EnvironmentIter& ei) = delete;
 
   public:
-    // Constructing from a copy of an existing ScopeIter.
-    ScopeIter(JSContext* cx, const ScopeIter& si
-              MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
+    // Constructing from a copy of an existing EnvironmentIter.
+    EnvironmentIter(JSContext* cx, const EnvironmentIter& ei
+                    MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
 
     // Constructing from a dynamic scope, static scope pair. All scopes are
     // considered not to be withinInitialFrame, since no frame is given.
-    ScopeIter(JSContext* cx, JSObject* scope, JSObject* staticScope
-              MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
+    EnvironmentIter(JSContext* cx, JSObject* scope, JSObject* staticScope
+                    MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
 
-    // Constructing from a frame. Places the ScopeIter on the innermost scope
+    // Constructing from a frame. Places the EnvironmentIter on the innermost scope
     // at pc.
-    ScopeIter(JSContext* cx, AbstractFramePtr frame, jsbytecode* pc
-              MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
+    EnvironmentIter(JSContext* cx, AbstractFramePtr frame, jsbytecode* pc
+                    MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
 
     inline bool done() const;
-    ScopeIter& operator++();
+    EnvironmentIter& operator++();
 
     // If done():
     inline JSObject& enclosingScope() const;
@@ -1183,9 +1153,9 @@ class MissingScopeKey
     JSObject* staticScope_;
 
   public:
-    explicit MissingScopeKey(const ScopeIter& si)
-      : frame_(si.maybeInitialFrame()),
-        staticScope_(si.maybeStaticScope())
+    explicit MissingScopeKey(const EnvironmentIter& ei)
+      : frame_(ei.maybeInitialFrame()),
+        staticScope_(ei.maybeStaticScope())
     { }
 
     AbstractFramePtr frame() const { return frame_; }
@@ -1218,9 +1188,9 @@ class LiveScopeVal
     static void staticAsserts();
 
   public:
-    explicit LiveScopeVal(const ScopeIter& si)
-      : frame_(si.initialFrame()),
-        staticScope_(si.maybeStaticScope())
+    explicit LiveScopeVal(const EnvironmentIter& ei)
+      : frame_(ei.initialFrame()),
+        staticScope_(ei.maybeStaticScope())
     { }
 
     AbstractFramePtr frame() const { return frame_; }
@@ -1359,8 +1329,9 @@ class DebugScopes
     static DebugScopeObject* hasDebugScope(JSContext* cx, ScopeObject& scope);
     static bool addDebugScope(JSContext* cx, ScopeObject& scope, DebugScopeObject& debugScope);
 
-    static DebugScopeObject* hasDebugScope(JSContext* cx, const ScopeIter& si);
-    static bool addDebugScope(JSContext* cx, const ScopeIter& si, DebugScopeObject& debugScope);
+    static DebugScopeObject* hasDebugScope(JSContext* cx, const EnvironmentIter& ei);
+    static bool addDebugScope(JSContext* cx, const EnvironmentIter& ei,
+                              DebugScopeObject& debugScope);
 
     static bool updateLiveScopes(JSContext* cx);
     static LiveScopeVal* hasLiveScope(ScopeObject& scope);
@@ -1374,7 +1345,7 @@ class DebugScopes
     // In debug-mode, these must be called whenever exiting a scope that might
     // have stack-allocated locals.
     static void onPopCall(AbstractFramePtr frame, JSContext* cx);
-    static void onPopBlock(JSContext* cx, const ScopeIter& si);
+    static void onPopBlock(JSContext* cx, const EnvironmentIter& ei);
     static void onPopBlock(JSContext* cx, AbstractFramePtr frame, jsbytecode* pc);
     static void onPopWith(AbstractFramePtr frame);
     static void onPopStrictEvalScope(AbstractFramePtr frame);
@@ -1508,19 +1479,19 @@ ScopeObject::aliasedVar(ScopeCoordinate sc)
 }
 
 inline bool
-ScopeIter::done() const
+EnvironmentIter::done() const
 {
     return ssi_.done();
 }
 
 inline bool
-ScopeIter::hasSyntacticScopeObject() const
+EnvironmentIter::hasSyntacticScopeObject() const
 {
     return ssi_.hasSyntacticDynamicScopeObject();
 }
 
 inline bool
-ScopeIter::hasNonSyntacticScopeObject() const
+EnvironmentIter::hasNonSyntacticScopeObject() const
 {
     // The case we're worrying about here is a NonSyntactic static scope which
     // has 0+ corresponding non-syntactic DynamicWithObject scopes, a
@@ -1534,13 +1505,13 @@ ScopeIter::hasNonSyntacticScopeObject() const
 }
 
 inline bool
-ScopeIter::hasAnyScopeObject() const
+EnvironmentIter::hasAnyScopeObject() const
 {
     return hasSyntacticScopeObject() || hasNonSyntacticScopeObject();
 }
 
 inline bool
-ScopeIter::canHaveSyntacticScopeObject() const
+EnvironmentIter::canHaveSyntacticScopeObject() const
 {
     if (ssi_.done())
         return false;
@@ -1565,7 +1536,7 @@ ScopeIter::canHaveSyntacticScopeObject() const
 }
 
 inline JSObject&
-ScopeIter::enclosingScope() const
+EnvironmentIter::enclosingScope() const
 {
     // As an engine invariant (maintained internally and asserted by Execute),
     // ScopeObjects and non-ScopeObjects cannot be interleaved on the scope

@@ -1,0 +1,18 @@
+Parser:
+  - remove uses of op on ParseNode
+
+BCE:
+  - remove dead StaticScope stuff from SharedContext
+  - for loops
+  - params
+  - TDZ
+  - Annex B
+
+VM:
+  - hook new scopes in
+
+XDR
+Debugger scopes
+
+rename ScopeCoordinate -> EnvironmentCoordinate
+rename BlockScope -> LexicalScope

@@ -44,12 +44,12 @@ InterpreterFrame::initExecuteFrame(JSContext* cx, HandleScript script, AbstractF
     RootedValue newTarget(cx, newTargetValue);
     if (script->isDirectEvalInFunction()) {
         if (evalInFramePrev) {
-            if (newTarget.isNull() && evalInFramePrev.script()->functionOrCallerFunction())
+            if (newTarget.isNull()) // TODOshu && evalInFramePrev.script()->functionOrCallerFunction())
                 newTarget = evalInFramePrev.newTarget();
         } else {
             FrameIter iter(cx);
             MOZ_ASSERT(!iter.isWasm());
-            if (newTarget.isNull() && iter.script()->functionOrCallerFunction())
+            if (newTarget.isNull()) // TODOshu && iter.script()->functionOrCallerFunction())
                 newTarget = iter.newTarget();
         }
     }

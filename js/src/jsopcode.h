@@ -49,11 +49,11 @@ enum {
                                        atom index */
     JOF_INT32           = 14,       /* int32_t immediate operand */
     JOF_UINT32          = 15,       /* uint32_t immediate operand */
-    JOF_OBJECT          = 16,       /* unsigned 16-bit object index */
+    JOF_OBJECT          = 16,       /* unsigned 32-bit object index */
     JOF_REGEXP          = 17,       /* unsigned 32-bit regexp index */
     JOF_INT8            = 18,       /* int8_t immediate operand */
     JOF_ATOMOBJECT      = 19,       /* uint16_t constant index + object index */
-    /* 20 is unused */
+    JOF_SCOPE           = 20,       /* unsigned 32-bit scope index */
     JOF_SCOPECOORD      = 21,       /* embedded ScopeCoordinate immediate */
     JOF_TYPEMASK        = 0x001f,   /* mask for above immediate types */
 

@@ -44,6 +44,7 @@ class PlainObject;
 class PropertyName;
 class RegExpObject;
 class SavedFrame;
+class Scope;
 class ScopeObject;
 class ScriptSourceObject;
 class Shape;
@@ -100,6 +101,7 @@ class JitCode;
     D(js::PropertyName*) \
     D(js::RegExpObject*) \
     D(js::SavedFrame*) \
+    D(js::Scope*) \
     D(js::ScopeObject*) \
     D(js::ScriptSourceObject*) \
     D(js::Shape*) \

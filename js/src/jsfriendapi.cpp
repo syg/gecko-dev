@@ -778,7 +778,7 @@ FormatFrame(JSContext* cx, const ScriptFrameIter& iter, char* buf, int num,
         return nullptr;
 
     if (showArgs && iter.hasArgs()) {
-        BindingIter bi(script);
+        SimpleFormalParameterIter fi(script);
         bool first = true;
         for (unsigned i = 0; i < iter.numActualArgs(); i++) {
             RootedValue arg(cx);
@@ -814,11 +814,11 @@ FormatFrame(JSContext* cx, const ScriptFrameIter& iter, char* buf, int num,
             const char* name = nullptr;
 
             if (i < iter.numFormalArgs()) {
-                MOZ_ASSERT(i == bi.argIndex());
-                name = nameBytes.encodeLatin1(cx, bi->name());
+                MOZ_ASSERT(fi.position() == i);
+                name = nameBytes.encodeLatin1(cx, fi.name());
                 if (!name)
                     return nullptr;
-                bi++;
+                fi++;
             }
 
             if (value) {

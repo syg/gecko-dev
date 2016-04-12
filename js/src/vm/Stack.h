@@ -85,7 +85,7 @@ class CommonFrameLayout;
 // InterpreterActivation) is a local var of js::Interpret.
 
 enum MaybeCheckAliasing { CHECK_ALIASING = true, DONT_CHECK_ALIASING = false };
-enum MaybeCheckLexical { CheckLexical = true, DontCheckLexical = false };
+enum MaybeCheckTDZ { CheckTDZ = true, DontCheckTDZ = false };
 
 /*****************************************************************************/
 

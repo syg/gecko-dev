@@ -91,14 +91,11 @@ StaticScopeIter<allowGC>::operator++(int)
     } else if (obj->template is<StaticNonSyntacticScope>()) {
         obj = obj->template as<StaticNonSyntacticScope>().enclosingScope();
     } else if (obj->template is<ModuleObject>()) {
-        obj = obj->template as<ModuleObject>().enclosingStaticScope();
+        // TODOshu obj = obj->template as<ModuleObject>().enclosingStaticScope();
     } else if (onNamedLambda || !obj->template as<JSFunction>().isNamedLambda()) {
         onNamedLambda = false;
         JSFunction& fun = obj->template as<JSFunction>();
-        if (fun.isBeingParsed())
-            obj = fun.functionBox()->enclosingStaticScope();
-        else
-            obj = fun.nonLazyScript()->enclosingStaticScope();
+        obj = fun.nonLazyScript()->enclosingStaticScope();
     } else {
         onNamedLambda = true;
     }
@@ -112,8 +109,6 @@ StaticScopeIter<allowGC>::hasSyntacticDynamicScopeObject() const
 {
     if (obj->template is<JSFunction>()) {
         JSFunction& fun = obj->template as<JSFunction>();
-        if (fun.isBeingParsed())
-            return fun.functionBox()->needsCallObject();
         return fun.needsCallObject();
     }
     if (obj->template is<ModuleObject>())
@@ -209,16 +204,6 @@ StaticScopeIter<allowGC>::fun() const
 {
     MOZ_ASSERT(type() == Function);
     return obj->template as<JSFunction>();
-}
-
-template <AllowGC allowGC>
-inline frontend::FunctionBox*
-StaticScopeIter<allowGC>::maybeFunctionBox() const
-{
-    MOZ_ASSERT(type() == Function);
-    if (fun().isBeingParsed())
-        return fun().functionBox();
-    return nullptr;
 }
 
 template <AllowGC allowGC>

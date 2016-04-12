@@ -41,11 +41,10 @@ static bool
 IsEvalCacheCandidate(JSScript* script)
 {
     // Make sure there are no inner objects which might use the wrong parent
-    // and/or call scope by reusing the previous eval's script. Skip the
-    // script's first object, which entrains the eval's scope.
-    return script->savedCallerFun() &&
-           !script->hasSingletons() &&
-           script->objects()->length == 1;
+    // and/or call scope by reusing the previous eval's script.
+    // TODOshu check presence of caller function in eval scope
+    return !script->hasSingletons() &&
+           script->objects()->length == 0;
 }
 
 /* static */ HashNumber
@@ -283,18 +282,14 @@ EvalKernel(JSContext* cx, HandleValue v, EvalType evalType, AbstractFramePtr cal
         if (maybeScript && maybeScript->scriptSource()->introducerFilename())
             introducerFilename = maybeScript->scriptSource()->introducerFilename();
 
-        RootedObject enclosing(cx);
+        RootedScope enclosing(cx);
         if (evalType == DIRECT_EVAL)
-            enclosing = callerScript->innermostStaticScope(pc);
+            enclosing = callerScript->innermostScope(pc);
         else
-            enclosing = &cx->global()->lexicalScope().staticBlock();
-        Rooted<StaticEvalScope*> staticScope(cx, StaticEvalScope::create(cx, enclosing));
-        if (!staticScope)
-            return false;
+            enclosing = cx->emptyGlobalScope();
 
         CompileOptions options(cx);
         options.setIsRunOnce(true)
-               .setForEval(true)
                .setNoScriptRval(false)
                .setMutedErrors(mutedErrors)
                .maybeMakeStrictMode(evalType == DIRECT_EVAL && IsStrictEvalPC(pc));
@@ -316,14 +311,11 @@ EvalKernel(JSContext* cx, HandleValue v, EvalType evalType, AbstractFramePtr cal
                                                   ? SourceBufferHolder::GiveOwnership
                                                   : SourceBufferHolder::NoOwnership;
         SourceBufferHolder srcBuf(chars, linearStr->length(), ownership);
-        JSScript* compiled = frontend::CompileScript(cx, &cx->tempLifoAlloc(),
-                                                     scopeobj, staticScope, callerScript,
-                                                     options, srcBuf, linearStr);
+        JSScript* compiled = frontend::CompileEvalScript(cx, &cx->tempLifoAlloc(),
+                                                         scopeobj, enclosing,
+                                                         options, srcBuf);
         if (!compiled)
             return false;
-
-        if (compiled->strict())
-            staticScope->setStrict();
 
         esg.setNewScript(compiled);
     }
@@ -375,14 +367,10 @@ js::DirectEvalStringFromIon(JSContext* cx,
         if (maybeScript && maybeScript->scriptSource()->introducerFilename())
             introducerFilename = maybeScript->scriptSource()->introducerFilename();
 
-        RootedObject enclosing(cx, callerScript->innermostStaticScope(pc));
-        Rooted<StaticEvalScope*> staticScope(cx, StaticEvalScope::create(cx, enclosing));
-        if (!staticScope)
-            return false;
+        RootedScope enclosing(cx, callerScript->innermostScope(pc));
 
         CompileOptions options(cx);
         options.setIsRunOnce(true)
-               .setForEval(true)
                .setNoScriptRval(false)
                .setMutedErrors(mutedErrors)
                .maybeMakeStrictMode(IsStrictEvalPC(pc));
@@ -404,14 +392,11 @@ js::DirectEvalStringFromIon(JSContext* cx,
                                                   ? SourceBufferHolder::GiveOwnership
                                                   : SourceBufferHolder::NoOwnership;
         SourceBufferHolder srcBuf(chars, linearStr->length(), ownership);
-        JSScript* compiled = frontend::CompileScript(cx, &cx->tempLifoAlloc(),
-                                                     scopeObj, staticScope, callerScript,
-                                                     options, srcBuf, linearStr);
+        JSScript* compiled = frontend::CompileEvalScript(cx, &cx->tempLifoAlloc(),
+                                                         scopeObj, enclosing,
+                                                         options, srcBuf);
         if (!compiled)
             return false;
-
-        if (compiled->strict())
-            staticScope->setStrict();
 
         esg.setNewScript(compiled);
     }

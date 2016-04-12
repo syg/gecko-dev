@@ -335,6 +335,12 @@ GlobalObject::createInternal(JSContext* cx, const Class* clasp)
         return nullptr;
     global->setReservedSlot(LEXICAL_SCOPE, ObjectValue(*lexical));
 
+    if (!cx->runtime()->emptyGlobalScope) {
+        cx->runtime()->emptyGlobalScope = GlobalScope::create(cx, ScopeKind::Global, nullptr);
+        if (!cx->runtime()->emptyGlobalScope)
+            return nullptr;
+    }
+
     cx->compartment()->initGlobal(*global);
 
     if (!global->setQualifiedVarObj(cx))

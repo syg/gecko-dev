@@ -750,7 +750,7 @@ CheckDOMProxyExpandoDoesNotShadow(JSContext* cx, MacroAssembler& masm, JSObject*
 
 static void
 GenerateReadSlot(JSContext* cx, IonScript* ion, MacroAssembler& masm,
-                 IonCache::StubAttacher& attacher, MaybeCheckLexical checkLexical,
+                 IonCache::StubAttacher& attacher, MaybeCheckTDZ checkTDZ,
                  JSObject* obj, JSObject* holder, Shape* shape, Register object,
                  TypedOrValueRegister output, Label* failures = nullptr)
 {
@@ -759,7 +759,7 @@ GenerateReadSlot(JSContext* cx, IonScript* ion, MacroAssembler& masm,
     // common point to patch.
     bool multipleFailureJumps = (obj != holder)
                              || obj->is<UnboxedPlainObject>()
-                             || (checkLexical && output.hasValue())
+                             || (checkTDZ && output.hasValue())
                              || (failures != nullptr && failures->used());
 
     // If we have multiple failure jumps but didn't get a label from the
@@ -849,7 +849,7 @@ GenerateReadSlot(JSContext* cx, IonScript* ion, MacroAssembler& masm,
     // Slot access.
     if (holder) {
         EmitLoadSlot(masm, &holder->as<NativeObject>(), shape, holderReg, output, scratchReg);
-        if (checkLexical && output.hasValue())
+        if (checkTDZ && output.hasValue())
             masm.branchTestMagic(Assembler::Equal, output.valueReg(), failures);
     } else {
         masm.moveValue(UndefinedValue(), output.valueReg());
@@ -1502,7 +1502,7 @@ GetPropertyIC::tryAttachNative(JSContext* cx, HandleScript outerScript, IonScrip
 
     switch (type) {
       case CanAttachReadSlot:
-        GenerateReadSlot(cx, ion, masm, attacher, DontCheckLexical, obj, holder,
+        GenerateReadSlot(cx, ion, masm, attacher, DontCheckTDZ, obj, holder,
                          shape, object(), output(), maybeFailures);
         attachKind = idempotent() ? "idempotent reading"
                                     : "non idempotent reading";
@@ -1585,7 +1585,7 @@ GetPropertyIC::tryAttachUnboxedExpando(JSContext* cx, HandleScript outerScript, 
     Label* maybeFailures = failures.used() ? &failures : nullptr;
 
     StubAttacher attacher(*this);
-    GenerateReadSlot(cx, ion, masm, attacher, DontCheckLexical, obj, obj,
+    GenerateReadSlot(cx, ion, masm, attacher, DontCheckTDZ, obj, obj,
                      shape, object(), output(), maybeFailures);
     return linkAndAttachStub(cx, masm, attacher, ion, "read unboxed expando",
                              JS::TrackedOutcome::ICGetPropStub_UnboxedReadExpando);
@@ -4837,7 +4837,7 @@ NameIC::attachReadSlot(JSContext* cx, HandleScript outerScript, IonScript* ion,
     // doesn't generate the extra guard.
     //
     // NAME ops must do their own TDZ checks.
-    GenerateReadSlot(cx, ion, masm, attacher, CheckLexical, holderBase, holder, shape, scratchReg,
+    GenerateReadSlot(cx, ion, masm, attacher, CheckTDZ, holderBase, holder, shape, scratchReg,
                      outputReg(), failures.used() ? &failures : nullptr);
 
     return linkAndAttachStub(cx, masm, attacher, ion, "generic",

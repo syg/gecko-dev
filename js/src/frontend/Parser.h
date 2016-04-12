@@ -15,227 +15,449 @@
 
 #include "frontend/BytecodeCompiler.h"
 #include "frontend/FullParseHandler.h"
-#include "frontend/ParseMaps.h"
-#include "frontend/ParseNode.h"
 #include "frontend/SharedContext.h"
 #include "frontend/SyntaxParseHandler.h"
+
+#include "frontend/ParseNode-inl.h"
 
 namespace js {
 
 class ModuleObject;
-class StaticFunctionBoxScopeObject;
 
 namespace frontend {
 
-struct StmtInfoPC : public StmtInfoBase
+enum class DeclarationKind : uint8_t
 {
-    static const unsigned BlockIdLimit = 1 << ParseNode::NumBlockIdBits;
-
-    StmtInfoPC*     enclosing;
-    StmtInfoPC*     enclosingScope;
-
-    uint32_t        blockid;        /* for simplified dominance computation */
-    uint32_t        innerBlockScopeDepth; /* maximum depth of nested block scopes, in slots */
-
-    // Lexical declarations inside switches are tricky because the block id
-    // doesn't convey dominance information. Record what index the current
-    // case's lexical declarations start at so we may generate dead zone
-    // checks for other cases' declarations.
-    //
-    // Only valid if type is StmtType::SWITCH.
-    uint16_t        firstDominatingLexicalInCase;
-
-    explicit StmtInfoPC(ExclusiveContext* cx)
-      : StmtInfoBase(cx),
-        blockid(BlockIdLimit),
-        innerBlockScopeDepth(0),
-        firstDominatingLexicalInCase(0)
-    {}
+    SimpleFormalParameter,
+    FormalParameter,
+    Var,
+    Let,
+    Const,
+    Import,
+    BodyLevelFunction,
+    LexicalFunction,
+    CatchParameter
 };
 
-class SharedContext;
-
-typedef Vector<Definition*, 16> DeclVector;
-
-struct GenericParseContext
+static inline bool
+DeclarationKindIsLexical(DeclarationKind kind)
 {
-    // Enclosing function or global context.
-    GenericParseContext* parent;
+    return kind == DeclarationKind::Let ||
+           kind == DeclarationKind::Const ||
+           kind == DeclarationKind::Import ||
+           kind == DeclarationKind::CatchParameter;
+}
 
-    // Context shared between parsing and bytecode generation.
-    SharedContext* sc;
+static inline BindingKind
+DeclarationKindToBindingKind(DeclarationKind kind)
+{
+    switch (kind) {
+      case DeclarationKind::SimpleFormalParameter:
+      case DeclarationKind::FormalParameter:
+        return BindingKind::FormalParameter;
 
-    // The following flags are set when a particular code feature is detected
-    // in a function.
+      case DeclarationKind::Var:
+      case DeclarationKind::BodyLevelFunction:
+        return BindingKind::Var;
 
-    // Function has 'return <expr>;'
-    bool funHasReturnExpr:1;
+      case DeclarationKind::Let:
+      case DeclarationKind::Import:
+      case DeclarationKind::LexicalFunction:
+      case DeclarationKind::CatchParameter:
+        return BindingKind::Let;
 
-    // Function has 'return;'
-    bool funHasReturnVoid:1;
+      case DeclarationKind::Const:
+        return BindingKind::Const;
 
-    GenericParseContext(GenericParseContext* parent, SharedContext* sc)
-      : parent(parent),
-        sc(sc),
-        funHasReturnExpr(false),
-        funHasReturnVoid(false)
-    {}
-};
+      default:
+        MOZ_CRASH("Bad DeclarationKind");
+    }
+}
 
 /*
  * The struct ParseContext stores information about the current parsing context,
  * which is part of the parser state (see the field Parser::pc). The current
  * parsing context is either the global context, or the function currently being
  * parsed. When the parser encounters a function definition, it creates a new
- * ParseContext, makes it the new current context, and sets its parent to the
- * context in which it encountered the definition.
+ * ParseContext, makes it the new current context.
  */
-template <typename ParseHandler>
-struct MOZ_STACK_CLASS ParseContext : public GenericParseContext
+class ParseContext : public Nestable<ParseContext>
 {
-    typedef typename ParseHandler::Node Node;
-    typedef typename ParseHandler::DefinitionNode DefinitionNode;
+  public:
+    // The intra-function statement stack.
+    //
+    // Used for early error checking that depend on the nesting structure of
+    // statements, such as continue/break targets, labels, and unbraced
+    // lexical declarations.
+    class Statement : public Nestable<Statement>
+    {
+        StatementKind kind_;
 
-    uint32_t        bodyid;         /* block number of program/function body */
+      public:
+        using Nestable<Statement>::enclosing;
+        using Nestable<Statement>::findNearest;
 
-    StmtInfoStack<StmtInfoPC> stmtStack;
+        Statement(ParseContext* pc, StatementKind kind)
+          : Nestable<Statement>(&pc->innermostStatement_),
+            kind_(kind)
+        { }
 
-    Node            maybeFunction;  /* sc->isFunctionBox, the pn where pn->pn_funbox == sc */
+        template <typename T> inline bool is() const;
 
-    // If sc->isFunctionBox(), this is used to temporarily link up the
-    // FunctionBox with the JSFunction so the static scope chain may be walked
-    // without a JSScript.
-    mozilla::Maybe<JSFunction::AutoParseUsingFunctionBox> parseUsingFunctionBox;
+        template <typename T>
+        T& as() {
+            MOZ_ASSERT(is<T>());
+            return static_cast<T&>(*this);
+        }
 
+        StatementKind kind() const {
+            return kind_;
+        }
+
+        void refineForKind(StatementKind newForKind) {
+            MOZ_ASSERT(kind_ == StatementKind::ForLoop);
+            MOZ_ASSERT(newForKind == StatementKind::ForInLoop ||
+                       newForKind == StatementKind::ForOfLoop);
+            kind_ = newForKind;
+        }
+    };
+
+    class LabelStatement : public Statement
+    {
+        RootedAtom label_;
+
+      public:
+        LabelStatement(ParseContext* pc, JSAtom* label)
+          : Statement(pc, StatementKind::Label),
+            label_(pc->sc_->context, label)
+        { }
+
+        HandleAtom label() const {
+            return label_;
+        }
+    };
+
+    // The intra-function scope stack.
+    //
+    // Tracks declared and used names within a scope.
+    class Scope : public Nestable<Scope>
+    {
+        class DeclaredNameInfo
+        {
+            friend class Scope;
+
+            DeclarationKind kind_;
+
+            // If the declared name is a binding, whether the binding is
+            // closed over. Its value is meaningless if the declared name is
+            // not a binding (i.e., a 'var' declared name in a non-'var'
+            // scope).
+            bool closedOver_;
+
+          public:
+            // Default constructor for InlineMap.
+            DeclaredNameInfo()
+              : kind_(DeclarationKind::Var),
+                closedOver_(false)
+            { }
+
+            explicit DeclaredNameInfo(DeclarationKind kind)
+              : kind_(kind),
+                closedOver_(false)
+            { }
+
+            DeclarationKind kind() const {
+                return kind_;
+            }
+
+            void setClosedOver() {
+                closedOver_ = true;
+            }
+
+            bool closedOver() const {
+                return closedOver_;
+            }
+        };
+
+        using DeclaredNameMap = InlineMap<JSAtom*,
+                                          DeclaredNameInfo,
+                                          8,
+                                          DefaultHasher<JSAtom*>,
+                                          LifoAllocPolicy<Fallible>>;
+
+        using UsedNameSet = InlineSet<JSAtom*,
+                                      24,
+                                      DefaultHasher<JSAtom*>,
+                                      LifoAllocPolicy<Fallible>>;
+
+        // Data is LifoAlloc'd to save C++ stack.
+        struct Data
+        {
+            // Names declared in this scope. Corresponds to the union of
+            // VarDeclaredNames and LexicallyDeclaredNames in the ES spec.
+            //
+            // A 'var' declared name is a member of the declared name set of every
+            // scope in its scope contour.
+            //
+            // A lexically declared name is a member only of the declared name set of
+            // the scope in which it is declared.
+            DeclaredNameMap declared;
+
+            // Names used in this scope.
+            UsedNameSet used;
+
+            explicit Data(LifoAlloc& alloc)
+              : declared(alloc),
+                used(alloc)
+            { }
+        };
+
+        Data* data_;
+
+        Data& data() {
+            MOZ_ASSERT(data_);
+            return *data_;
+        }
+
+        const Data& data() const {
+            MOZ_ASSERT(data_);
+            return *data_;
+        }
+
+        bool maybeReportOOM(ParseContext* pc, bool result) {
+            if (!result)
+                ReportOutOfMemory(pc->sc()->context);
+            return result;
+        }
+
+      public:
+        using DeclaredNamePtr = DeclaredNameMap::Ptr;
+        using AddDeclaredNamePtr = DeclaredNameMap::AddPtr;
+
+        using Nestable<Scope>::enclosing;
+
+        explicit Scope(ParseContext* pc)
+          : Nestable<Scope>(&pc->innermostScope_),
+            data_(nullptr)
+        { }
+
+        ~Scope();
+
+        void dump(ParseContext* pc);
+
+        bool init(ParseContext* pc) {
+            data_ = pc->scopeAlloc_.new_<Data>(pc->scopeAlloc_);
+            return maybeReportOOM(pc, !!data_);
+        }
+
+        DeclaredNamePtr lookupDeclaredName(JSAtom* name) {
+            return data().declared.lookup(name);
+        }
+
+        AddDeclaredNamePtr lookupDeclaredNameForAdd(JSAtom* name) {
+            return data().declared.lookupForAdd(name);
+        }
+
+        bool addDeclaredName(ParseContext* pc, AddDeclaredNamePtr& p, JSAtom* name,
+                             DeclarationKind kind)
+        {
+            return maybeReportOOM(pc, data().declared.add(p, name, DeclaredNameInfo(kind)));
+        }
+
+        bool addUsedName(ParseContext* pc, JSAtom* name) {
+            return maybeReportOOM(pc, data().used.put(name));
+        }
+
+        bool hasUsedName(JSAtom* name) {
+            return data().used.has(name);
+        }
+
+        // An iterator for the set of free names in the current scope: the set
+        // of uses subtracting the set of declared names.
+        class FreeNameIter
+        {
+            friend class Scope;
+
+            bool isVarScope_;
+            Scope& scope_;
+            UsedNameSet::Range usedRange_;
+
+            FreeNameIter(Scope& scope, bool isVarScope)
+              : isVarScope_(isVarScope),
+                scope_(scope),
+                usedRange_(scope.data().used.all())
+            {
+                settle();
+            }
+
+            void settle() {
+                while (!usedRange_.empty()) {
+                    DeclaredNameMap::Ptr p = scope_.data().declared.lookup(usedRange_.front());
+                    if (!p)
+                        break;
+                    // A use of a 'var' declared in a lexical scope is
+                    // considered free, as it's not binding in that lexical
+                    // scope.
+                    if (!isVarScope_ && p->value().kind() == DeclarationKind::Var)
+                        break;
+                    usedRange_.popFront();
+                }
+            }
+
+          public:
+            bool done() const {
+                return usedRange_.empty();
+            }
+
+            explicit operator bool() const {
+                return !done();
+            }
+
+            JSAtom* name() {
+                MOZ_ASSERT(!done());
+                return usedRange_.front();
+            }
+
+            void operator++(int) {
+                MOZ_ASSERT(!done());
+                usedRange_.popFront();
+                settle();
+            }
+        };
+
+        inline FreeNameIter freeNames(ParseContext* pc);
+
+        // Propagate all free names from the current scope to all enclosing
+        // scopes. Required on scope exit.
+        bool propagateFreeNames(ParseContext* pc);
+
+        // Mark the free names from an inner function as closed over. For each
+        // name in the range, mark the name as used in scopes where it is not
+        // a binding, and closed over in scopes where it is a binding.
+        template <typename NameRange>
+        bool addClosedOverNames(ParseContext* pc, NameRange r);
+
+        // An iterator for the set of names a scope binds: the set of all
+        // declared names for 'var' scopes, and the set of lexically declared
+        // names for non-'var' scopes.
+        class BindingIter
+        {
+            friend class Scope;
+
+            bool isVarScope_;
+            DeclaredNameMap::Range declaredRange_;
+
+            BindingIter(Scope& scope, bool isVarScope)
+              : isVarScope_(isVarScope),
+                declaredRange_(scope.data().declared.all())
+            {
+                settle();
+            }
+
+            void settle() {
+                if (isVarScope_)
+                    return;
+                while (!declaredRange_.empty()) {
+                    if (DeclarationKindIsLexical(declaredRange_.front().value().kind()))
+                        break;
+                    declaredRange_.popFront();
+                }
+            }
+
+          public:
+            bool done() const {
+                return declaredRange_.empty();
+            }
+
+            explicit operator bool() const {
+                return !done();
+            }
+
+            JSAtom* name() {
+                MOZ_ASSERT(!done());
+                return declaredRange_.front().key();
+            }
+
+            DeclarationKind declarationKind() {
+                MOZ_ASSERT(!done());
+                return declaredRange_.front().value().kind();
+            }
+
+            BindingKind kind() {
+                return DeclarationKindToBindingKind(declarationKind());
+            }
+
+            bool closedOver() {
+                MOZ_ASSERT(!done());
+                return declaredRange_.front().value().closedOver();
+            }
+
+            void operator++(int) {
+                MOZ_ASSERT(!done());
+                declaredRange_.popFront();
+                settle();
+            }
+        };
+
+        inline BindingIter bindings(ParseContext* pc);
+
+        static size_t sizeOfData() {
+            return sizeof(Data);
+        }
+    };
+
+  private:
+    // The LifoAlloc for ParseScopes. A separate allocator is used because
+    // ParseScopes are large, and unlike ParseNodes, they don't live beyond
+    // the ParseContext's lifetime.
+    //
+    // Ideally ParseScopes would be stack allocated, but the C++ stack limit
+    // is a concern when parsing.
+    static const size_t InlineScopesPerAllocChunk = 16;
+    LifoAlloc scopeAlloc_;
+
+    // Context shared between parsing and bytecode generation.
+    SharedContext* sc_;
+
+    // The innermost statement, i.e., top of the statement stack.
+    Statement* innermostStatement_;
+
+    // The innermost scope, i.e., top of the scope stack.
+    //
+    // The outermost scope in the stack is varScope_.
+    Scope* innermostScope_;
+
+    // If isFunctionBox() and the function is a named lambda, the DeclEnv
+    // scope for named lambdas.
+    mozilla::Maybe<Scope> declEnvScope_;
+
+    // If isFunctionBox(), the scope for parameter default expressions.
+    mozilla::Maybe<Scope> defaultsScope_;
+
+    // The body-level scope. This always exists, but since Scopes are LIFO, is
+    // wrapped in a Maybe to ensure the correct nesting order of declEnvScope,
+    // defaultsScope, and varScope.
+    mozilla::Maybe<Scope> varScope_;
+
+    // Set when compiling a function using Parser::standaloneFunctionBody via
+    // the Function or Generator constructor.
+    bool isStandaloneFunctionBody_;
+
+    // Set when encountering a super.property inside a method. We need to mark
+    // the nearest super scope as needing a home object.
+    bool superScopeNeedsHomeObject_;
+
+  public:
     // lastYieldOffset stores the offset of the last yield that was parsed.
     // NoYieldOffset is its initial value.
     static const uint32_t NoYieldOffset = UINT32_MAX;
-    uint32_t         lastYieldOffset;
+    uint32_t lastYieldOffset;
 
-    // Most functions start off being parsed as non-generators.
-    // Non-generators transition to LegacyGenerator on parsing "yield" in JS 1.7.
-    // An ES6 generator is marked as a "star generator" before its body is parsed.
-    GeneratorKind generatorKind() const {
-        return sc->isFunctionBox() ? sc->asFunctionBox()->generatorKind() : NotGenerator;
-    }
-    bool isGenerator() const { return generatorKind() != NotGenerator; }
-    bool isLegacyGenerator() const { return generatorKind() == LegacyGenerator; }
-    bool isStarGenerator() const { return generatorKind() == StarGenerator; }
+    // Simple formal parameter names, in order of appearance. Only used when
+    // isFunctionBox().
+    Vector<JSAtom*> simpleFormalParameterNames;
 
-    bool isArrowFunction() const {
-        return sc->isFunctionBox() && sc->asFunctionBox()->function()->isArrow();
-    }
-    bool isMethod() const {
-        return sc->isFunctionBox() && sc->asFunctionBox()->function()->isMethod();
-    }
-
-    uint32_t        blockScopeDepth; /* maximum depth of nested block scopes, in slots */
-    Node            blockNode;      /* parse node for a block with let declarations
-                                       (block with its own lexical scope)  */
-
-  private:
-    AtomDecls<ParseHandler> decls_;     /* function, const, and var declarations */
-    DeclVector      args_;              /* argument definitions */
-    DeclVector      vars_;              /* var/const definitions */
-    DeclVector      bodyLevelLexicals_; /* lexical definitions at body-level */
-
-    typedef HashSet<JSAtom*, DefaultHasher<JSAtom*>, LifoAllocPolicy<Fallible>> DeclaredNameSet;
-    DeclaredNameSet bodyLevelLexicallyDeclaredNames_;
-
-    bool checkLocalsOverflow(TokenStream& ts);
-
-  public:
-    const AtomDecls<ParseHandler>& decls() const {
-        return decls_;
-    }
-
-    uint32_t numArgs() const {
-        MOZ_ASSERT(sc->isFunctionBox());
-        return args_.length();
-    }
-
-    /*
-     * This function adds a definition to the lexical scope represented by this
-     * ParseContext.
-     *
-     * Pre-conditions:
-     *  + The caller must have already taken care of name collisions:
-     *    - For non-let definitions, this means 'name' isn't in 'decls'.
-     *    - For let definitions, this means 'name' isn't already a name in the
-     *      current block.
-     *  + The given 'pn' is either a placeholder (created by a previous unbound
-     *    use) or an un-bound un-linked name node.
-     *  + The given 'kind' is one of ARG, CONST, VAR, or LET. In particular,
-     *    NAMED_LAMBDA is handled in an ad hoc special case manner (see
-     *    LeaveFunction) that we should consider rewriting.
-     *
-     * Post-conditions:
-     *  + pc->decls().lookupFirst(name) == pn
-     *  + The given name 'pn' has been converted in-place into a
-     *    non-placeholder definition.
-     *  + If this is a function scope (sc->inFunction), 'pn' is bound to a
-     *    particular local/argument slot.
-     *  + PND_CONST is set for Definition::COSNT
-     *  + Pre-existing uses of pre-existing placeholders have been linked to
-     *    'pn' if they are in the scope of 'pn'.
-     *  + Pre-existing placeholders in the scope of 'pn' have been removed.
-     */
-    bool define(TokenStream& ts, HandlePropertyName name, Node pn, Definition::Kind kind,
-                bool declaringVarInCatchBody = false);
-
-    /*
-     * Let definitions may shadow same-named definitions in enclosing scopes.
-     * To represesent this, 'decls' is not a plain map, but actually:
-     *   decls :: name -> stack of definitions
-     * New bindings are pushed onto the stack, name lookup always refers to the
-     * top of the stack, and leaving a block scope calls popLetDecl for each
-     * name in the block's scope.
-     */
-    void popLetDecl(JSAtom* atom);
-
-    /* See the sad story in defineArg. */
-    void prepareToAddDuplicateArg(HandlePropertyName name, DefinitionNode prevDecl);
-
-    /* See the sad story in MakeDefIntoUse. */
-    MOZ_MUST_USE bool updateDecl(TokenStream& ts, JSAtom* atom, Node newDecl);
-
-    // After a script has been parsed, the parser generates the code's
-    // "bindings". Bindings are a data-structure, ultimately stored in the
-    // compiled JSScript, that serve three purposes:
-    //
-    //  - After parsing, the ParseContext is destroyed and 'decls' along with
-    //    it. Mostly, the emitter just uses the binding information stored in
-    //    the use/def nodes, but the emitter occasionally needs 'bindings' for
-    //    various scope-related queries.
-    //
-    //  - For functions, bindings provide the initial js::Shape to use when
-    //    creating a dynamic scope object (js::CallObject). This shape is used
-    //    during dynamic name lookup.
-    //
-    //  - Sometimes a script's bindings are accessed at runtime to retrieve the
-    //    contents of the lexical scope (e.g., from the debugger).
-    //
-    //  - For global and eval scripts, ES6 15.1.8 specifies that if there are
-    //    name conflicts in the script, *no* bindings from the script are
-    //    instantiated. So, record the vars and lexical bindings to check for
-    //    redeclarations in the prologue.
-    bool generateBindings(ExclusiveContext* cx, TokenStream& ts, LifoAlloc& alloc,
-                          MutableHandle<Bindings> bindings) const;
-
-  private:
-    ParseContext**  parserPC;     /* this points to the Parser's active pc
-                                       and holds either |this| or one of
-                                       |this|'s descendents */
-
-    // Value for parserPC to restore at the end. Use 'parent' instead for
-    // information about the parse chain, this may be nullptr if
-    // parent != nullptr.
-    ParseContext<ParseHandler>* oldpc;
-
-  public:
-    OwnedAtomDefnMapPtr lexdeps;    /* unresolved lexical name dependencies */
-
-    // All inner functions in this context. Only filled in when parsing syntax.
+    // All inner functions in this context. Only used when syntax parsing.
     Rooted<GCVector<JSFunction*>> innerFunctions;
 
     // In a function context, points to a Directive struct that can be updated
@@ -254,57 +476,100 @@ struct MOZ_STACK_CLASS ParseContext : public GenericParseContext
     // The comments atop checkDestructuring explain the distinction between
     // assignment-like and declaration-like destructuring patterns, and why
     // they need to be treated differently.
-    bool inDeclDestructuring:1;
+    bool inDeclDestructuring;
 
-    ParseContext(Parser<ParseHandler>* prs, GenericParseContext* parent,
-                 Node maybeFunction, SharedContext* sc, Directives* newDirectives)
-      : GenericParseContext(parent, sc),
-        bodyid(0),           // initialized in init()
-        stmtStack(prs->context),
-        maybeFunction(maybeFunction),
+    // Set when parsing a function and it has 'return <expr>;'
+    bool funHasReturnExpr;
+
+    // Set when parsing a function and it has 'return;'
+    bool funHasReturnVoid;
+
+  public:
+    template <typename ParseHandler>
+    ParseContext(Parser<ParseHandler>* prs, SharedContext* sc, Directives* newDirectives)
+      : Nestable<ParseContext>(&prs->pc),
+        scopeAlloc_(mozilla::RoundUpPow2(InlineScopesPerAllocChunk *
+                                         ParseContext::Scope::sizeOfData())),
+        sc_(sc),
+        innermostStatement_(nullptr),
+        innermostScope_(nullptr),
+        isStandaloneFunctionBody_(false),
+        superScopeNeedsHomeObject_(false),
         lastYieldOffset(NoYieldOffset),
-        blockScopeDepth(0),
-        blockNode(ParseHandler::null()),
-        decls_(prs->context, prs->alloc),
-        args_(prs->context),
-        vars_(prs->context),
-        bodyLevelLexicals_(prs->context),
-        bodyLevelLexicallyDeclaredNames_(prs->alloc),
-        parserPC(&prs->pc),
-        oldpc(prs->pc),
-        lexdeps(prs->context),
+        simpleFormalParameterNames(prs->context),
         innerFunctions(prs->context, GCVector<JSFunction*>(prs->context)),
         newDirectives(newDirectives),
-        inDeclDestructuring(false)
+        inDeclDestructuring(false),
+        funHasReturnExpr(false),
+        funHasReturnVoid(false)
     {
-        prs->pc = this;
-        if (sc->isFunctionBox())
-            parseUsingFunctionBox.emplace(prs->context, sc->asFunctionBox());
+        if (isFunctionBox()) {
+            if (functionBox()->function()->isNamedLambda())
+                declEnvScope_.emplace(this);
+            //defaultsScope_.emplace(this);
+        }
+        varScope_.emplace(this);
     }
 
     ~ParseContext();
 
-    MOZ_MUST_USE bool init(Parser<ParseHandler>& parser);
+    bool init();
+    bool finishFunctionScopes();
 
-    unsigned blockid() { return stmtStack.innermost() ? stmtStack.innermost()->blockid : bodyid; }
-
-    StmtInfoPC* innermostStmt() const { return stmtStack.innermost(); }
-    StmtInfoPC* innermostScopeStmt() const { return stmtStack.innermostScopeStmt(); }
-    StmtInfoPC* innermostNonLabelStmt() const { return stmtStack.innermostNonLabel(); }
-    JSObject* innermostStaticScope() const {
-        if (StmtInfoPC* stmt = innermostScopeStmt())
-            return stmt->staticScope;
-        return sc->staticScope();
+    SharedContext* sc() {
+        return sc_;
     }
 
-    bool isBodyLevelLexicallyDeclaredName(HandleAtom name) {
-        return bodyLevelLexicallyDeclaredNames_.has(name);
+    bool isFunctionBox() const {
+        return sc_->isFunctionBox();
     }
 
-    bool addBodyLevelLexicallyDeclaredName(TokenStream& ts, HandleAtom name) {
-        if (!bodyLevelLexicallyDeclaredNames_.put(name))
-            return ts.reportError(JSMSG_OUT_OF_MEMORY);
-        return true;
+    FunctionBox* functionBox() {
+        return sc_->asFunctionBox();
+    }
+
+    Statement* innermostStatement() {
+        return innermostStatement_;
+    }
+
+    Scope* innermostScope() {
+        // There is always at least one scope: the 'var' scope.
+        MOZ_ASSERT(innermostScope_);
+        return innermostScope_;
+    }
+
+    Scope& declEnvScope() {
+        MOZ_ASSERT(functionBox()->function()->isNamedLambda());
+        return *declEnvScope_;
+    }
+
+    Scope& defaultsScope() {
+        MOZ_ASSERT(isFunctionBox());
+        return *defaultsScope_;
+    }
+
+    Scope& varScope() {
+        return *varScope_;
+    }
+
+    Scope& outermostScope() {
+        if (isFunctionBox()) {
+            if (functionBox()->function()->isNamedLambda())
+                return declEnvScope();
+            // TODOshu defaults scope
+            // return defaultsScope();
+        }
+        return varScope();
+    }
+
+    template <typename Predicate /* (Statement*) -> bool */>
+    Statement* findInnermostStatement(Predicate predicate) {
+        return Statement::findNearest(innermostStatement_, predicate);
+    }
+
+    template <typename T, typename Predicate /* (Statement*) -> bool */>
+    T* findInnermostStatement(Predicate predicate) {
+        return Statement::findNearest<T>(innermostStatement_, predicate);
     }
 
     // True if we are at the topmost level of a entire script or function body.
@@ -314,56 +579,92 @@ struct MOZ_STACK_CLASS ParseContext : public GenericParseContext
     //   function f1() { function f2() { } }
     //   if (cond) { function f3() { if (cond) { function f4() { } } } }
     //
-    bool atBodyLevel(StmtInfoPC* stmt) {
-        // 'eval' and non-syntactic scripts are always under an invisible
-        // lexical scope, but since it is not syntactic, it should still be
-        // considered at body level.
-        if (sc->staticScope()->is<StaticEvalScope>()) {
-            bool bl = !stmt->enclosing;
-            MOZ_ASSERT_IF(bl, stmt->type == StmtType::BLOCK);
-            MOZ_ASSERT_IF(bl, stmt->staticScope
-                                  ->template as<StaticBlockScope>()
-                                  .enclosingStaticScope() == sc->staticScope());
-            return bl;
-        }
-        return !stmt;
-    }
-
     bool atBodyLevel() {
-        return atBodyLevel(innermostStmt());
+        return !innermostStatement_;
     }
 
     bool atGlobalLevel() {
-        return atBodyLevel() && sc->isGlobalContext() && !innermostScopeStmt();
+        return atBodyLevel() && sc_->isGlobalContext();
     }
 
     // True if we are at the topmost level of a module only.
     bool atModuleLevel() {
-        return atBodyLevel() && sc->isModuleBox();
+        return atBodyLevel() && sc_->isModuleBox();
     }
 
-    // True if this is the ParseContext for the body of a function created by
-    // the Function constructor.
-    bool isFunctionConstructorBody() const {
-        return sc->isFunctionBox() && !parent && sc->asFunctionBox()->function()->isLambda();
+    void setIsStandaloneFunctionBody() {
+        isStandaloneFunctionBody_ = true;
     }
 
-    inline bool useAsmOrInsideUseAsm() const {
-        return sc->isFunctionBox() && sc->asFunctionBox()->useAsmOrInsideUseAsm();
+    bool isStandaloneFunctionBody() const {
+        return isStandaloneFunctionBody_;
+    }
+
+    void setSuperScopeNeedsHomeObject() {
+        MOZ_ASSERT(sc_->isFunctionBox());
+        superScopeNeedsHomeObject_ = true;
+    }
+
+    bool superScopeNeedsHomeObject() const {
+        return superScopeNeedsHomeObject_;
+    }
+
+    bool useAsmOrInsideUseAsm() const {
+        return sc_->isFunctionBox() && sc_->asFunctionBox()->useAsmOrInsideUseAsm();
+    }
+
+    // Most functions start off being parsed as non-generators.
+    // Non-generators transition to LegacyGenerator on parsing "yield" in JS 1.7.
+    // An ES6 generator is marked as a "star generator" before its body is parsed.
+    GeneratorKind generatorKind() const {
+        return sc_->isFunctionBox() ? sc_->asFunctionBox()->generatorKind() : NotGenerator;
+    }
+
+    bool isGenerator() const {
+        return generatorKind() != NotGenerator;
+    }
+
+    bool isLegacyGenerator() const {
+        return generatorKind() == LegacyGenerator;
+    }
+
+    bool isStarGenerator() const {
+        return generatorKind() == StarGenerator;
+    }
+
+    bool isArrowFunction() const {
+        return sc_->isFunctionBox() && sc_->asFunctionBox()->function()->isArrow();
+    }
+
+    bool isMethod() const {
+        return sc_->isFunctionBox() && sc_->asFunctionBox()->function()->isMethod();
     }
 };
 
-template <typename ParseHandler>
+template <>
+inline bool
+ParseContext::Statement::is<ParseContext::LabelStatement>() const
+{
+    return kind_ == StatementKind::Label;
+}
+
+inline ParseContext::Scope::FreeNameIter
+ParseContext::Scope::freeNames(ParseContext* pc)
+{
+    return FreeNameIter(*this, &pc->varScope() == this);
+}
+
+inline ParseContext::Scope::BindingIter
+ParseContext::Scope::bindings(ParseContext* pc)
+{
+    return BindingIter(*this, &pc->varScope() == this);
+}
+
 inline
-Directives::Directives(ParseContext<ParseHandler>* parent)
-  : strict_(parent->sc->strict()),
+Directives::Directives(ParseContext* parent)
+  : strict_(parent->sc()->strict()),
     asmJS_(parent->useAsmOrInsideUseAsm())
 {}
-
-template <typename ParseHandler>
-struct BindData;
-
-class CompExprTransplanter;
 
 enum VarContext { HoistVars, DontHoistVars };
 enum PropListType { ObjectLiteral, ClassBody, DerivedClassBody };
@@ -393,25 +694,6 @@ enum TripledotHandling { TripledotAllowed, TripledotProhibited };
 template <typename ParseHandler>
 class Parser : private JS::AutoGCRooter, public StrictModeGetter
 {
-    class MOZ_STACK_CLASS AutoPushStmtInfoPC
-    {
-        Parser<ParseHandler>& parser_;
-        StmtInfoPC stmt_;
-
-      public:
-        AutoPushStmtInfoPC(Parser<ParseHandler>& parser, StmtType type);
-        AutoPushStmtInfoPC(Parser<ParseHandler>& parser, StmtType type,
-                           NestedStaticScope& staticScope);
-        ~AutoPushStmtInfoPC();
-
-        bool generateBlockId();
-        bool makeInnermostLexicalScope(StaticBlockScope& blockScope);
-
-        StmtInfoPC& operator*() { return stmt_; }
-        StmtInfoPC* operator->() { return &stmt_; }
-        operator StmtInfoPC*() { return &stmt_; }
-    };
-
     /*
      * A class for temporarily stashing errors while parsing continues.
      *
@@ -481,6 +763,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
 
   public:
     ExclusiveContext* const context;
+
     LifoAlloc& alloc;
 
     TokenStream         tokenStream;
@@ -490,10 +773,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     ObjectBox* traceListHead;
 
     /* innermost parse context (stack-allocated) */
-    ParseContext<ParseHandler>* pc;
-
-    // List of all block scopes.
-    AutoObjectVector blockScopes;
+    ParseContext* pc;
 
     /* Compression token for aborting. */
     SourceCompressionTask* sct;
@@ -523,7 +803,6 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     bool isUnexpectedEOF_:1;
 
     typedef typename ParseHandler::Node Node;
-    typedef typename ParseHandler::DefinitionNode DefinitionNode;
 
   public:
     /* State specific to the kind of parse being performed. */
@@ -584,26 +863,8 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
      * cx->tempLifoAlloc.
      */
     ObjectBox* newObjectBox(JSObject* obj);
-    FunctionBox* newFunctionBox(Node fn, JSFunction* fun, ParseContext<ParseHandler>* outerpc,
-                                Directives directives, GeneratorKind generatorKind,
-                                JSObject* enclosingStaticScope);
-
-    // Use when the funbox is the outermost.
-    FunctionBox* newFunctionBox(Node fn, HandleFunction fun, Directives directives,
-                                GeneratorKind generatorKind, HandleObject enclosingStaticScope)
-    {
-        return newFunctionBox(fn, fun, nullptr, directives, generatorKind,
-                              enclosingStaticScope);
-    }
-
-    // Use when the funbox should be linked to the outerpc's innermost scope.
-    FunctionBox* newFunctionBox(Node fn, HandleFunction fun, ParseContext<ParseHandler>* outerpc,
-                                Directives directives, GeneratorKind generatorKind)
-    {
-        RootedObject enclosing(context, outerpc->innermostStaticScope());
-        return newFunctionBox(fn, fun, outerpc, directives, generatorKind, enclosing);
-    }
-
+    FunctionBox* newFunctionBox(Node fn, JSFunction* fun, Directives directives,
+                                GeneratorKind generatorKind);
     ModuleBox* newModuleBox(Node pn, HandleModuleObject module, ModuleBuilder& builder);
 
     /*
@@ -612,16 +873,6 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
      */
     JSFunction* newFunction(HandleAtom atom, FunctionSyntaxKind kind, GeneratorKind generatorKind,
                             HandleObject proto);
-
-    bool generateBlockId(JSObject* staticScope, uint32_t* blockIdOut) {
-        if (blockScopes.length() == StmtInfoPC::BlockIdLimit) {
-            tokenStream.reportError(JSMSG_NEED_DIET, "program");
-            return false;
-        }
-        MOZ_ASSERT(blockScopes.length() < StmtInfoPC::BlockIdLimit);
-        *blockIdOut = blockScopes.length();
-        return blockScopes.append(staticScope);
-    }
 
     void trace(JSTracer* trc);
 
@@ -639,7 +890,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
   private:
     Parser* thisForCtor() { return this; }
 
-    JSAtom * stopStringCompression();
+    JSAtom* stopStringCompression();
 
     Node stringLiteral();
     Node noSubstitutionTemplate();
@@ -651,6 +902,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     bool checkStatementsEOF();
 
     inline Node newName(PropertyName* name);
+    inline Node newName(PropertyName* name, TokenPos pos);
     inline Node newYieldExpression(uint32_t begin, Node expr, bool isYieldStar = false);
 
     inline bool abortIfSyntaxParser();
@@ -678,23 +930,22 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     // Generator constructors.
     Node standaloneFunctionBody(HandleFunction fun, Handle<PropertyNameVector> formals,
                                 GeneratorKind generatorKind,
-                                Directives inheritedDirectives, Directives* newDirectives,
-                                HandleObject enclosingStaticScope);
+                                Directives inheritedDirectives, Directives* newDirectives);
 
     // Parse a function, given only its arguments and body. Used for lazily
     // parsed functions.
     Node standaloneLazyFunction(HandleFunction fun, bool strict, GeneratorKind generatorKind);
 
-    /*
-     * Parse a function body.  Pass StatementListBody if the body is a list of
-     * statements; pass ExpressionBody if the body is a single expression.
-     */
-    enum FunctionBodyType { StatementListBody, ExpressionBody };
-    Node functionBody(InHandling inHandling, YieldHandling yieldHandling, FunctionSyntaxKind kind,
-                      FunctionBodyType type);
+    // Parse an inner function given an enclosing ParseContext and a
+    // FunctionBox for the inner function.
+    bool innerFunction(Node pn, ParseContext* outerpc, FunctionBox* funbox,
+                       InHandling inHandling, FunctionSyntaxKind kind, GeneratorKind generatorKind,
+                       Directives inheritedDirectives, Directives* newDirectives);
 
-    bool functionArgsAndBodyGeneric(InHandling inHandling, YieldHandling yieldHandling, Node pn,
-                                    HandleFunction fun, FunctionSyntaxKind kind);
+    // Parse a function's formal parameters and its body assuming its function
+    // ParseContext is already on the stack.
+    bool functionFormalParametersAndBody(InHandling inHandling, YieldHandling yieldHandling,
+                                         Node pn, FunctionSyntaxKind kind);
 
     // Determine whether |yield| is a valid name in the current context, or
     // whether it's prohibited due to strictness, JS version, or occurrence
@@ -704,10 +955,10 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
         return versionNumber() >= JSVERSION_1_7 || pc->isGenerator();
     }
 
-    virtual bool strictMode() { return pc->sc->strict(); }
+    virtual bool strictMode() { return pc->sc()->strict(); }
     bool setLocalStrictMode(bool strict) {
         MOZ_ASSERT(tokenStream.debugHasNoLookahead());
-        return pc->sc->setLocalStrictMode(strict);
+        return pc->sc()->setLocalStrictMode(strict);
     }
 
     const ReadOnlyCompileOptions& options() const {
@@ -749,15 +1000,10 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     bool forHeadStart(YieldHandling yieldHandling,
                       ParseNodeKind* forHeadKind,
                       Node* forInitialPart,
-                      mozilla::Maybe<AutoPushStmtInfoPC>& letStmt,
-                      MutableHandle<StaticBlockScope*> blockScope,
-                      Node* forLetImpliedBlock,
+                      mozilla::Maybe<ParseContext::Scope>& forLetImpliedScope,
                       Node* forInOrOfExpression);
     bool validateForInOrOfLHSExpression(Node target);
     Node expressionAfterForInOrOf(ParseNodeKind forHeadKind, YieldHandling yieldHandling);
-
-    void assertCurrentLexicalStaticBlockIs(ParseContext<ParseHandler>* pc,
-                                           Handle<StaticBlockScope*> blockScope);
 
     Node switchStatement(YieldHandling yieldHandling);
     Node continueStatement(YieldHandling yieldHandling);
@@ -797,7 +1043,6 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     // parsed into |*forInOrOfExpression|.
     Node declarationList(YieldHandling yieldHandling,
                          ParseNodeKind kind,
-                         StaticBlockScope* blockScope = nullptr,
                          ParseNodeKind* forHeadKind = nullptr,
                          Node* forInOrOfExpression = nullptr);
 
@@ -810,10 +1055,10 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     // |*forInOrOfExpression|.  (An "initial declaration" is the first
     // declaration in a declaration list: |a| but not |b| in |var a, b|, |{c}|
     // but not |d| in |let {c} = 3, d|.)
-    Node declarationPattern(Node decl, TokenKind tt, BindData<ParseHandler>* data,
+    Node declarationPattern(Node decl, DeclarationKind declKind, TokenKind tt,
                             bool initialDeclaration, YieldHandling yieldHandling,
                             ParseNodeKind* forHeadKind, Node* forInOrOfExpression);
-    Node declarationName(Node decl, TokenKind tt, BindData<ParseHandler>* data,
+    Node declarationName(Node decl, DeclarationKind declKind, TokenKind tt,
                          bool initialDeclaration, YieldHandling yieldHandling,
                          ParseNodeKind* forHeadKind, Node* forInOrOfExpression);
 
@@ -823,7 +1068,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     // consume trailing in/of and subsequent expression, if so directed by
     // |forHeadKind|.
     bool initializerInNameDeclaration(Node decl, Node binding, Handle<PropertyName*> name,
-                                      BindData<ParseHandler>* data, bool initialDeclaration,
+                                      DeclarationKind declKind, bool initialDeclaration,
                                       YieldHandling yieldHandling, ParseNodeKind* forHeadKind,
                                       Node* forInOrOfExpression);
 
@@ -877,15 +1122,18 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
      * Additional JS parsers.
      */
     bool functionArguments(YieldHandling yieldHandling, FunctionSyntaxKind kind,
-                           Node funcpn, bool* hasRest);
+                           Node funcpn);
 
-    Node functionDef(InHandling inHandling, YieldHandling uieldHandling, HandleAtom name,
-                     FunctionSyntaxKind kind, GeneratorKind generatorKind,
-                     InvokedPrediction invoked = PredictUninvoked,
-                     Node* assignmentForAnnexBOut = nullptr);
-    bool functionArgsAndBody(InHandling inHandling, Node pn, HandleFunction fun,
-                             FunctionSyntaxKind kind, GeneratorKind generatorKind,
-                             Directives inheritedDirectives, Directives* newDirectives);
+    Node functionDefinition(InHandling inHandling, YieldHandling yieldHandling, HandleAtom name,
+                            FunctionSyntaxKind kind, GeneratorKind generatorKind,
+                            InvokedPrediction invoked = PredictUninvoked,
+                            Node* assignmentForAnnexBOut = nullptr);
+
+    // Parse a function body.  Pass StatementListBody if the body is a list of
+    // statements; pass ExpressionBody if the body is a single expression.
+    enum FunctionBodyType { StatementListBody, ExpressionBody };
+    Node functionBody(InHandling inHandling, YieldHandling yieldHandling, FunctionSyntaxKind kind,
+                      FunctionBodyType type);
 
     Node unaryOpExpr(YieldHandling yieldHandling, ParseNodeKind kind, JSOp op, uint32_t begin);
 
@@ -901,18 +1149,18 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     Node generatorComprehension(uint32_t begin);
 
     bool argumentList(YieldHandling yieldHandling, Node listNode, bool* isSpread);
-    Node destructuringExpr(YieldHandling yieldHandling, BindData<ParseHandler>* data,
-                           TokenKind tt);
-    Node destructuringExprWithoutYield(YieldHandling yieldHandling, BindData<ParseHandler>* data,
-                                       TokenKind tt, unsigned msg);
+    Node destructuringDeclaration(DeclarationKind kind, YieldHandling yieldHandling,
+                                  TokenKind tt);
+    Node destructuringDeclarationWithoutYield(DeclarationKind kind, YieldHandling yieldHandling,
+                                              TokenKind tt, unsigned msg);
 
-    Node newBoundImportForCurrentName();
     bool namedImportsOrNamespaceImport(TokenKind tt, Node importSpecSet);
     bool checkExportedName(JSAtom* exportName);
     bool checkExportedNamesForDeclaration(Node node);
 
     enum ClassContext { ClassStatement, ClassExpression };
-    Node classDefinition(YieldHandling yieldHandling, ClassContext classContext, DefaultHandling defaultHandling);
+    Node classDefinition(YieldHandling yieldHandling, ClassContext classContext,
+                         DefaultHandling defaultHandling);
 
     Node identifierName(YieldHandling yieldHandling);
 
@@ -939,18 +1187,24 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
                                      PossibleError* possibleError=nullptr);
     bool matchInOrOf(bool* isForInp, bool* isForOfp);
 
-    bool checkFunctionArguments();
-
-    bool defineFunctionThis();
+    bool declareFunctionArgumentsObject();
+    bool declareFunctionThis();
+    Node newInternalDotName(HandlePropertyName name);
     Node newThisName();
+    Node newDotGeneratorName();
+    bool declareDotGeneratorName();
 
-    bool makeDefIntoUse(Definition* dn, Node pn, HandleAtom atom);
-    bool bindLexicalFunctionName(HandlePropertyName funName, ParseNode* pn);
-    bool bindBodyLevelFunctionName(HandlePropertyName funName, ParseNode** pn);
-    bool checkFunctionDefinition(HandleAtom funAtom, Node* pn, FunctionSyntaxKind kind,
-                                 bool* pbodyProcessed, Node* assignmentForAnnexBOut);
-    bool finishFunctionDefinition(Node pn, FunctionBox* funbox, Node body);
-    bool addFreeVariablesFromLazyFunction(JSFunction* fun, ParseContext<ParseHandler>* pc);
+    bool checkFunctionDefinition(HandleAtom funAtom, Node pn, FunctionSyntaxKind kind,
+                                 Node* assignmentForAnnexBOut);
+    bool skipLazyInnerFunction(Node pn);
+    bool innerFunction(Node pn, ParseContext* outerpc, HandleFunction fun,
+                       InHandling inHandling, FunctionSyntaxKind kind, GeneratorKind generatorKind,
+                       Directives inheritedDirectives, Directives* newDirectives);
+    bool trySyntaxParseInnerFunction(Node pn, HandleFunction fun, InHandling inHandling,
+                                     FunctionSyntaxKind kind, GeneratorKind generatorKind,
+                                     Directives inheritedDirectives, Directives* newDirectives);
+    bool finishFunction();
+    bool leaveInnerFunction(ParseContext* outerpc);
 
     // Use when the current token is TOK_NAME and is known to be 'let'.
     bool shouldParseLetDeclaration(bool* parseDeclOut);
@@ -975,16 +1229,23 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     bool reportIfNotValidSimpleAssignmentTarget(Node target, AssignmentFlavor flavor);
 
     bool checkAndMarkAsIncOperand(Node kid, AssignmentFlavor flavor);
-
     bool checkStrictAssignment(Node lhs);
-
     bool checkStrictBinding(PropertyName* name, Node pn);
-    bool defineArg(Node funcpn, HandlePropertyName name,
-                   bool disallowDuplicateArgs = false, Node* duplicatedArg = nullptr);
-    Node pushLexicalScope(AutoPushStmtInfoPC& stmt);
-    Node pushLexicalScope(Handle<StaticBlockScope*> blockScope, AutoPushStmtInfoPC& stmt);
-    Node pushLetScope(Handle<StaticBlockScope*> blockScope, AutoPushStmtInfoPC& stmt);
-    bool noteNameUse(HandlePropertyName name, Node pn);
+
+    void reportRedeclaration(HandlePropertyName name, DeclarationKind kind);
+    bool noteSimpleFormalParameter(Node fn, HandlePropertyName name,
+                                   bool disallowDuplicateParams = false,
+                                   bool* duplicatedArg = nullptr);
+    bool noteDeclaredName(HandlePropertyName name, DeclarationKind kind, Node node = null());
+    bool noteUsedName(HandlePropertyName name);
+
+    mozilla::Maybe<GlobalScope::Data*> newGlobalScopeData(ParseContext::Scope& scope);
+    mozilla::Maybe<EvalScope::Data*> newEvalScopeData(ParseContext::Scope& scope);
+    mozilla::Maybe<FunctionScope::Data*> newFunctionScopeData(ParseContext::Scope& scope);
+    mozilla::Maybe<LexicalScope::Data*> newLexicalScopeData(ParseContext::Scope& scope);
+    mozilla::Maybe<FreeNameArray*> newFreeNameArray(ParseContext::Scope& scope);
+    Node finishLexicalScope(ParseContext::Scope& scope, Node body);
+
     Node propertyName(YieldHandling yieldHandling, Node propList,
                       PropertyType* propType, MutableHandleAtom propAtom);
     Node computedPropertyName(YieldHandling yieldHandling, Node literal);
@@ -993,35 +1254,18 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
 
     Node objectLiteral(YieldHandling yieldHandling, PossibleError* possibleError);
 
-    enum PrepareLexicalKind {
-        PrepareLet,
-        PrepareConst,
-        PrepareFunction
-    };
-    bool checkAndPrepareLexical(PrepareLexicalKind prepareWhat, const TokenPos& errorPos);
-    bool prepareAndBindInitializedLexicalWithNode(HandlePropertyName name,
-                                                  PrepareLexicalKind prepareWhat,
-                                                  ParseNode* pn, const TokenPos& pos);
-    Node makeInitializedLexicalBinding(HandlePropertyName name, PrepareLexicalKind prepareWhat,
-                                       const TokenPos& pos);
-
-    Node newBindingNode(PropertyName* name, bool functionScope, VarContext varContext = HoistVars);
-
     // Top-level entrypoint into destructuring pattern checking/name-analyzing.
-    bool checkDestructuringPattern(BindData<ParseHandler>* data, Node pattern);
+    bool checkDestructuringPattern(Node pattern,
+                                   mozilla::Maybe<DeclarationKind> maybeDecl = mozilla::Nothing());
 
     // Recursive methods for checking/name-analyzing subcomponents of a
     // destructuring pattern.  The array/object methods *must* be passed arrays
     // or objects.  The name method may be passed anything but will report an
     // error if not passed a name.
-    bool checkDestructuringArray(BindData<ParseHandler>* data, Node arrayPattern);
-    bool checkDestructuringObject(BindData<ParseHandler>* data, Node objectPattern);
-    bool checkDestructuringName(BindData<ParseHandler>* data, Node expr);
+    bool checkDestructuringArray(Node arrayPattern, mozilla::Maybe<DeclarationKind> maybeDecl);
+    bool checkDestructuringObject(Node objectPattern, mozilla::Maybe<DeclarationKind> maybeDecl);
+    bool checkDestructuringName(Node expr, mozilla::Maybe<DeclarationKind> maybeDecl);
 
-    bool bindInitialized(BindData<ParseHandler>* data, HandlePropertyName name, Node pn);
-    bool bindInitialized(BindData<ParseHandler>* data, Node pn);
-    bool bindUninitialized(BindData<ParseHandler>* data, HandlePropertyName name, Node pn);
-    bool bindUninitialized(BindData<ParseHandler>* data, Node pn);
     bool makeSetCall(Node node, unsigned errnum);
 
     Node cloneForInOrOfDeclarationForAssignment(Node decl);
@@ -1033,26 +1277,9 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
         return handler.newNumber(tok.number(), tok.decimalPoint(), tok.pos);
     }
 
-    static bool
-    bindDestructuringArg(BindData<ParseHandler>* data,
-                         HandlePropertyName name, Parser<ParseHandler>* parser);
-
-    static bool
-    bindLexical(BindData<ParseHandler>* data,
-                HandlePropertyName name, Parser<ParseHandler>* parser);
-
-    static bool
-    bindVar(BindData<ParseHandler>* data,
-            HandlePropertyName name, Parser<ParseHandler>* parser);
-
     static Node null() { return ParseHandler::null(); }
 
-    bool reportRedeclaration(Node pn, Definition::Kind redeclKind, HandlePropertyName name);
     bool reportBadReturn(Node pn, ParseReportKind kind, unsigned errnum, unsigned anonerrnum);
-    DefinitionNode getOrCreateLexicalDependency(ParseContext<ParseHandler>* pc, JSAtom* atom);
-
-    bool leaveFunction(Node fn, ParseContext<ParseHandler>* outerpc,
-                       FunctionSyntaxKind kind = Expression);
 
     JSAtom* prefixAccessorName(PropertyType propType, HandleAtom propAtom);
 
@@ -1063,8 +1290,6 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     void addTelemetry(JSCompartment::DeprecatedLanguageExtension e);
 
     bool warnOnceAboutExprClosure();
-
-    friend struct BindData<ParseHandler>;
 };
 
 } /* namespace frontend */

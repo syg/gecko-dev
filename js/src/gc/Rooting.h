@@ -24,6 +24,7 @@ class ScriptSourceObject;
 class SavedFrame;
 class Shape;
 class ObjectGroup;
+class Scope;
 
 // These are internal counterparts to the public types such as HandleObject.
 
@@ -37,12 +38,14 @@ typedef JS::Handle<ArrayObject*>       HandleArrayObject;
 typedef JS::Handle<PlainObject*>       HandlePlainObject;
 typedef JS::Handle<SavedFrame*>        HandleSavedFrame;
 typedef JS::Handle<ScriptSourceObject*> HandleScriptSource;
+typedef JS::Handle<Scope*>             HandleScope;
 
 typedef JS::MutableHandle<Shape*>      MutableHandleShape;
 typedef JS::MutableHandle<JSAtom*>     MutableHandleAtom;
 typedef JS::MutableHandle<NativeObject*> MutableHandleNativeObject;
 typedef JS::MutableHandle<PlainObject*> MutableHandlePlainObject;
 typedef JS::MutableHandle<SavedFrame*> MutableHandleSavedFrame;
+typedef JS::MutableHandle<Scope*>      MutableHandleScope;
 
 typedef JS::Rooted<NativeObject*>      RootedNativeObject;
 typedef JS::Rooted<Shape*>             RootedShape;
@@ -55,6 +58,7 @@ typedef JS::Rooted<GlobalObject*>      RootedGlobalObject;
 typedef JS::Rooted<PlainObject*>       RootedPlainObject;
 typedef JS::Rooted<SavedFrame*>        RootedSavedFrame;
 typedef JS::Rooted<ScriptSourceObject*> RootedScriptSource;
+typedef JS::Rooted<Scope*>             RootedScope;
 
 typedef JS::GCVector<JSFunction*>   FunctionVector;
 typedef JS::GCVector<PropertyName*> PropertyNameVector;

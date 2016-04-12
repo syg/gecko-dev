@@ -1757,7 +1757,6 @@ class ASTSerializer
     bool declaration(ParseNode* pn, MutableHandleValue dst);
     bool variableDeclaration(ParseNode* pn, bool lexical, MutableHandleValue dst);
     bool variableDeclarator(ParseNode* pn, MutableHandleValue dst);
-    bool letBlock(ParseNode* pn, MutableHandleValue dst);
     bool importDeclaration(ParseNode* pn, MutableHandleValue dst);
     bool importSpecifier(ParseNode* pn, MutableHandleValue dst);
     bool exportDeclaration(ParseNode* pn, MutableHandleValue dst);
@@ -2087,7 +2086,7 @@ ASTSerializer::variableDeclarator(ParseNode* pn, MutableHandleValue dst)
 
     if (pn->isKind(PNK_NAME)) {
         pnleft = pn;
-        pnright = pn->isUsed() ? nullptr : pn->pn_expr;
+        pnright = pn->pn_expr;
         MOZ_ASSERT_IF(pnright, pn->pn_pos.encloses(pnright->pn_pos));
     } else if (pn->isKind(PNK_ASSIGN)) {
         pnleft = pn->pn_left;
@@ -2104,35 +2103,6 @@ ASTSerializer::variableDeclarator(ParseNode* pn, MutableHandleValue dst)
     return pattern(pnleft, &left) &&
            optExpression(pnright, &right) &&
            builder.variableDeclarator(left, right, &pn->pn_pos, dst);
-}
-
-bool
-ASTSerializer::letBlock(ParseNode* pn, MutableHandleValue dst)
-{
-    MOZ_ASSERT(pn->pn_pos.encloses(pn->pn_left->pn_pos));
-    MOZ_ASSERT(pn->pn_pos.encloses(pn->pn_right->pn_pos));
-
-    ParseNode* letHead = pn->pn_left;
-    LOCAL_ASSERT(letHead->isArity(PN_LIST));
-
-    ParseNode* letBody = pn->pn_right;
-    LOCAL_ASSERT(letBody->isKind(PNK_LEXICALSCOPE));
-
-    NodeVector dtors(cx);
-    if (!dtors.reserve(letHead->pn_count))
-        return false;
-
-    for (ParseNode* next = letHead->pn_head; next; next = next->pn_next) {
-        RootedValue child(cx);
-
-        if (!variableDeclarator(next, &child))
-            return false;
-        dtors.infallibleAppend(child);
-    }
-
-    RootedValue v(cx);
-    return statement(letBody->pn_expr, &v) &&
-           builder.letStatement(dtors, v, &pn->pn_pos, dst);
 }
 
 bool
@@ -2426,9 +2396,6 @@ ASTSerializer::statement(ParseNode* pn, MutableHandleValue dst)
             return builder.emptyStatement(&pn->pn_pos, dst);
         return declaration(pn->pn_left, dst);
 
-      case PNK_LETBLOCK:
-        return letBlock(pn, dst);
-
       case PNK_LET:
       case PNK_CONST:
         return declaration(pn, dst);
@@ -2442,8 +2409,9 @@ ASTSerializer::statement(ParseNode* pn, MutableHandleValue dst)
         return exportDeclaration(pn, dst);
 
       case PNK_NAME:
-        LOCAL_ASSERT(pn->isUsed());
-        return statement(pn->pn_lexdef, dst);
+        MOZ_CRASH("TODOshu");
+        return false;
+        //return statement(pn->pn_lexdef, dst);
 
       case PNK_SEMI:
         if (pn->pn_kid) {
@@ -3496,7 +3464,7 @@ ASTSerializer::functionArgsAndBody(ParseNode* pn, NodeVector& args, NodeVector& 
     ParseNode* pnbody;
 
     /* Extract the args and body separately. */
-    if (pn->isKind(PNK_ARGSBODY)) {
+    if (pn->isKind(PNK_PARAMSBODY)) {
         pnargs = pn;
         pnbody = pn->last();
     } else {
@@ -3751,7 +3719,7 @@ reflect_parse(JSContext* cx, uint32_t argc, Value* vp)
         if (!GlobalObject::ensureModulePrototypesCreated(cx, cx->global()))
             return false;
 
-        Rooted<ModuleObject*> module(cx, ModuleObject::create(cx, nullptr));
+        Rooted<ModuleObject*> module(cx, ModuleObject::create(cx));
         if (!module)
             return false;
 

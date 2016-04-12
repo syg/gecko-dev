@@ -889,13 +889,19 @@ js::Disassemble1(JSContext* cx, HandleScript script, jsbytecode* pc,
       }
 
       case JOF_SCOPECOORD: {
+          /*
         RootedValue v(cx,
             StringValue(ScopeCoordinateName(cx->runtime()->scopeCoordinateNameCache, script, pc)));
         JSAutoByteString bytes;
         if (!ToDisassemblySource(cx, v, &bytes))
             return 0;
+          */
         ScopeCoordinate sc(pc);
+        /* TODOshu
         if (Sprint(sp, " %s (hops = %u, slot = %u)", bytes.ptr(), sc.hops(), sc.slot()) == -1)
+            return 0;
+        */
+        if (Sprint(sp, " (hops = %u, slot = %u)", sc.hops(), sc.slot()) == -1)
             return 0;
         break;
       }
@@ -1280,10 +1286,9 @@ ExpressionDecompiler::getArg(unsigned slot)
     MOZ_ASSERT(script->functionNonDelazifying());
     MOZ_ASSERT(slot < script->bindings.numArgs());
 
-    for (BindingIter bi(script); bi; bi++) {
-        MOZ_ASSERT(bi->kind() == Binding::ARGUMENT);
-        if (bi.argIndex() == slot)
-            return bi->name();
+    for (SimpleFormalParameterIter fi(script); fi; fi++) {
+        if (fi.position() == slot)
+            return fi.name();
     }
 
     MOZ_CRASH("No binding");
@@ -1295,12 +1300,14 @@ ExpressionDecompiler::getLocal(uint32_t local, jsbytecode* pc)
     MOZ_ASSERT(local < script->nfixed());
     if (local < script->nbodyfixed()) {
         for (BindingIter bi(script); bi; bi++) {
-            if (bi->kind() != Binding::ARGUMENT && !bi->aliased() && bi.frameIndex() == local)
-                return bi->name();
+            BindingLocation loc = bi.location();
+            if (loc.kind() == BindingLocation::Kind::Frame && loc.slot() == local)
+                return bi.name();
         }
 
         MOZ_CRASH("No binding");
     }
+    /* TODOshu
     for (NestedStaticScope* chain = script->getStaticBlockScope(pc);
          chain;
          chain = chain->enclosingNestedScope())
@@ -1320,6 +1327,7 @@ ExpressionDecompiler::getLocal(uint32_t local, jsbytecode* pc)
         }
         break;
     }
+    */
     return nullptr;
 }
 

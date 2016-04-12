@@ -215,8 +215,6 @@ class CompileInfo
             MOZ_ASSERT(fun_->isTenured());
         }
 
-        osrStaticScope_ = osrPc ? script->getStaticBlockScope(osrPc) : nullptr;
-
         nimplicit_ = StartArgSlot(script)                   /* scope chain and argument obj */
                    + (fun ? 1 : 0);                         /* this */
         nargs_ = fun ? fun->nargs() : 0;
@@ -228,8 +226,8 @@ class CompileInfo
     }
 
     explicit CompileInfo(unsigned nlocals)
-      : script_(nullptr), fun_(nullptr), osrPc_(nullptr), osrStaticScope_(nullptr),
-        constructing_(false), analysisMode_(Analysis_None), scriptNeedsArgsObj_(false),
+      : script_(nullptr), fun_(nullptr), osrPc_(nullptr), constructing_(false),
+        analysisMode_(Analysis_None), scriptNeedsArgsObj_(false),
         mayReadFrameArgsDirectly_(false), inlineScriptTree_(nullptr)
     {
         nimplicit_ = 0;
@@ -258,9 +256,6 @@ class CompileInfo
     }
     jsbytecode* osrPc() const {
         return osrPc_;
-    }
-    NestedStaticScope* osrStaticScope() const {
-        return osrStaticScope_;
     }
     InlineScriptTree* inlineScriptTree() const {
         return inlineScriptTree_;
@@ -407,53 +402,12 @@ class CompileInfo
         return nimplicit() + nargs() + nlocals();
     }
 
-    bool isSlotAliased(uint32_t index, NestedStaticScope* staticScope) const {
+    bool isSlotAliased(uint32_t index) const {
         MOZ_ASSERT(index >= startArgSlot());
-
-        if (funMaybeLazy() && index == thisSlot())
-            return false;
-
         uint32_t arg = index - firstArgSlot();
         if (arg < nargs())
             return script()->formalIsAliased(arg);
-
-        uint32_t local = index - firstLocalSlot();
-        if (local < nlocals()) {
-            // First, check if this local is body-level. If we have a slot for
-            // it, it is by definition unaliased. Aliased body-level locals do
-            // not have fixed slots on the frame and live in the CallObject.
-            //
-            // Note that this is not true for lexical (block-scoped)
-            // bindings. Such bindings, even when aliased, may be considered
-            // part of the "fixed" part (< nlocals()) of the frame.
-            if (local < nbodyfixed())
-                return false;
-
-            // Otherwise, it might be part of a block scope.
-            for (; staticScope; staticScope = staticScope->enclosingNestedScope()) {
-                if (!staticScope->is<StaticBlockScope>())
-                    continue;
-                StaticBlockScope& blockScope = staticScope->as<StaticBlockScope>();
-                if (blockScope.localOffset() < local) {
-                    if (local - blockScope.localOffset() < blockScope.numVariables())
-                        return blockScope.isAliased(local - blockScope.localOffset());
-                    return false;
-                }
-            }
-
-            // In this static scope, this var is dead.
-            return false;
-        }
-
-        MOZ_ASSERT(index >= firstStackSlot());
         return false;
-    }
-
-    bool isSlotAliasedAtEntry(uint32_t index) const {
-        return isSlotAliased(index, nullptr);
-    }
-    bool isSlotAliasedAtOsr(uint32_t index) const {
-        return isSlotAliased(index, osrStaticScope());
     }
 
     bool hasArguments() const {
@@ -570,7 +524,6 @@ class CompileInfo
     JSScript* script_;
     JSFunction* fun_;
     jsbytecode* osrPc_;
-    NestedStaticScope* osrStaticScope_;
     bool constructing_;
     AnalysisMode analysisMode_;
 

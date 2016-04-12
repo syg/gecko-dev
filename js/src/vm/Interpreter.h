@@ -20,7 +20,7 @@
 
 namespace js {
 
-class ScopeIter;
+class EnvironmentIter;
 
 /*
  * Convert null/undefined |thisv| into the current global object for the
@@ -325,19 +325,19 @@ TypeOfValue(const Value& v);
 extern bool
 HasInstance(JSContext* cx, HandleObject obj, HandleValue v, bool* bp);
 
-// Unwind scope chain and iterator to match the static scope corresponding to
+// Unwind environment chain and iterator to match the scope corresponding to
 // the given bytecode position.
 extern void
-UnwindScope(JSContext* cx, ScopeIter& si, jsbytecode* pc);
+UnwindEnvironment(JSContext* cx, EnvironmentIter& ei, jsbytecode* pc);
 
-// Unwind all scopes.
+// Unwind all environments.
 extern void
-UnwindAllScopesInFrame(JSContext* cx, ScopeIter& si);
+UnwindAllEnvironmentsInFrame(JSContext* cx, EnvironmentIter& ei);
 
 // Compute the pc needed to unwind the scope to the beginning of the block
 // pointed to by the try note.
 extern jsbytecode*
-UnwindScopeToTryPc(JSScript* script, JSTryNote* tn);
+UnwindEnvironmentToTryPc(JSScript* script, JSTryNote* tn);
 
 template <class StackDepthOp>
 class MOZ_STACK_CLASS TryNoteIter
@@ -553,8 +553,7 @@ ReportRuntimeLexicalError(JSContext* cx, unsigned errorNumber, HandleScript scri
 // script. Due to the extensibility of the global lexical scope, we also check
 // for redeclarations during runtime in JSOP_DEF{VAR,LET,CONST}.
 void
-ReportRuntimeRedeclaration(JSContext* cx, HandlePropertyName name,
-                           frontend::Definition::Kind declKind);
+ReportRuntimeRedeclaration(JSContext* cx, HandlePropertyName name, BindingKind bindKind);
 
 bool
 ThrowUninitializedThis(JSContext* cx, AbstractFramePtr frame);

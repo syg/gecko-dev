@@ -9,6 +9,7 @@
 
 #include "NamespaceImports.h"
 
+#include "vm/Scope.h"
 #include "vm/String.h"
 
 class JSLinearString;
@@ -25,12 +26,19 @@ struct SourceCompressionTask;
 namespace frontend {
 
 JSScript*
-CompileScript(ExclusiveContext* cx, LifoAlloc* alloc,
-              HandleObject scopeChain, Handle<StaticScope*> enclosingStaticScope,
-              HandleScript evalCaller, const ReadOnlyCompileOptions& options,
-              SourceBufferHolder& srcBuf, JSString* source_ = nullptr,
-              SourceCompressionTask* extraSct = nullptr,
-              ScriptSourceObject** sourceObjectOut = nullptr);
+CompileGlobalScript(ExclusiveContext* cx, LifoAlloc* alloc, ScopeKind scopeKind,
+                    const ReadOnlyCompileOptions& options,
+                    SourceBufferHolder& srcBuf,
+                    SourceCompressionTask* extraSct = nullptr,
+                    ScriptSourceObject** sourceObjectOut = nullptr);
+
+JSScript*
+CompileEvalScript(ExclusiveContext* cx, LifoAlloc* alloc,
+                  HandleObject scopeChain, HandleScope enclosingScope,
+                  const ReadOnlyCompileOptions& options,
+                  SourceBufferHolder& srcBuf,
+                  SourceCompressionTask* extraSct = nullptr,
+                  ScriptSourceObject** sourceObjectOut = nullptr);
 
 ModuleObject*
 CompileModule(JSContext* cx, const ReadOnlyCompileOptions& options,
@@ -52,7 +60,7 @@ MOZ_MUST_USE bool
 CompileFunctionBody(JSContext* cx, MutableHandleFunction fun,
                     const ReadOnlyCompileOptions& options,
                     Handle<PropertyNameVector> formals, JS::SourceBufferHolder& srcBuf,
-                    Handle<StaticScope*> enclosingStaticScope);
+                    HandleScope enclosingScope);
 
 // As above, but defaults to the global lexical scope as the enclosing static
 // scope.

@@ -3545,6 +3545,13 @@ MaybeDumpObject(const char* name, JSObject* obj)
 }
 
 static void
+MaybeDumpScope(const char* name, Scope* scope)
+{
+    if (scope)
+        fprintf(stderr, "  %s: %s\n", name, ScopeKindString(scope->kind()));
+}
+
+static void
 MaybeDumpValue(const char* name, const Value& v)
 {
     if (!v.isNull()) {
@@ -3598,7 +3605,7 @@ js::DumpInterpreterFrame(JSContext* cx, InterpreterFrame* start)
         if (jsbytecode* pc = i.pc()) {
             fprintf(stderr, "  pc = %p\n", pc);
             fprintf(stderr, "  current op: %s\n", CodeName[*pc]);
-            MaybeDumpObject("staticScope", i.script()->getStaticBlockScope(pc));
+            MaybeDumpScope("scope", i.script()->getScope(pc));
         }
         if (i.isFunctionFrame())
             MaybeDumpValue("this", i.thisArgument(cx));

@@ -140,19 +140,11 @@ JSScript::getFunction(size_t index)
 }
 
 inline JSFunction*
-JSScript::getCallerFunction()
-{
-    MOZ_ASSERT(savedCallerFun());
-    return getFunction(0);
-}
-
-inline JSFunction*
-JSScript::functionOrCallerFunction()
+JSScript::function()
 {
     if (functionNonDelazifying())
         return functionNonDelazifying();
-    if (savedCallerFun())
-        return getCallerFunction();
+    // TODOshu eval scopes
     return nullptr;
 }
 
