@@ -9,6 +9,10 @@ BCE:
   - Annex B
 
 VM:
+  - Environments:
+    - VarEnvironmentObject (CallObject, ModuleEnvironmentObject)
+    - LexicalEnvironmentObject
+    - WithObject
   - hook new scopes in
 
 XDR
