@@ -642,7 +642,7 @@ class ParseNode
     }
 
     void setScopeBody(ParseNode* body) {
-        MOZ_ASSERT(pn_arity = PN_SCOPE);
+        MOZ_ASSERT(pn_arity == PN_SCOPE);
         pn_u.scope.body = body;
     }
 
