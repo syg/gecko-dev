@@ -2481,6 +2481,7 @@ BytecodeEmitter::needsImplicitThis()
     if (sc->inWith())
         return true;
 
+    // Otherwise see if the current point is under a 'with'.
     for (EmitterScope* es = innermostEmitterScope; es; es = es->enclosing()) {
         if (es->scope(this)->kind() == ScopeKind::With)
             return true;
@@ -2658,19 +2659,15 @@ EmitGetNameAtLocation(BytecodeEmitter* bce, JSAtom* name, const NameLocation& lo
         break;
 
       case NameLocation::Kind::FrameSlot:
-        if (loc.isLexical()) {
-            if (!bce->emitTDZCheckIfNeeded(name, loc))
-                return false;
-        }
+        if (loc.isLexical() && !bce->emitTDZCheckIfNeeded(name, loc))
+            return false;
         if (!bce->emitLocalOp(JSOP_GETLOCAL, loc.frameSlot()))
             return false;
         break;
 
       case NameLocation::Kind::EnvironmentCoordinate:
-        if (loc.isLexical()) {
-            if (!bce->emitTDZCheckIfNeeded(name, loc))
-                return false;
-        }
+        if (loc.isLexical() && !bce->emitTDZCheckIfNeeded(name, loc))
+            return false;
         if (!bce->emitScopeCoordOp(JSOP_GETALIASEDVAR, loc.scopeCoordinate()))
             return false;
         break;
