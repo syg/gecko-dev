@@ -346,6 +346,10 @@ class FunctionScope : public Scope
     Shape* environmentShape() const {
         return data().environmentShape;
     }
+
+    uint32_t numSimpleFormalParameters() const {
+        return data().nonSimpleFormalStart;
+    }
 };
 
 // Scope corresponding to both the global object scope and the global lexical

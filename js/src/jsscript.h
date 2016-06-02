@@ -172,309 +172,6 @@ class YieldOffsetArray {
     }
 };
 
-class Binding
-{
-    // One JSScript stores one Binding per formal/variable so we use a
-    // packed-word representation.
-    uintptr_t bits_;
-
-    static const uintptr_t KIND_MASK = 0x3;
-    static const uintptr_t ALIASED_BIT = 0x4;
-    static const uintptr_t NAME_MASK = ~(KIND_MASK | ALIASED_BIT);
-
-  public:
-    // A "binding" is a formal parameter, 'var' (also a stand in for
-    // body-level 'let' declarations), or 'const' declaration. A function's
-    // lexical scope is composed of these three kinds of bindings.
-    enum Kind { ARGUMENT, VARIABLE, CONSTANT };
-
-    explicit Binding() : bits_(0) {}
-
-    Binding(PropertyName* name, Kind kind, bool aliased) {
-        JS_STATIC_ASSERT(CONSTANT <= KIND_MASK);
-        MOZ_ASSERT((uintptr_t(name) & ~NAME_MASK) == 0);
-        MOZ_ASSERT((uintptr_t(kind) & ~KIND_MASK) == 0);
-        bits_ = uintptr_t(name) | uintptr_t(kind) | (aliased ? ALIASED_BIT : 0);
-    }
-
-    PropertyName* name() const {
-        return (PropertyName*)(bits_ & NAME_MASK);
-    }
-
-    Kind kind() const {
-        return Kind(bits_ & KIND_MASK);
-    }
-
-    bool aliased() const {
-        return bool(bits_ & ALIASED_BIT);
-    }
-
-    static void trace(Binding* self, JSTracer* trc) { self->trace(trc); }
-    void trace(JSTracer* trc);
-};
-
-JS_STATIC_ASSERT(sizeof(Binding) == sizeof(uintptr_t));
-
-/*
- * Formal parameters and local variables are stored in a shape tree
- * path encapsulated within this class.  This class represents bindings for
- * both function and top-level scripts (the latter is needed to track names in
- * strict mode eval code, to give such code its own lexical environment).
- */
-class Bindings
-{
-    friend class BindingIter;
-    friend class AliasedFormalIter;
-    template <typename Outer> friend class BindingsOperations;
-    template <typename Outer> friend class MutableBindingsOperations;
-
-    HeapPtr<Shape*> callObjShape_;
-    uintptr_t bindingArrayAndFlag_;
-    uint16_t numArgs_;
-    uint16_t numBlockScoped_;
-    uint16_t numBodyLevelLexicals_;
-    uint16_t numUnaliasedBodyLevelLexicals_;
-    uint32_t aliasedBodyLevelLexicalBegin_;
-    uint32_t numVars_;
-    uint32_t numUnaliasedVars_;
-
-#if JS_BITS_PER_WORD == 32
-    // Bindings is allocated inline inside JSScript, which needs to be
-    // gc::Cell aligned.
-    uint32_t padding_;
-#endif
-
-    /*
-     * During parsing, bindings are allocated out of a temporary LifoAlloc.
-     * After parsing, a JSScript object is created and the bindings are
-     * permanently transferred to it. On error paths, the JSScript object may
-     * end up with bindings that still point to the (new released) LifoAlloc
-     * memory. To avoid tracing these bindings during GC, we keep track of
-     * whether the bindings are temporary or permanent in the low bit of
-     * bindingArrayAndFlag_.
-     */
-    static const uintptr_t TEMPORARY_STORAGE_BIT = 0x1;
-    bool bindingArrayUsingTemporaryStorage() const {
-        return bindingArrayAndFlag_ & TEMPORARY_STORAGE_BIT;
-    }
-
-  public:
-    static const uint32_t BODY_LEVEL_LEXICAL_LIMIT = UINT16_LIMIT;
-
-    Binding* bindingArray() const {
-        return reinterpret_cast<Binding*>(bindingArrayAndFlag_ & ~TEMPORARY_STORAGE_BIT);
-    }
-
-    Bindings()
-      : callObjShape_(nullptr), bindingArrayAndFlag_(TEMPORARY_STORAGE_BIT),
-        numArgs_(0), numBlockScoped_(0),
-        numBodyLevelLexicals_(0), numUnaliasedBodyLevelLexicals_(0),
-        numVars_(0), numUnaliasedVars_(0)
-    {}
-
-    /*
-     * Initialize a Bindings with a pointer into temporary storage.
-     * bindingArray must have length numArgs + numVars +
-     * numBodyLevelLexicals. Before the temporary storage is release,
-     * switchToScriptStorage must be called, providing a pointer into the
-     * Binding array stored in script->data.
-     */
-    static bool initWithTemporaryStorage(ExclusiveContext* cx, MutableHandle<Bindings> self,
-                                         uint32_t numArgs,
-                                         uint32_t numVars,
-                                         uint32_t numBodyLevelLexicals,
-                                         uint32_t numBlockScoped,
-                                         uint32_t numUnaliasedVars,
-                                         uint32_t numUnaliasedBodyLevelLexicals,
-                                         const Binding* bindingArray,
-                                         bool isModule = false);
-
-    // Initialize a trivial Bindings with no slots and an empty callObjShape.
-    static bool initTrivialForScript(ExclusiveContext* cx, HandleScript script);
-
-    // CompileScript parses and compiles one statement at a time, but the result
-    // is one Script object.  There will be no vars or bindings, because those
-    // go on the global, but there may be block-scoped locals, and the number of
-    // block-scoped locals may increase as we parse more expressions.  This
-    // helper updates the number of block scoped variables in a script as it is
-    // being parsed.
-    void updateNumBlockScoped(unsigned numBlockScoped) {
-        MOZ_ASSERT(!callObjShape_);
-        MOZ_ASSERT(numVars_ == 0);
-        MOZ_ASSERT(numBlockScoped < LOCALNO_LIMIT);
-        MOZ_ASSERT(numBlockScoped >= numBlockScoped_);
-        numBlockScoped_ = numBlockScoped;
-    }
-
-    void setAllLocalsAliased() {
-        numBlockScoped_ = 0;
-    }
-
-    uint8_t* switchToScriptStorage(Binding* newStorage);
-
-    /*
-     * Clone srcScript's bindings (as part of js::CloneScript). dstScriptData
-     * is the pointer to what will eventually be dstScript->data.
-     */
-    static bool clone(JSContext* cx, MutableHandle<Bindings> self, uint8_t* dstScriptData,
-                      HandleScript srcScript);
-
-    uint32_t numArgs() const { return numArgs_; }
-    uint32_t numVars() const { return numVars_; }
-    uint32_t numBodyLevelLexicals() const { return numBodyLevelLexicals_; }
-    uint32_t numBlockScoped() const { return numBlockScoped_; }
-    uint32_t numBodyLevelLocals() const { return numVars_ + numBodyLevelLexicals_; }
-    uint32_t numUnaliasedBodyLevelLocals() const { return numUnaliasedVars_ + numUnaliasedBodyLevelLexicals_; }
-    uint32_t numAliasedBodyLevelLocals() const { return numBodyLevelLocals() - numUnaliasedBodyLevelLocals(); }
-    uint32_t numLocals() const { return numVars() + numBodyLevelLexicals() + numBlockScoped(); }
-    uint32_t numFixedLocals() const { return numUnaliasedVars() + numUnaliasedBodyLevelLexicals() + numBlockScoped(); }
-    uint32_t lexicalBegin() const { return numArgs() + numVars(); }
-    uint32_t aliasedBodyLevelLexicalBegin() const { return aliasedBodyLevelLexicalBegin_; }
-
-    uint32_t numUnaliasedVars() const { return numUnaliasedVars_; }
-    uint32_t numUnaliasedBodyLevelLexicals() const { return numUnaliasedBodyLevelLexicals_; }
-
-    // Return the size of the bindingArray.
-    uint32_t count() const { return numArgs() + numVars() + numBodyLevelLexicals(); }
-
-    /* Return the initial shape of call objects created for this scope. */
-    Shape* callObjShape() const { return callObjShape_; }
-
-    /* Return whether the binding at bindingIndex is aliased. */
-    bool bindingIsAliased(uint32_t bindingIndex);
-
-    /* Return whether this scope has any aliased bindings. */
-    bool hasAnyAliasedBindings() const {
-        if (!callObjShape_)
-            return false;
-
-        return !callObjShape_->isEmptyShape();
-    }
-
-    Binding* begin() const { return bindingArray(); }
-    Binding* end() const { return bindingArray() + count(); }
-
-    static void trace(Bindings* self, JSTracer* trc) { self->trace(trc); }
-    void trace(JSTracer* trc);
-};
-
-// If this fails, add/remove padding within Bindings.
-static_assert(sizeof(Bindings) % js::gc::CellSize == 0,
-              "Size of Bindings must be an integral multiple of js::gc::CellSize");
-
-template <class Outer>
-class BindingsOperations
-{
-    const Bindings& bindings() const { return static_cast<const Outer*>(this)->get(); }
-
-  public:
-    // Direct data access to the underlying bindings.
-    const HeapPtr<Shape*>& callObjShape() const {
-        return bindings().callObjShape_;
-    }
-    uint16_t numArgs() const {
-        return bindings().numArgs_;
-    }
-    uint16_t numBlockScoped() const {
-        return bindings().numBlockScoped_;
-    }
-    uint16_t numBodyLevelLexicals() const {
-        return bindings().numBodyLevelLexicals_;
-    }
-    uint16_t aliasedBodyLevelLexicalBegin() const {
-        return bindings().aliasedBodyLevelLexicalBegin_;
-    }
-    uint16_t numUnaliasedBodyLevelLexicals() const {
-        return bindings().numUnaliasedBodyLevelLexicals_;
-    }
-    uint32_t numVars() const {
-        return bindings().numVars_;
-    }
-    uint32_t numUnaliasedVars() const {
-        return bindings().numUnaliasedVars_;
-    }
-
-    // Binding array access.
-    bool bindingArrayUsingTemporaryStorage() const {
-        return bindings().bindingArrayUsingTemporaryStorage();
-    }
-    const Binding* bindingArray() const {
-        return bindings().bindingArray();
-    }
-    uint32_t count() const {
-        return bindings().count();
-    }
-
-    // Helpers.
-    uint32_t numBodyLevelLocals() const {
-        return numVars() + numBodyLevelLexicals();
-    }
-    uint32_t numUnaliasedBodyLevelLocals() const {
-        return numUnaliasedVars() + numUnaliasedBodyLevelLexicals();
-    }
-    uint32_t numAliasedBodyLevelLocals() const {
-        return numBodyLevelLocals() - numUnaliasedBodyLevelLocals();
-    }
-    uint32_t numLocals() const {
-        return numVars() + numBodyLevelLexicals() + numBlockScoped();
-    }
-    uint32_t numFixedLocals() const {
-        return numUnaliasedVars() + numUnaliasedBodyLevelLexicals() + numBlockScoped();
-    }
-    uint32_t lexicalBegin() const {
-        return numArgs() + numVars();
-    }
-};
-
-template <class Outer>
-class MutableBindingsOperations : public BindingsOperations<Outer>
-{
-    Bindings& bindings() { return static_cast<Outer*>(this)->get(); }
-
-  public:
-    void setCallObjShape(HandleShape shape) { bindings().callObjShape_ = shape; }
-    void setBindingArray(const Binding* bindingArray, uintptr_t temporaryBit) {
-        bindings().bindingArrayAndFlag_ = uintptr_t(bindingArray) | temporaryBit;
-    }
-    void setNumArgs(uint32_t num) {
-        MOZ_ASSERT(num <= UINT16_MAX);
-        bindings().numArgs_ = num;
-    }
-    void setNumVars(uint32_t num) {
-        bindings().numVars_ = num;
-    }
-    void setNumBodyLevelLexicals(uint32_t num) {
-        MOZ_ASSERT(num <= UINT16_MAX);
-        bindings().numBodyLevelLexicals_ = num;
-    }
-    void setNumBlockScoped(uint32_t num) {
-        MOZ_ASSERT(num <= UINT16_MAX);
-        bindings().numBlockScoped_ = num;
-    }
-    void setNumUnaliasedVars(uint32_t num) {
-        bindings().numUnaliasedVars_ = num;
-    }
-    void setNumUnaliasedBodyLevelLexicals(uint32_t num) {
-        MOZ_ASSERT(num <= UINT16_MAX);
-        bindings().numUnaliasedBodyLevelLexicals_ = num;
-    }
-    void setAliasedBodyLevelLexicalBegin(uint32_t offset) {
-        bindings().aliasedBodyLevelLexicalBegin_ = offset;
-    }
-    uint8_t* switchToScriptStorage(Binding* permanentStorage) {
-        return bindings().switchToScriptStorage(permanentStorage);
-    }
-};
-
-template <>
-class HandleBase<Bindings> : public BindingsOperations<JS::Handle<Bindings>>
-{};
-
-template <>
-class MutableHandleBase<Bindings>
-  : public MutableBindingsOperations<JS::MutableHandle<Bindings>>
-{};
-
 class ScriptCounts
 {
   public:
@@ -950,36 +647,6 @@ class JSScript : public js::gc::TenuredCell
     js::detail::CopyScript(JSContext* cx, js::HandleObject scriptStaticScope, js::HandleScript src,
                            js::HandleScript dst);
 
-  public:
-    //
-    // We order fields according to their size in order to avoid wasting space
-    // for alignment.
-    //
-
-    // Larger-than-word-sized fields.
-
-  public:
-    js::Bindings    bindings;   /* names of top-level variables in this script
-                                   (and arguments if this is a function script) */
-
-    bool hasAnyAliasedBindings() const {
-        return bindings.hasAnyAliasedBindings();
-    }
-
-    js::Binding* bindingArray() const {
-        return bindings.bindingArray();
-    }
-
-    unsigned numArgs() const {
-        return bindings.numArgs();
-    }
-
-    js::Shape* callObjShape() const {
-        return bindings.callObjShape();
-    }
-
-    // Word-sized fields.
-
   private:
     jsbytecode*     code_;     /* bytecodes and their immediate operands */
   public:
@@ -1040,7 +707,8 @@ class JSScript : public js::gc::TenuredCell
                                    predef'ing prologue */
 
     uint32_t        natoms_;    /* length of atoms array */
-    uint32_t        nslots_;    /* vars plus maximum stack depth */
+    uint32_t        nfixed_;    /* fixed frame slots */
+    uint32_t        nslots_;    /* slots plus maximum stack depth */
 
     /* Range of characters in scriptSource which contains this script's source. */
     uint32_t        sourceStart_;
@@ -1300,7 +968,7 @@ class JSScript : public js::gc::TenuredCell
     // The fixed part of a stack frame is comprised of vars (in function and
     // module code) and block-scoped locals (in all kinds of code).
     size_t nfixed() const {
-        return isGlobalOrEvalCode() ? bindings.numBlockScoped() : bindings.numFixedLocals();
+        return nfixed_;
     }
 
     // Number of fixed slots reserved for vars.  Only nonzero for function
@@ -1865,6 +1533,9 @@ class JSScript : public js::gc::TenuredCell
     inline JSFunction* getFunction(size_t index);
     inline JSFunction* function();
 
+    inline unsigned numArgs() const;
+    inline js::Shape* callObjShape() const;
+
     inline js::RegExpObject* getRegExp(size_t index);
     inline js::RegExpObject* getRegExp(jsbytecode* pc);
 
@@ -1994,36 +1665,6 @@ static_assert(sizeof(JSScript) % js::gc::CellSize == 0,
               "Size of JSScript must be an integral multiple of js::gc::CellSize");
 
 namespace js {
-
-/*
- * Iterator over the aliased formal bindings in ascending index order. This can
- * be veiwed as a filtering of BindingIter with predicate
- *   bi->aliased() && bi->kind() == Binding::ARGUMENT
- */
-class AliasedFormalIter
-{
-    const Binding* begin_;
-    const Binding* p_;
-    const Binding* end_;
-    unsigned slot_;
-
-    void settle() {
-        while (p_ != end_ && !p_->aliased())
-            p_++;
-    }
-
-  public:
-    explicit inline AliasedFormalIter(JSScript* script);
-
-    bool done() const { return p_ == end_; }
-    explicit operator bool() const { return !done(); }
-    void operator++(int) { MOZ_ASSERT(!done()); p_++; slot_++; settle(); }
-
-    const Binding& operator*() const { MOZ_ASSERT(!done()); return *p_; }
-    const Binding* operator->() const { MOZ_ASSERT(!done()); return p_; }
-    unsigned frameIndex() const { MOZ_ASSERT(!done()); return p_ - begin_; }
-    unsigned scopeSlot() const { MOZ_ASSERT(!done()); return slot_; }
-};
 
 // Information about a script which may be (or has been) lazily compiled to
 // bytecode from its source.

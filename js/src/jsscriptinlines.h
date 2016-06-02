@@ -144,7 +144,22 @@ JSScript::function()
 {
     if (functionNonDelazifying())
         return functionNonDelazifying();
-    // TODOshu eval scopes
+    return nullptr;
+}
+
+inline unsigned
+JSScript::numArgs() const
+{
+    if (bodyScope()->is<FunctionScope>())
+        return bodyScope()->as<FunctionScope>().numSimpleFormalParameters();
+    return 0;
+}
+
+inline js::Shape*
+JSScript::callObjShape() const
+{
+    if (bodyScope()->is<FunctionScope>())
+        return bodyScope()->as<FunctionScope>().environmentShape();
     return nullptr;
 }
 

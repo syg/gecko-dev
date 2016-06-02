@@ -221,6 +221,8 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     AtomIndexMap    atomIndices;    /* literals indexed for mapping */
     unsigned        firstLine;      /* first line, for JSScript::initFromEmitter */
 
+    uint32_t        maxFixedSlots;  /* maximum number of fixed frame slots so far */
+
     int32_t         stackDepth;     /* current stack depth in script frame */
     uint32_t        maxStackDepth;  /* maximum stack depth so far */
 

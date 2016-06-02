@@ -2970,7 +2970,8 @@ JSScript::fullyInitFromEmitter(ExclusiveContext* cx, HandleScript script, Byteco
     if (bce->yieldOffsetList.length() != 0)
         bce->yieldOffsetList.finish(script->yieldOffsets(), prologueLength);
 
-    // The call to nfixed() depends on the above setFunction() call.
+    script->nfixed_ = bce->maxFixedSlots;
+
     if (UINT32_MAX - script->nfixed() < bce->maxStackDepth) {
         bce->reportError(nullptr, JSMSG_NEED_DIET, "script");
         return false;

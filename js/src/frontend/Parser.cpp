@@ -1010,7 +1010,8 @@ Parser<FullParseHandler>::checkStatementsEOF()
 
 template <>
 Maybe<GlobalScope::Data*>
-Parser<FullParseHandler>::newGlobalScopeData(ParseContext::Scope& scope, uint32_t* functionsEnd)
+Parser<FullParseHandler>::newGlobalScopeData(ParseContext::Scope& scope,
+                                             uint32_t* functionBindingEnd)
 {
     Vector<BindingName> funs(context);
     Vector<BindingName> vars(context);
@@ -1063,7 +1064,7 @@ Parser<FullParseHandler>::newGlobalScopeData(ParseContext::Scope& scope, uint32_
     // superfluous DEFVARs.
     PodCopy(cursor, funs.begin(), funs.length());
     cursor += funs.length();
-    *functionsEnd = cursor - start;
+    *functionBindingEnd = cursor - start;
 
     PodCopy(cursor, vars.begin(), vars.length());
     cursor += vars.length();
@@ -1081,7 +1082,8 @@ Parser<FullParseHandler>::newGlobalScopeData(ParseContext::Scope& scope, uint32_
 
 template <>
 Maybe<EvalScope::Data*>
-Parser<FullParseHandler>::newEvalScopeData(ParseContext::Scope& scope, uint32_t* functionsEnd)
+Parser<FullParseHandler>::newEvalScopeData(ParseContext::Scope& scope,
+                                           uint32_t* functionBindingEnd)
 {
     Vector<BindingName> funs(context);
     Vector<BindingName> vars(context);
@@ -1122,7 +1124,7 @@ Parser<FullParseHandler>::newEvalScopeData(ParseContext::Scope& scope, uint32_t*
     // superfluous DEFVARs.
     PodCopy(cursor, funs.begin(), funs.length());
     cursor += funs.length();
-    *functionsEnd = cursor - start;
+    *functionBindingEnd = cursor - start;
 
     PodCopy(cursor, vars.begin(), vars.length());
     bindings->length = numBindings;
@@ -1352,14 +1354,14 @@ Parser<FullParseHandler>::evalBody()
         }
     }
 
-    uint32_t functionsEnd = 0;
-    Maybe<EvalScope::Data*> bindings = newEvalScopeData(pc->varScope(), &functionsEnd);
+    uint32_t functionBindingEnd = 0;
+    Maybe<EvalScope::Data*> bindings = newEvalScopeData(pc->varScope(), &functionBindingEnd);
     if (!bindings)
         return nullptr;
 
     EvalSharedContext* evalsc = pc->sc()->asEvalContext();
     evalsc->bindings = *bindings;
-    evalsc->functionsEnd = functionsEnd;
+    evalsc->functionBindingEnd = functionBindingEnd;
 
     return body;
 }
@@ -1377,14 +1379,14 @@ Parser<FullParseHandler>::globalBody()
     if (!checkStatementsEOF())
         return nullptr;
 
-    uint32_t functionsEnd = 0;
-    Maybe<GlobalScope::Data*> bindings = newGlobalScopeData(pc->varScope(), &functionsEnd);
+    uint32_t functionBindingEnd = 0;
+    Maybe<GlobalScope::Data*> bindings = newGlobalScopeData(pc->varScope(), &functionBindingEnd);
     if (!bindings)
         return nullptr;
 
     GlobalSharedContext* globalsc = pc->sc()->asGlobalContext();
     globalsc->bindings = *bindings;
-    globalsc->functionsEnd = functionsEnd;
+    globalsc->functionBindingEnd = functionBindingEnd;
 
     return body;
 }

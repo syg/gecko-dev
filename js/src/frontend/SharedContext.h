@@ -385,7 +385,7 @@ class MOZ_STACK_CLASS GlobalSharedContext : public SharedContext
     //
     // This is only used in BytecodeEmitter, and is thus not kept in
     // GlobalScope::Data.
-    uint32_t functionsEnd;
+    uint32_t functionBindingEnd;
 
     GlobalScope::Data* bindings;
 
@@ -393,7 +393,7 @@ class MOZ_STACK_CLASS GlobalSharedContext : public SharedContext
                         bool extraWarnings)
       : SharedContext(cx, Kind::Global, directives, extraWarnings),
         scopeKind_(scopeKind),
-        functionsEnd(0),
+        functionBindingEnd(0),
         bindings(nullptr)
     {
         MOZ_ASSERT(scopeKind == ScopeKind::Global || scopeKind == ScopeKind::NonSyntactic);
@@ -421,7 +421,7 @@ class MOZ_STACK_CLASS EvalSharedContext : public SharedContext
     //
     // This is only used in BytecodeEmitter, and is thus not kept in
     // EvalScope::Data.
-    uint32_t functionsEnd;
+    uint32_t functionBindingEnd;
 
     EvalScope::Data* bindings;
 
@@ -429,7 +429,7 @@ class MOZ_STACK_CLASS EvalSharedContext : public SharedContext
                       bool extraWarnings)
       : SharedContext(cx, Kind::Eval, directives, extraWarnings),
         enclosingScope_(cx, enclosingScope),
-        functionsEnd(0),
+        functionBindingEnd(0),
         bindings(nullptr)
     {
         computeAllowSyntax(enclosingScope);

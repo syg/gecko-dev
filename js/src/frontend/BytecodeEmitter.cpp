@@ -995,21 +995,21 @@ BytecodeEmitter::EmitterScope::enterFunction(BytecodeEmitter* bce,
 
 class PrologueBindingIter : public BindingIter
 {
-    uint32_t functionsEnd_;
+    uint32_t functionEnd_;
 
   public:
-    PrologueBindingIter(GlobalScope::Data& data, uint32_t functionsEnd)
+    PrologueBindingIter(GlobalScope::Data& data, uint32_t functionEnd)
       : BindingIter(data),
-        functionsEnd_(functionsEnd)
+        functionEnd_(functionEnd)
     {
-        MOZ_ASSERT(functionsEnd_ >= varStart_ && functionsEnd_ <= letStart_);
+        MOZ_ASSERT(functionEnd_ >= varStart_ && functionEnd_ <= letStart_);
     }
 
-    PrologueBindingIter(EvalScope::Data& data, uint32_t functionsEnd, bool strict)
+    PrologueBindingIter(EvalScope::Data& data, uint32_t functionEnd, bool strict)
       : BindingIter(data, strict),
-        functionsEnd_(functionsEnd)
+        functionEnd_(functionEnd)
     {
-        MOZ_ASSERT(functionsEnd_ >= varStart_ && functionsEnd_ <= letStart_);
+        MOZ_ASSERT(functionEnd_ >= varStart_ && functionEnd_ <= letStart_);
     }
 
     JSOp prologueOp() const {
@@ -1026,7 +1026,7 @@ class PrologueBindingIter : public BindingIter
     }
 
     bool isBodyLevelFunction() const {
-        return index_ < functionsEnd_;
+        return index_ < functionEnd_;
     }
 };
 
@@ -1058,7 +1058,7 @@ BytecodeEmitter::EmitterScope::enterGlobal(BytecodeEmitter* bce, GlobalSharedCon
     // Resolve binding names and emit DEF{VAR,LET,CONST} prologue ops.
     bce->switchToPrologue();
     if (GlobalScope::Data* bindings = globalsc->bindings) {
-        for (PrologueBindingIter bi(*bindings, globalsc->functionsEnd); bi; bi++) {
+        for (PrologueBindingIter bi(*bindings, globalsc->functionBindingEnd); bi; bi++) {
             NameLocation loc = NameLocation::fromBinding(bi.kind(), bi.location());
             JSAtom* name = bi.name();
             if (!putNameInCache(bce, name, loc))
@@ -1113,7 +1113,7 @@ BytecodeEmitter::EmitterScope::enterEval(BytecodeEmitter* bce, EvalSharedContext
 
         if (!evalsc->strict()) {
             bce->switchToPrologue();
-            for (PrologueBindingIter bi(*bindings, evalsc->functionsEnd, false); bi; bi++) {
+            for (PrologueBindingIter bi(*bindings, evalsc->functionBindingEnd, false); bi; bi++) {
                 MOZ_ASSERT(bi.prologueOp() == JSOP_DEFVAR);
 
                 if (bi.isBodyLevelFunction())
@@ -1194,6 +1194,10 @@ BytecodeEmitter::EmitterScope::leave(BytecodeEmitter* bce, bool nonLocal)
     if (!nonLocal && enclosing())
         bce->scopeNoteList.recordEnd(noteIndex_, bce->offset(), bce->inPrologue());
 
+    // Record the maximum frame size.
+    if (data().nextFrameSlot() > bce->maxFixedSlots)
+        bce->maxFixedSlots = data().nextFrameSlot();
+
     return true;
 }
 
@@ -1262,6 +1266,7 @@ BytecodeEmitter::BytecodeEmitter(BytecodeEmitter* parent,
     parser(parser),
     atomIndices(cx),
     firstLine(lineNum),
+    maxFixedSlots(0),
     stackDepth(0), maxStackDepth(0),
     arrayCompDepth(0),
     emitLevel(0),
