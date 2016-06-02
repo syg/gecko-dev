@@ -408,7 +408,7 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     MOZ_MUST_USE bool emitTree(ParseNode* pn, EmitLineNumberNote emitLineNote = EMIT_LINENOTE);
 
     // Emit global or eval code for tree rooted at body.
-    bool emitScript(ParseNode* body);
+    MOZ_MUST_USE bool emitScript(ParseNode* body);
 
     // Emit function code for the tree rooted at body.
     MOZ_MUST_USE bool emitFunctionScript(ParseNode* body);
@@ -538,6 +538,8 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     MOZ_MUST_USE bool emitInitializeName(JSAtom* name, RHSEmitter emitRhs) {
         return emitSetOrInitializeName(name, emitRhs, true);
     }
+
+    MOZ_MUST_USE bool emitTDZCheckIfNeeded(JSAtom* name, const NameLocation& loc);
 
     MOZ_MUST_USE bool emitNameIncDec(ParseNode* pn);
 

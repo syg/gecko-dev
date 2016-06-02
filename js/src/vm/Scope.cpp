@@ -386,17 +386,23 @@ BindingIter::init(FunctionScope::Data& data)
 void
 BindingIter::init(GlobalScope::Data& data)
 {
-    init(0, 0, 0, 0,
-         false, 0, JSSLOT_FREE(&ClonedBlockObject::class_),
+    init(0, 0, data.letStart, data.constStart,
+         false, UINT32_MAX, UINT32_MAX,
          data.names, data.length);
 }
 
 void
 BindingIter::init(EvalScope::Data& data, bool strict)
 {
-    init(0, 0, data.length, data.length,
-         strict, 0, JSSLOT_FREE(&CallObject::class_),
-         data.names, data.length);
+    if (strict) {
+        init(0, 0, data.length, data.length,
+             true, 0, JSSLOT_FREE(&CallObject::class_),
+             data.names, data.length);
+    } else {
+        init(0, 0, data.length, data.length,
+             false, UINT32_MAX, UINT32_MAX,
+             data.names, data.length);
+    }
 }
 
 uint32_t

@@ -2658,11 +2658,19 @@ EmitGetNameAtLocation(BytecodeEmitter* bce, JSAtom* name, const NameLocation& lo
         break;
 
       case NameLocation::Kind::FrameSlot:
+        if (loc.isLexical()) {
+            if (!bce->emitTDZCheckIfNeeded(name, loc))
+                return false;
+        }
         if (!bce->emitLocalOp(JSOP_GETLOCAL, loc.frameSlot()))
             return false;
         break;
 
       case NameLocation::Kind::EnvironmentCoordinate:
+        if (loc.isLexical()) {
+            if (!bce->emitTDZCheckIfNeeded(name, loc))
+                return false;
+        }
         if (!bce->emitScopeCoordOp(JSOP_GETALIASEDVAR, loc.scopeCoordinate()))
             return false;
         break;
@@ -2780,10 +2788,18 @@ BytecodeEmitter::emitSetOrInitializeName(JSAtom* name, RHSEmitter emitRhs, bool 
       case NameLocation::Kind::FrameSlot: {
         JSOp op = JSOP_SETLOCAL;
         if (loc.isLexical()) {
-            if (initialize)
+            if (initialize) {
                 op = JSOP_INITLEXICAL;
-            else if (loc.isConst())
-                op = JSOP_THROWSETCONST;
+
+                if (!innermostTDZCheckCache->noteEmittedTDZCheck(this, name))
+                    return false;
+            } else {
+                if (loc.isConst())
+                    op = JSOP_THROWSETCONST;
+
+                if (!emitTDZCheckIfNeeded(name, loc))
+                    return false;
+            }
         }
         if (!emitRhs(this, loc, emittedBindOp))
             return false;
@@ -2798,8 +2814,15 @@ BytecodeEmitter::emitSetOrInitializeName(JSAtom* name, RHSEmitter emitRhs, bool 
             if (initialize) {
                 MOZ_ASSERT(loc.scopeCoordinate().hops() == 0);
                 op = JSOP_INITALIASEDLEXICAL;
-            } else if (loc.isConst()) {
-                op = JSOP_THROWSETALIASEDCONST;
+
+                if (!innermostTDZCheckCache->noteEmittedTDZCheck(this, name))
+                    return false;
+            } else {
+                if (loc.isConst())
+                    op = JSOP_THROWSETALIASEDCONST;
+
+                if (!emitTDZCheckIfNeeded(name, loc))
+                    return false;
             }
         }
         if (!emitRhs(this, loc, emittedBindOp))
@@ -2811,6 +2834,32 @@ BytecodeEmitter::emitSetOrInitializeName(JSAtom* name, RHSEmitter emitRhs, bool 
     }
 
     return true;
+}
+
+bool
+BytecodeEmitter::emitTDZCheckIfNeeded(JSAtom* name, const NameLocation& loc)
+{
+    // Dynamic accesses have TDZ checks built into their VM code and should
+    // never emit explicit TDZ checks.
+    MOZ_ASSERT(loc.isLexical() && loc.hasKnownSlot());
+
+    Maybe<MaybeCheckTDZ> check = innermostTDZCheckCache->needsTDZCheck(this, name);
+    if (!check)
+        return false;
+
+    // We've already emitted a check in this basic block.
+    if (!*check)
+        return true;
+
+    if (loc.kind() == NameLocation::Kind::FrameSlot) {
+        if (!emitLocalOp(JSOP_CHECKLEXICAL, loc.frameSlot()))
+            return false;
+    } else {
+        if (!emitScopeCoordOp(JSOP_CHECKALIASEDLEXICAL, loc.scopeCoordinate()))
+            return false;
+    }
+
+    return innermostTDZCheckCache->noteEmittedTDZCheck(this, name);
 }
 
 bool
@@ -6563,10 +6612,8 @@ BytecodeEmitter::emitThisLiteral(ParseNode* pn)
 bool
 BytecodeEmitter::emitCheckDerivedClassConstructorReturn()
 {
-    JSAtom* dotThis = cx->names().dotThis;
-    NameLocation loc = lookupName(dotThis);
-    MOZ_ASSERT(loc.kind() == NameLocation::Kind::EnvironmentCoordinate);
-    if (!EmitGetNameAtLocation(this, dotThis, loc, false))
+    MOZ_ASSERT(lookupName(cx->names().dotThis).hasKnownSlot());
+    if (!emitGetName(cx->names().dotThis))
         return false;
     if (!emit1(JSOP_CHECKRETURN))
         return false;
