@@ -1243,6 +1243,7 @@ Parser<FullParseHandler>::newLexicalScopeData(ParseContext::Scope& scope)
 
     // The ordering here is important. See comments in LexicalScope.
     BindingName* cursor = bindings->names;
+    BindingName* start = cursor;
 
     PodCopy(cursor, lets.begin(), lets.length());
     cursor += lets.length();
@@ -1326,6 +1327,30 @@ Parser<FullParseHandler>::evalBody()
     body = finishLexicalScope(scope, body);
     if (!body)
         return nullptr;
+
+    // It's an error to use 'arguments' in a legacy generator expression.
+    //
+    // If 'arguments' appears free (i.e. not a declared name) or if the
+    // declaration does not shadow the enclosing script's 'arguments'
+    // binding (i.e. not a lexical declaration), check the enclosing
+    // script.
+    ParseContext::Scope& varScope = pc->varScope();
+    JSAtom* argumentsName = context->names().arguments;
+    if (varScope.hasUsedName(argumentsName)) {
+        DeclaredNamePtr ptr = varScope.lookupDeclaredName(argumentsName);
+        if (!ptr || !DeclarationKindIsLexical(ptr->value().kind())) {
+            Scope* scope = pc->sc()->compilationEnclosingScope();
+            while (scope->is<EvalScope>())
+                scope = scope->enclosing();
+            if (scope->is<FunctionScope>()) {
+                JSScript* script = scope->as<FunctionScope>().script();
+                if (script->isGeneratorExp() && script->isLegacyGenerator()) {
+                    report(ParseError, false, nullptr, JSMSG_BAD_GENEXP_BODY, js_arguments_str);
+                    return nullptr;
+                }
+            }
+        }
+    }
 
     uint32_t functionsEnd = 0;
     Maybe<EvalScope::Data*> bindings = newEvalScopeData(pc->varScope(), &functionsEnd);

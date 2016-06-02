@@ -77,8 +77,7 @@ class MOZ_STACK_CLASS BytecodeCompiler
     void emplaceEmitter(SharedContext* sharedContext);
     bool handleParseFailure(const Directives& newDirectives);
     bool prepareTree(ParseNode** pn);
-    bool checkArgumentsWithinEval(JSContext* cx, HandleFunction fun);
-    bool maybeCheckEvalFreeVariables(HandleObject environment, ParseContext& pc);
+    bool deoptimizeArgumentsInEnclosingScripts(JSContext* cx, HandleObject environment);
     bool maybeSetDisplayURL(TokenStream& tokenStream);
     bool maybeSetSourceMap(TokenStream& tokenStream);
     bool maybeSetSourceMapFromOptions();
@@ -343,72 +342,23 @@ BytecodeCompiler::maybeSetSourceMapFromOptions()
 }
 
 bool
-BytecodeCompiler::checkArgumentsWithinEval(JSContext* cx, HandleFunction fun)
+BytecodeCompiler::deoptimizeArgumentsInEnclosingScripts(JSContext* cx, HandleObject environment)
 {
-    RootedScript script(cx, fun->getOrCreateScript(cx));
-    if (!script)
-        return false;
-
-    // It's an error to use |arguments| in a legacy generator expression.
-    if (script->isGeneratorExp() && script->isLegacyGenerator()) {
-        parser->report(ParseError, false, nullptr, JSMSG_BAD_GENEXP_BODY, js_arguments_str);
-        return false;
-    }
-
-    return true;
-}
-
-bool
-BytecodeCompiler::maybeCheckEvalFreeVariables(HandleObject environment, ParseContext& pc)
-{
-    // TODOshu
-    return true;
-
-#if 0
-    // Eval scripts are only compiled on the main thread.
-    JSContext* cx = this->cx->asJSContext();
-
-    // Watch for uses of 'arguments' within the evaluated script, both as
-    // free variables and as variables redeclared with 'var'.
-    RootedFunction fun(cx, evalCaller->functionOrCallerFunction());
-    HandlePropertyName arguments = cx->names().arguments;
-    /* TODOshu
-    for (AtomDefnRange r = pc.lexdeps->all(); !r.empty(); r.popFront()) {
-        if (r.front().key() == arguments) {
-            if (!checkArgumentsWithinEval(cx, fun))
+    RootedObject scope(cx, environment);
+    while (scope->is<ScopeObject>() || scope->is<DebugScopeObject>()) {
+        if (scope->is<CallObject>() && !scope->as<CallObject>().isForEval()) {
+            RootedScript script(cx, scope->as<CallObject>().callee().getOrCreateScript(cx));
+            if (!script)
                 return false;
-        }
-    }
-    for (AtomDefnListMap::Range r = pc.decls().all(); !r.empty(); r.popFront()) {
-        if (r.front().key() == arguments) {
-            if (!checkArgumentsWithinEval(cx, fun))
-                return false;
-        }
-    }
-    */
-
-    // If the eval'ed script contains any debugger statement, force construction
-    // of arguments objects for the caller script and any other scripts it is
-    // transitively nested inside. The debugger can access any variable on the
-    // scope chain.
-    if (pc.sc()->hasDebuggerStatement()) {
-        RootedObject scope(cx, environment);
-        while (scope->is<ScopeObject>() || scope->is<DebugScopeObject>()) {
-            if (scope->is<CallObject>() && !scope->as<CallObject>().isForEval()) {
-                RootedScript script(cx, scope->as<CallObject>().callee().getOrCreateScript(cx));
-                if (!script)
+            if (script->argumentsHasVarBinding()) {
+                if (!JSScript::argumentsOptimizationFailed(cx, script))
                     return false;
-                if (script->argumentsHasVarBinding()) {
-                    if (!JSScript::argumentsOptimizationFailed(cx, script))
-                        return false;
-                }
             }
-            scope = scope->enclosingScope();
         }
+        scope = scope->enclosingScope();
     }
 
     return true;
-#endif
 }
 
 bool
@@ -441,8 +391,14 @@ BytecodeCompiler::compileScript(HandleObject environment, SharedContext* sc)
 
         // Successfully parsed. Emit the script.
         if (pn) {
-            if (!maybeCheckEvalFreeVariables(environment, pc))
-                return nullptr;
+            if (sc->isEvalContext() && sc->hasDebuggerStatement() && cx->isJSContext()) {
+                // If the eval'ed script contains any debugger statement, force construction
+                // of arguments objects for the caller script and any other scripts it is
+                // transitively nested inside. The debugger can access any variable on the
+                // scope chain.
+                if (!deoptimizeArgumentsInEnclosingScripts(cx->asJSContext(), environment))
+                    return nullptr;
+            }
             if (!prepareTree(&pn))
                 return nullptr;
             if (!emitter->emitScript(pn))
