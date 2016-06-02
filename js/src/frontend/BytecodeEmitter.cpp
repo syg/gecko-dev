@@ -993,6 +993,43 @@ BytecodeEmitter::EmitterScope::enterFunction(BytecodeEmitter* bce,
     return internScope(bce, createFunctionScope);
 }
 
+class PrologueBindingIter : public BindingIter
+{
+    uint32_t functionsEnd_;
+
+  public:
+    PrologueBindingIter(GlobalScope::Data& data, uint32_t functionsEnd)
+      : BindingIter(data),
+        functionsEnd_(functionsEnd)
+    {
+        MOZ_ASSERT(functionsEnd_ >= varStart_ && functionsEnd_ <= letStart_);
+    }
+
+    PrologueBindingIter(EvalScope::Data& data, uint32_t functionsEnd, bool strict)
+      : BindingIter(data, strict),
+        functionsEnd_(functionsEnd)
+    {
+        MOZ_ASSERT(functionsEnd_ >= varStart_ && functionsEnd_ <= letStart_);
+    }
+
+    JSOp prologueOp() const {
+        switch (kind()) {
+          case BindingKind::Var:
+            return JSOP_DEFVAR;
+          case BindingKind::Let:
+            return JSOP_DEFLET;
+          case BindingKind::Const:
+            return JSOP_DEFCONST;
+          default:
+            MOZ_CRASH("Bad BindingKind");
+        }
+    }
+
+    bool isBodyLevelFunction() const {
+        return index_ < functionsEnd_;
+    }
+};
+
 bool
 BytecodeEmitter::EmitterScope::enterGlobal(BytecodeEmitter* bce, GlobalSharedContext* globalsc)
 {
@@ -1021,34 +1058,22 @@ BytecodeEmitter::EmitterScope::enterGlobal(BytecodeEmitter* bce, GlobalSharedCon
     // Resolve binding names and emit DEF{VAR,LET,CONST} prologue ops.
     bce->switchToPrologue();
     if (GlobalScope::Data* bindings = globalsc->bindings) {
-        for (BindingIter bi(*bindings); bi; bi++) {
+        for (PrologueBindingIter bi(*bindings, globalsc->functionsEnd); bi; bi++) {
             NameLocation loc = NameLocation::fromBinding(bi.kind(), bi.location());
-
-            JSOp op;
-            switch (bi.kind()) {
-              case BindingKind::Var:
-                op = JSOP_DEFVAR;
-                break;
-              case BindingKind::Let:
-                op = JSOP_DEFLET;
-                break;
-              case BindingKind::Const:
-                op = JSOP_DEFCONST;
-                break;
-              default:
-                MOZ_CRASH("Bad global scope BindingKind");
-            }
-
-            // Define the binding in the prologue.
             JSAtom* name = bi.name();
-            jsatomid atomIndex;
-            if (!bce->makeAtomIndex(name, &atomIndex))
-                return false;
-            if (!bce->emitIndexOp(op, atomIndex))
-                return false;
-
             if (!putNameInCache(bce, name, loc))
                 return false;
+
+            // Define the name in the prologue. Do not emit DEFVAR for
+            // functions that we'll emit DEFFUN for.
+            if (!bi.isBodyLevelFunction()) {
+                jsatomid atomIndex;
+                if (!bce->makeAtomIndex(name, &atomIndex))
+                    return false;
+                if (!bce->emitIndexOp(bi.prologueOp(), atomIndex))
+                    return false;
+            }
+
         }
     }
     bce->switchToMain();
@@ -1088,13 +1113,14 @@ BytecodeEmitter::EmitterScope::enterEval(BytecodeEmitter* bce, EvalSharedContext
 
         if (!evalsc->strict()) {
             bce->switchToPrologue();
-            for (BindingIter bi(*bindings, false); bi; bi++) {
-                if (bi.kind() != BindingKind::Var)
+            for (PrologueBindingIter bi(*bindings, evalsc->functionsEnd, false); bi; bi++) {
+                MOZ_ASSERT(bi.prologueOp() == JSOP_DEFVAR);
+
+                if (bi.isBodyLevelFunction())
                     continue;
 
-                JSAtom* name = bi.name();
                 jsatomid atomIndex;
-                if (!bce->makeAtomIndex(name, &atomIndex))
+                if (!bce->makeAtomIndex(bi.name(), &atomIndex))
                     return false;
                 if (!bce->emitIndexOp(JSOP_DEFVAR, atomIndex))
                     return false;

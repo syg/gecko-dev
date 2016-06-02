@@ -870,7 +870,7 @@ Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind 
                     return false;
                 }
             } else {
-                if (!scope->addDeclaredName(pc, p, name, DeclarationKind::Var))
+                if (!scope->addDeclaredName(pc, p, name, kind))
                     return false;
             }
         }
@@ -1010,8 +1010,9 @@ Parser<FullParseHandler>::checkStatementsEOF()
 
 template <>
 Maybe<GlobalScope::Data*>
-Parser<FullParseHandler>::newGlobalScopeData(ParseContext::Scope& scope)
+Parser<FullParseHandler>::newGlobalScopeData(ParseContext::Scope& scope, uint32_t* functionsEnd)
 {
+    Vector<BindingName> funs(context);
     Vector<BindingName> vars(context);
     Vector<BindingName> lets(context);
     Vector<BindingName> consts(context);
@@ -1021,8 +1022,13 @@ Parser<FullParseHandler>::newGlobalScopeData(ParseContext::Scope& scope)
         BindingName binding(bi.name(), closeOverAllBindings || bi.closedOver());
         switch (bi.kind()) {
           case BindingKind::Var:
-            if (!vars.append(binding))
-                return Nothing();
+            if (bi.declarationKind() == DeclarationKind::BodyLevelFunction) {
+                if (!funs.append(binding))
+                    return Nothing();
+            } else {
+                if (!vars.append(binding))
+                    return Nothing();
+            }
             break;
           case BindingKind::Let:
             if (!lets.append(binding))
@@ -1038,7 +1044,7 @@ Parser<FullParseHandler>::newGlobalScopeData(ParseContext::Scope& scope)
     }
 
     GlobalScope::Data* bindings = nullptr;
-    uint32_t numBindings = vars.length() + lets.length() + consts.length();
+    uint32_t numBindings = funs.length() + vars.length() + lets.length() + consts.length();
     if (numBindings == 0)
         return Some(bindings);
 
@@ -1052,6 +1058,12 @@ Parser<FullParseHandler>::newGlobalScopeData(ParseContext::Scope& scope)
     // The ordering here is important. See comments in GlobalScope.
     BindingName* start = bindings->names;
     BindingName* cursor = start;
+
+    // Keep track of what vars are functions. This is only used in BCE to omit
+    // superfluous DEFVARs.
+    PodCopy(cursor, funs.begin(), funs.length());
+    cursor += funs.length();
+    *functionsEnd = cursor - start;
 
     PodCopy(cursor, vars.begin(), vars.length());
     cursor += vars.length();
@@ -1069,8 +1081,9 @@ Parser<FullParseHandler>::newGlobalScopeData(ParseContext::Scope& scope)
 
 template <>
 Maybe<EvalScope::Data*>
-Parser<FullParseHandler>::newEvalScopeData(ParseContext::Scope& scope)
+Parser<FullParseHandler>::newEvalScopeData(ParseContext::Scope& scope, uint32_t* functionsEnd)
 {
+    Vector<BindingName> funs(context);
     Vector<BindingName> vars(context);
 
     bool closeOverAllBindings = pc->sc()->closeOverAllBindings();
@@ -1078,8 +1091,13 @@ Parser<FullParseHandler>::newEvalScopeData(ParseContext::Scope& scope)
         // Eval scopes only contain 'var' bindings.
         MOZ_ASSERT(bi.kind() == BindingKind::Var);
         BindingName binding(bi.name(), closeOverAllBindings || bi.closedOver());
-        if (!vars.append(binding))
-            return Nothing();
+        if (bi.declarationKind() == DeclarationKind::BodyLevelFunction) {
+            if (!funs.append(binding))
+                return Nothing();
+        } else {
+            if (!vars.append(binding))
+                return Nothing();
+        }
     }
 
     EvalScope::Data* bindings = nullptr;
@@ -1099,6 +1117,12 @@ Parser<FullParseHandler>::newEvalScopeData(ParseContext::Scope& scope)
 
     BindingName* start = bindings->names;
     BindingName* cursor = start;
+
+    // Keep track of what vars are functions. This is only used in BCE to omit
+    // superfluous DEFVARs.
+    PodCopy(cursor, funs.begin(), funs.length());
+    cursor += funs.length();
+    *functionsEnd = funs.length();
 
     PodCopy(cursor, vars.begin(), vars.length());
     bindings->length = numBindings;
@@ -1303,10 +1327,14 @@ Parser<FullParseHandler>::evalBody()
     if (!body)
         return nullptr;
 
-    Maybe<EvalScope::Data*> bindings = newEvalScopeData(pc->varScope());
+    uint32_t functionsEnd = 0;
+    Maybe<EvalScope::Data*> bindings = newEvalScopeData(pc->varScope(), &functionsEnd);
     if (!bindings)
         return nullptr;
-    pc->sc()->asEvalContext()->bindings = *bindings;
+
+    EvalSharedContext* evalsc = pc->sc()->asEvalContext();
+    evalsc->bindings = *bindings;
+    evalsc->functionsEnd = functionsEnd;
 
     return body;
 }
@@ -1324,10 +1352,14 @@ Parser<FullParseHandler>::globalBody()
     if (!checkStatementsEOF())
         return nullptr;
 
-    Maybe<GlobalScope::Data*> bindings = newGlobalScopeData(pc->varScope());
+    uint32_t functionsEnd = 0;
+    Maybe<GlobalScope::Data*> bindings = newGlobalScopeData(pc->varScope(), &functionsEnd);
     if (!bindings)
         return nullptr;
-    pc->sc()->asGlobalContext()->bindings = *bindings;
+
+    GlobalSharedContext* globalsc = pc->sc()->asGlobalContext();
+    globalsc->bindings = *bindings;
+    globalsc->functionsEnd = functionsEnd;
 
     return body;
 }

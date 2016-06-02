@@ -378,12 +378,22 @@ class MOZ_STACK_CLASS GlobalSharedContext : public SharedContext
     ScopeKind scopeKind_;
 
   public:
+    // We omit DEFFVAR in the prologue for global functions since we emit
+    // DEFFUN for them. In order to distinguish function vars, functions are
+    // ordered before vars. See Parser::newGlobalScopeData and
+    // EmitterScope::enterGlobal.
+    //
+    // This is only used in BytecodeEmitter, and is thus not kept in
+    // GlobalScope::Data.
+    uint32_t functionsEnd;
+
     GlobalScope::Data* bindings;
 
     GlobalSharedContext(ExclusiveContext* cx, ScopeKind scopeKind, Directives directives,
                         bool extraWarnings)
       : SharedContext(cx, Kind::Global, directives, extraWarnings),
         scopeKind_(scopeKind),
+        functionsEnd(0),
         bindings(nullptr)
     {
         MOZ_ASSERT(scopeKind == ScopeKind::Global || scopeKind == ScopeKind::NonSyntactic);
@@ -404,12 +414,22 @@ class MOZ_STACK_CLASS EvalSharedContext : public SharedContext
     RootedScope enclosingScope_;
 
   public:
+    // We omit DEFFVAR in the prologue for body-level functions since we emit
+    // DEFFUN for them. In order to distinguish function vars, functions are
+    // ordered before vars. See Parser::newEvalScopeData and
+    // EmitterScope::enterEval.
+    //
+    // This is only used in BytecodeEmitter, and is thus not kept in
+    // EvalScope::Data.
+    uint32_t functionsEnd;
+
     EvalScope::Data* bindings;
 
     EvalSharedContext(ExclusiveContext* cx, Scope* enclosingScope, Directives directives,
                       bool extraWarnings)
       : SharedContext(cx, Kind::Eval, directives, extraWarnings),
         enclosingScope_(cx, enclosingScope),
+        functionsEnd(0),
         bindings(nullptr)
     {
         computeAllowSyntax(enclosingScope);

@@ -1239,8 +1239,10 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     bool noteDeclaredName(HandlePropertyName name, DeclarationKind kind, Node node = null());
     bool noteUsedName(HandlePropertyName name);
 
-    mozilla::Maybe<GlobalScope::Data*> newGlobalScopeData(ParseContext::Scope& scope);
-    mozilla::Maybe<EvalScope::Data*> newEvalScopeData(ParseContext::Scope& scope);
+    mozilla::Maybe<GlobalScope::Data*> newGlobalScopeData(ParseContext::Scope& scope,
+                                                          uint32_t* functionsEnd);
+    mozilla::Maybe<EvalScope::Data*> newEvalScopeData(ParseContext::Scope& scope,
+                                                      uint32_t* functionsEnd);
     mozilla::Maybe<FunctionScope::Data*> newFunctionScopeData(ParseContext::Scope& scope);
     mozilla::Maybe<LexicalScope::Data*> newLexicalScopeData(ParseContext::Scope& scope);
     mozilla::Maybe<FreeNameArray*> newFreeNameArray(ParseContext::Scope& scope);

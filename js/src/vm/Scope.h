@@ -477,6 +477,7 @@ class EvalScope : public Scope
 
 class BindingIter
 {
+  protected:
     // Bindings are sorted by kind. Because different Scopes have differently
     // laid out Data for packing, BindingIter must handle all binding kinds.
     //
@@ -524,7 +525,7 @@ class BindingIter
     void init(EvalScope::Data& data, bool strict);
 
   public:
-    BindingIter(Scope* scope) {
+    explicit BindingIter(Scope* scope) {
         switch (scope->kind()) {
           case ScopeKind::Lexical:
           case ScopeKind::Catch:
