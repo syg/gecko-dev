@@ -1122,7 +1122,7 @@ Parser<FullParseHandler>::newEvalScopeData(ParseContext::Scope& scope, uint32_t*
     // superfluous DEFVARs.
     PodCopy(cursor, funs.begin(), funs.length());
     cursor += funs.length();
-    *functionsEnd = funs.length();
+    *functionsEnd = cursor - start;
 
     PodCopy(cursor, vars.begin(), vars.length());
     bindings->length = numBindings;
@@ -1246,7 +1246,7 @@ Parser<FullParseHandler>::newLexicalScopeData(ParseContext::Scope& scope)
 
     PodCopy(cursor, lets.begin(), lets.length());
     cursor += lets.length();
-    bindings->constStart = lets.length();
+    bindings->constStart = cursor - start;
 
     PodCopy(cursor, consts.begin(), consts.length());
     bindings->length = numBindings;
