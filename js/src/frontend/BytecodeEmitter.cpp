@@ -3808,14 +3808,8 @@ BytecodeEmitter::emitFunctionScript(ParseNode* body)
     }
 
     if (sc->isFunctionBox() && sc->asFunctionBox()->isDerivedClassConstructor()) {
-        // TODOshu
-        /*
-        BindingIter bi = Bindings::thisBinding(cx, script);
-        if (!emitLoadFromEnclosingFunctionScope(bi))
+        if (!emitCheckDerivedClassConstructorReturn())
             return false;
-        if (!emit1(JSOP_CHECKRETURN))
-            return false;
-        */
     }
 
     // Always end the script with a JSOP_RETRVAL. Some other parts of the codebase
@@ -6567,6 +6561,19 @@ BytecodeEmitter::emitThisLiteral(ParseNode* pn)
 }
 
 bool
+BytecodeEmitter::emitCheckDerivedClassConstructorReturn()
+{
+    JSAtom* dotThis = cx->names().dotThis;
+    NameLocation loc = lookupName(dotThis);
+    MOZ_ASSERT(loc.kind() == NameLocation::Kind::EnvironmentCoordinate);
+    if (!EmitGetNameAtLocation(this, dotThis, loc, false))
+        return false;
+    if (!emit1(JSOP_CHECKRETURN))
+        return false;
+    return true;
+}
+
+bool
 BytecodeEmitter::emitReturn(ParseNode* pn)
 {
     if (!updateSourceCoordNotes(pn->pn_pos.begin))
@@ -6622,13 +6629,8 @@ BytecodeEmitter::emitReturn(ParseNode* pn)
     // Make sure that we emit this before popping the blocks in prepareForNonLocalJump,
     // to ensure that the error is thrown while the scope-chain is still intact.
     if (isDerivedClassConstructor) {
-        /* TODOshu
-        BindingIter bi = Bindings::thisBinding(cx, script);
-        if (!emitLoadFromEnclosingFunctionScope(bi))
+        if (!emitCheckDerivedClassConstructorReturn())
             return false;
-        if (!emit1(JSOP_CHECKRETURN))
-            return false;
-        */
     }
 
     NonLocalExitControl nle(this);

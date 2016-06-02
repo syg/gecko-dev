@@ -192,7 +192,8 @@ class Scope : public js::gc::TenuredCell
     }
 
     bool hasBindings() const {
-        return !ScopeKindCanHaveBindings(kind_);
+        MOZ_ASSERT_IF(ScopeKindCanHaveBindings(kind_), data_);
+        return !data_;
     }
 
     void traceChildren(JSTracer* trc);
@@ -524,11 +525,6 @@ class BindingIter
 
   public:
     BindingIter(Scope* scope) {
-        if (!scope->hasBindings()) {
-            init(0, 0, 0, 0, false, 0, 0, nullptr, 0);
-            return;
-        }
-
         switch (scope->kind()) {
           case ScopeKind::Lexical:
           case ScopeKind::Catch:
@@ -661,7 +657,6 @@ class SimpleFormalParameterIter
 {
     uint16_t index_;
     FunctionScope::Data& data_;
-    JS::AutoAssertOnGC nogc;
 
   public:
     explicit SimpleFormalParameterIter(Scope* scope)
@@ -698,6 +693,8 @@ class SimpleFormalParameterIter
         MOZ_ASSERT(!done());
         return data_.names[index_].closedOver();
     }
+
+    void trace(JSTracer* trc);
 };
 
 class MOZ_STACK_CLASS ScopeIter

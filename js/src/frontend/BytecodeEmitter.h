@@ -462,6 +462,7 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     MOZ_MUST_USE bool emitGetFunctionThis(ParseNode* pn);
     MOZ_MUST_USE bool emitGetThisForSuperBase(ParseNode* pn);
     MOZ_MUST_USE bool emitSetThis(ParseNode* pn);
+    MOZ_MUST_USE bool emitCheckDerivedClassConstructorReturn();
 
     // Handle jump opcodes and jump targets.
     MOZ_MUST_USE bool emitJumpTarget(JumpTarget* target);
