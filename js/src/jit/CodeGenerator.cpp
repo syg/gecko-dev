@@ -5672,7 +5672,7 @@ CodeGenerator::visitNewDeclEnvObject(LNewDeclEnvObject* lir)
     masm.bind(ool->rejoin());
 }
 
-typedef JSObject* (*NewCallObjectFn)(JSContext*, HandleShape, HandleObjectGroup, uint32_t);
+typedef JSObject* (*NewCallObjectFn)(JSContext*, HandleShape, HandleObjectGroup);
 static const VMFunction NewCallObjectInfo =
     FunctionInfo<NewCallObjectFn>(NewCallObject);
 
@@ -5684,12 +5684,9 @@ CodeGenerator::visitNewCallObject(LNewCallObject* lir)
 
     CallObject* templateObj = lir->mir()->templateObject();
 
-    JSScript* script = lir->mir()->block()->info().script();
-    uint32_t lexicalBegin = script->bindings.aliasedBodyLevelLexicalBegin();
     OutOfLineCode* ool = oolCallVM(NewCallObjectInfo, lir,
                                    ArgList(ImmGCPtr(templateObj->lastProperty()),
-                                           ImmGCPtr(templateObj->group()),
-                                           Imm32(lexicalBegin)),
+                                           ImmGCPtr(templateObj->group())),
                                    StoreRegisterTo(objReg));
 
     // Inline call object creation, using the OOL path only for tricky cases.
@@ -5700,7 +5697,7 @@ CodeGenerator::visitNewCallObject(LNewCallObject* lir)
     masm.bind(ool->rejoin());
 }
 
-typedef JSObject* (*NewSingletonCallObjectFn)(JSContext*, HandleShape, uint32_t);
+typedef JSObject* (*NewSingletonCallObjectFn)(JSContext*, HandleShape);
 static const VMFunction NewSingletonCallObjectInfo =
     FunctionInfo<NewSingletonCallObjectFn>(NewSingletonCallObject);
 
@@ -5711,12 +5708,9 @@ CodeGenerator::visitNewSingletonCallObject(LNewSingletonCallObject* lir)
 
     JSObject* templateObj = lir->mir()->templateObject();
 
-    JSScript* script = lir->mir()->block()->info().script();
-    uint32_t lexicalBegin = script->bindings.aliasedBodyLevelLexicalBegin();
     OutOfLineCode* ool;
     ool = oolCallVM(NewSingletonCallObjectInfo, lir,
-                    ArgList(ImmGCPtr(templateObj->as<CallObject>().lastProperty()),
-                            Imm32(lexicalBegin)),
+                    ArgList(ImmGCPtr(templateObj->as<CallObject>().lastProperty())),
                     StoreRegisterTo(objReg));
 
     // Objects can only be given singleton types in VM calls.  We make the call

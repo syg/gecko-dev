@@ -1131,10 +1131,3 @@ ObjectBox::trace(JSTracer* trc)
 {
     TraceRoot(trc, &object, "parser.object");
 }
-
-void
-ModuleBox::trace(JSTracer* trc)
-{
-    ObjectBox::trace(trc);
-    bindings.trace(trc);
-}

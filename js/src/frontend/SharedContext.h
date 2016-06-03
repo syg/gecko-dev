@@ -566,7 +566,6 @@ class FunctionBox : public ObjectBox, public SharedContext
 class ModuleBox : public ObjectBox, public SharedContext
 {
   public:
-    Bindings bindings;
     ModuleBuilder& builder;
 
     ModuleBox(ExclusiveContext* cx, ObjectBox* traceListHead, ModuleObject* module,
@@ -575,8 +574,6 @@ class ModuleBox : public ObjectBox, public SharedContext
     ObjectBox* toObjectBox() override { return this; }
     ModuleObject* module() const { return &object->as<ModuleObject>(); }
     Scope* compilationEnclosingScope() const override { return nullptr; }
-
-    void trace(JSTracer* trc) override;
 };
 
 inline FunctionBox*

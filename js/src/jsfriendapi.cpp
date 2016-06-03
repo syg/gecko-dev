@@ -778,13 +778,13 @@ FormatFrame(JSContext* cx, const ScriptFrameIter& iter, char* buf, int num,
         return nullptr;
 
     if (showArgs && iter.hasArgs()) {
-        SimpleFormalParameterIter fi(script);
+        BindingIter bi(script);
         bool first = true;
         for (unsigned i = 0; i < iter.numActualArgs(); i++) {
             RootedValue arg(cx);
-            if (i < iter.numFormalArgs() && script->formalIsAliased(i)) {
-                for (AliasedFormalIter fi(script); ; fi++) {
-                    if (fi.frameIndex() == i) {
+            if (i < iter.numFormalArgs()) {
+                for (ClosedOverArgumentSlotIter fi(script); ; fi++) {
+                    if (fi.argumentSlot() == i) {
                         arg = iter.callObj(cx).aliasedVar(fi);
                         break;
                     }
@@ -814,11 +814,11 @@ FormatFrame(JSContext* cx, const ScriptFrameIter& iter, char* buf, int num,
             const char* name = nullptr;
 
             if (i < iter.numFormalArgs()) {
-                MOZ_ASSERT(fi.position() == i);
-                name = nameBytes.encodeLatin1(cx, fi.name());
+                MOZ_ASSERT(bi.argumentSlot() == i);
+                name = nameBytes.encodeLatin1(cx, bi.name());
                 if (!name)
                     return nullptr;
-                fi++;
+                bi++;
             }
 
             if (value) {

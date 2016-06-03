@@ -468,8 +468,6 @@ BytecodeCompiler::compileModule()
         return nullptr;
     }
 
-    script->bindings = pn->pn_modulebox->bindings;
-
     RootedModuleEnvironmentObject dynamicScope(cx, ModuleEnvironmentObject::create(cx, module));
     if (!dynamicScope)
         return nullptr;

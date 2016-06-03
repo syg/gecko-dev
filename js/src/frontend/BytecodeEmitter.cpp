@@ -1195,8 +1195,8 @@ BytecodeEmitter::EmitterScope::leave(BytecodeEmitter* bce, bool nonLocal)
         bce->scopeNoteList.recordEnd(noteIndex_, bce->offset(), bce->inPrologue());
 
     // Record the maximum frame size.
-    if (data().nextFrameSlot() > bce->maxFixedSlots)
-        bce->maxFixedSlots = data().nextFrameSlot();
+    if (data().nextFrameSlot > bce->maxFixedSlots)
+        bce->maxFixedSlots = data().nextFrameSlot;
 
     return true;
 }
@@ -3894,13 +3894,6 @@ BytecodeEmitter::emitFunctionScript(ParseNode* body)
     if (!emit1(JSOP_RETRVAL))
         return false;
 
-    // If all locals are aliased, the frame's block slots won't be used, so we
-    // can set numBlockScoped = 0. This is nice for generators as it ensures
-    // nfixed == 0, so we don't have to initialize any local slots when resuming
-    // a generator.
-    if (sc->closeOverAllBindings())
-        script->bindings.setAllLocalsAliased();
-
     if (!JSScript::fullyInitFromEmitter(cx, script, this))
         return false;
 
@@ -3948,13 +3941,6 @@ BytecodeEmitter::emitModuleScript(ParseNode* body)
     // depend on this opcode, e.g. InterpreterRegs::setToEndOfScript.
     if (!emit1(JSOP_RETRVAL))
         return false;
-
-    // If all locals are aliased, the frame's block slots won't be used, so we
-    // can set numBlockScoped = 0. This is nice for generators as it ensures
-    // nfixed == 0, so we don't have to initialize any local slots when resuming
-    // a generator.
-    if (sc->closeOverAllBindings())
-        script->bindings.setAllLocalsAliased();
 
     if (!JSScript::fullyInitFromEmitter(cx, script, this))
         return false;

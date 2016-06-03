@@ -860,7 +860,8 @@ IonBuilder::build()
 
     // Check for redeclaration errors for global scripts.
     if (!info().funMaybeLazy() && !info().module() &&
-        script()->bindings.numBodyLevelLocals() > 0)
+        script()->bodyScope()->is<GlobalScope>() &&
+        script()->bodyScope()->as<GlobalScope>().hasBindings())
     {
         MGlobalNameConflictsCheck* redeclCheck = MGlobalNameConflictsCheck::New(alloc());
         current->add(redeclCheck);
@@ -6218,9 +6219,9 @@ IonBuilder::createCallObject(MDefinition* callee, MDefinition* scope)
 
     // Initialize argument slots.
     MSlots* slots = nullptr;
-    for (AliasedFormalIter i(script()); i; i++) {
-        unsigned slot = i.scopeSlot();
-        unsigned formal = i.frameIndex();
+    for (ClosedOverArgumentSlotIter fi(script()); fi; fi++) {
+        unsigned slot = fi.location().slot();
+        unsigned formal = fi.argumentSlot();
         MDefinition* param = current->getSlot(info().argSlotUnchecked(formal));
         if (slot >= templateObj->numFixedSlots()) {
             if (!slots) {

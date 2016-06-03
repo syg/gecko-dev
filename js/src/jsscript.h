@@ -25,6 +25,7 @@
 #include "js/UbiNode.h"
 #include "js/UniquePtr.h"
 #include "vm/NativeObject.h"
+#include "vm/Scope.h"
 #include "vm/Shape.h"
 #include "vm/SharedImmutableStringsCache.h"
 
@@ -974,14 +975,9 @@ class JSScript : public js::gc::TenuredCell
     // Number of fixed slots reserved for vars.  Only nonzero for function
     // or module code.
     size_t nfixedvars() const {
-        return isGlobalOrEvalCode() ? 0 : bindings.numUnaliasedVars();
-    }
-
-    // Number of fixed slots reserved for body-level lexicals and vars. This
-    // value minus nfixedvars() is the number of body-level lexicals. Only
-    // nonzero for function or module code.
-    size_t nbodyfixed() const {
-        return isGlobalOrEvalCode() ? 0 : bindings.numUnaliasedBodyLevelLocals();
+        if (bodyScope()->is<js::FunctionScope>())
+            return bodyScope()->as<js::FunctionScope>().nextFrameSlot();
+        return 0;
     }
 
     // Calculate the number of fixed slots that are live at a particular bytecode.
@@ -998,6 +994,24 @@ class JSScript : public js::gc::TenuredCell
 
     size_t nslots() const {
         return nslots_;
+    }
+
+    unsigned numArgs() const {
+        if (bodyScope()->is<js::FunctionScope>())
+            return bodyScope()->as<js::FunctionScope>().numSimpleFormalParameters();
+        return 0;
+    }
+
+    inline js::Shape* callObjShape() const {
+        if (bodyScope()->is<js::FunctionScope>())
+            return bodyScope()->as<js::FunctionScope>().environmentShape();
+        if (bodyScope()->is<js::EvalScope>())
+            return bodyScope()->as<js::EvalScope>().environmentShape();
+        return nullptr;
+    }
+
+    inline bool hasAnyAliasedBindings() const {
+        return !!callObjShape();
     }
 
     size_t nTypeSets() const {
@@ -1531,10 +1545,11 @@ class JSScript : public js::gc::TenuredCell
     }
 
     inline JSFunction* getFunction(size_t index);
-    inline JSFunction* function();
-
-    inline unsigned numArgs() const;
-    inline js::Shape* callObjShape() const;
+    JSFunction* function() {
+        if (functionNonDelazifying())
+            return functionNonDelazifying();
+        return nullptr;
+    }
 
     inline js::RegExpObject* getRegExp(size_t index);
     inline js::RegExpObject* getRegExp(jsbytecode* pc);

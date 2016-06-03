@@ -20,16 +20,6 @@
 
 namespace js {
 
-inline
-AliasedFormalIter::AliasedFormalIter(JSScript* script)
-  : begin_(script->bindingArray()),
-    p_(begin_),
-    end_(begin_ + (script->funHasAnyAliasedFormal() ? script->numArgs() : 0)),
-    slot_(CallObject::RESERVED_SLOTS)
-{
-    settle();
-}
-
 ScriptCounts::ScriptCounts()
   : pcCounts_(),
     throwCounts_(),
@@ -137,30 +127,6 @@ JSScript::getFunction(size_t index)
     JSFunction* fun = &getObject(index)->as<JSFunction>();
     MOZ_ASSERT_IF(fun->isNative(), IsAsmJSModuleNative(fun->native()));
     return fun;
-}
-
-inline JSFunction*
-JSScript::function()
-{
-    if (functionNonDelazifying())
-        return functionNonDelazifying();
-    return nullptr;
-}
-
-inline unsigned
-JSScript::numArgs() const
-{
-    if (bodyScope()->is<FunctionScope>())
-        return bodyScope()->as<FunctionScope>().numSimpleFormalParameters();
-    return 0;
-}
-
-inline js::Shape*
-JSScript::callObjShape() const
-{
-    if (bodyScope()->is<FunctionScope>())
-        return bodyScope()->as<FunctionScope>().environmentShape();
-    return nullptr;
 }
 
 inline js::RegExpObject*

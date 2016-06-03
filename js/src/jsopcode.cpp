@@ -1284,11 +1284,11 @@ JSAtom*
 ExpressionDecompiler::getArg(unsigned slot)
 {
     MOZ_ASSERT(script->functionNonDelazifying());
-    MOZ_ASSERT(slot < script->bindings.numArgs());
+    MOZ_ASSERT(slot < script->numArgs());
 
-    for (SimpleFormalParameterIter fi(script); fi; fi++) {
-        if (fi.position() == slot)
-            return fi.name();
+    for (BindingIter bi(script); bi; bi++) {
+        if (bi.argumentSlot() == slot)
+            return bi.name();
     }
 
     MOZ_CRASH("No binding");
@@ -1298,37 +1298,37 @@ JSAtom*
 ExpressionDecompiler::getLocal(uint32_t local, jsbytecode* pc)
 {
     MOZ_ASSERT(local < script->nfixed());
-    if (local < script->nbodyfixed()) {
+
+    // If it's a var, look for it in the body scope.
+    if (local < script->nfixedvars()) {
         for (BindingIter bi(script); bi; bi++) {
             BindingLocation loc = bi.location();
             if (loc.kind() == BindingLocation::Kind::Frame && loc.slot() == local)
                 return bi.name();
         }
+    }
 
-        MOZ_CRASH("No binding");
-    }
-    /* TODOshu
-    for (NestedStaticScope* chain = script->getStaticBlockScope(pc);
-         chain;
-         chain = chain->enclosingNestedScope())
-    {
-        if (!chain->is<StaticBlockScope>())
+    // Otherwise look for it in an inner lexical scope.
+    for (ScopeIter si(script->getScope(pc)); si; si++) {
+        if (!si.scope()->is<LexicalScope>())
             continue;
-        StaticBlockScope& block = chain->as<StaticBlockScope>();
-        if (local < block.localOffset())
+        LexicalScope& lexicalScope = si.scope()->as<LexicalScope>();
+
+        // Is the slot within bounds of the current lexical scope?
+        if (local < lexicalScope.computeFirstFrameSlot())
             continue;
-        local -= block.localOffset();
-        if (local >= block.numVariables())
-            return nullptr;
-        for (Shape::Range<NoGC> r(block.lastProperty()); !r.empty(); r.popFront()) {
-            const Shape& shape = r.front();
-            if (block.shapeToIndex(shape) == local)
-                return JSID_TO_ATOM(shape.propid());
+        if (local >= lexicalScope.nextFrameSlot())
+            break;
+
+        // If so, get the name.
+        for (BindingIter bi(si.scope()); bi; bi++) {
+            BindingLocation loc = bi.location();
+            if (loc.kind() == BindingLocation::Kind::Frame && loc.slot() == local)
+                return bi.name();
         }
-        break;
     }
-    */
-    return nullptr;
+
+    MOZ_CRASH("No binding");
 }
 
 bool

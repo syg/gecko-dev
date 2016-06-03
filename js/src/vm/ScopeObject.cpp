@@ -256,7 +256,7 @@ ScopeObject::setEnclosingScope(HandleObject obj)
 }
 
 CallObject*
-CallObject::create(JSContext* cx, HandleShape shape, HandleObjectGroup group, uint32_t lexicalBegin)
+CallObject::create(JSContext* cx, HandleShape shape, HandleObjectGroup group)
 {
     MOZ_ASSERT(!group->singleton(),
                "passed a singleton group to create() (use createSingleton() "
@@ -269,12 +269,11 @@ CallObject::create(JSContext* cx, HandleShape shape, HandleObjectGroup group, ui
     if (!obj)
         return nullptr;
 
-    obj->as<CallObject>().initRemainingSlotsToUninitializedLexicals(lexicalBegin);
     return &obj->as<CallObject>();
 }
 
 CallObject*
-CallObject::createSingleton(JSContext* cx, HandleShape shape, uint32_t lexicalBegin)
+CallObject::createSingleton(JSContext* cx, HandleShape shape)
 {
     gc::AllocKind kind = gc::GetGCObjectKind(shape->numFixedSlots());
     MOZ_ASSERT(CanBeFinalizedInBackground(kind, &CallObject::class_));
@@ -290,7 +289,6 @@ CallObject::createSingleton(JSContext* cx, HandleShape shape, uint32_t lexicalBe
     MOZ_ASSERT(obj->isSingleton(),
                "group created inline above must be a singleton");
 
-    obj->as<CallObject>().initRemainingSlotsToUninitializedLexicals(lexicalBegin);
     return &obj->as<CallObject>();
 }
 
@@ -302,7 +300,7 @@ CallObject::createSingleton(JSContext* cx, HandleShape shape, uint32_t lexicalBe
 CallObject*
 CallObject::createTemplateObject(JSContext* cx, HandleScript script, gc::InitialHeap heap)
 {
-    RootedShape shape(cx, script->bindings.callObjShape());
+    RootedShape shape(cx, script->callObjShape());
     MOZ_ASSERT(shape->getObjectClass() == &class_);
 
     RootedObjectGroup group(cx, ObjectGroup::defaultNewGroup(cx, &class_, TaggedProto(nullptr)));
@@ -316,10 +314,6 @@ CallObject::createTemplateObject(JSContext* cx, HandleScript script, gc::Initial
     JSObject* obj = JSObject::create(cx, kind, heap, shape, group);
     if (!obj)
         return nullptr;
-
-    // Set uninitialized lexicals even on template objects, as Ion will copy
-    // over the template object's slot values in the fast path.
-    obj->as<CallObject>().initAliasedLexicalsToThrowOnTouch(script);
 
     return &obj->as<CallObject>();
 }
@@ -385,9 +379,9 @@ CallObject::createForFunction(JSContext* cx, AbstractFramePtr frame)
         return nullptr;
 
     /* Copy in the closed-over formal arguments. */
-    for (AliasedFormalIter i(frame.script()); i; i++) {
-        callobj->setAliasedVar(cx, i, i->name(),
-                               frame.unaliasedFormal(i.frameIndex(), DONT_CHECK_ALIASING));
+    for (ClosedOverArgumentSlotIter fi(frame.script()); fi; fi++) {
+        callobj->setAliasedVar(cx, fi,
+                               frame.unaliasedFormal(fi.argumentSlot(), DONT_CHECK_ALIASING));
     }
 
     return callobj;
@@ -468,7 +462,7 @@ const Class ModuleEnvironmentObject::class_ = {
 ModuleEnvironmentObject::create(ExclusiveContext* cx, HandleModuleObject module)
 {
     RootedScript script(cx, module->script());
-    RootedShape shape(cx, script->bindings.callObjShape());
+    RootedShape shape(cx, script->callObjShape());
     MOZ_ASSERT(shape->getObjectClass() == &class_);
 
     RootedObjectGroup group(cx, ObjectGroup::defaultNewGroup(cx, &class_, TaggedProto(nullptr)));
@@ -484,10 +478,6 @@ ModuleEnvironmentObject::create(ExclusiveContext* cx, HandleModuleObject module)
         return nullptr;
 
     RootedModuleEnvironmentObject scope(cx, &obj->as<ModuleEnvironmentObject>());
-
-    // Set uninitialized lexicals even on template objects, as Ion will use
-    // copy over the template object's slot values in the fast path.
-    scope->initAliasedLexicalsToThrowOnTouch(script);
 
     scope->initFixedSlot(MODULE_SLOT, ObjectValue(*module));
     if (!JSObject::setSingleton(cx, scope))
@@ -1696,14 +1686,13 @@ class DebugScopeProxy : public BaseProxyHandler
             if (!script->ensureHasTypes(cx) || !script->ensureHasAnalyzedArgsUsage(cx))
                 return false;
 
-            Bindings& bindings = script->bindings;
             BindingIter bi(script);
             while (bi && NameToId(bi.name()->asPropertyName()) != id)
                 bi++;
             if (!bi)
                 return true;
 
-            if (!bi.isSimpleFormalParameter()) {
+            if (!bi.hasArgumentSlot()) {
                 if (bi.closedOver())
                     return true;
 
@@ -1716,9 +1705,9 @@ class DebugScopeProxy : public BaseProxyHandler
                         frame.unaliasedLocal(i) = vp;
                 } else if (NativeObject* snapshot = debugScope->maybeSnapshot()) {
                     if (action == GET)
-                        vp.set(snapshot->getDenseElement(bindings.numArgs() + i));
+                        vp.set(snapshot->getDenseElement(script->numArgs() + i));
                     else
-                        snapshot->setDenseElement(bindings.numArgs() + i, vp);
+                        snapshot->setDenseElement(script->numArgs() + i, vp);
                 } else {
                     /* The unaliased value has been lost to the debugger. */
                     if (action == GET) {
@@ -1727,7 +1716,7 @@ class DebugScopeProxy : public BaseProxyHandler
                     }
                 }
             } else {
-                unsigned i = bi.simpleFormalParameterPosition();
+                unsigned i = bi.argumentSlot();
                 if (bi.closedOver())
                     return true;
 
@@ -3404,7 +3393,7 @@ js::CheckEvalDeclarationConflicts(JSContext* cx, HandleScript script,
 {
     // We don't need to check body-level lexical bindings for conflict. Eval
     // scripts always execute under their own lexical scope.
-    if (script->bindings.numVars() == 0)
+    if (!script->bodyScope()->as<EvalScope>().hasBindings())
         return true;
 
     RootedObject obj(cx, scopeChain);

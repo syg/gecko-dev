@@ -624,9 +624,8 @@ bool SetProperty(JSContext* cx, HandleObject obj, HandlePropertyName name, Handl
 bool InterruptCheck(JSContext* cx);
 
 void* MallocWrapper(JSRuntime* rt, size_t nbytes);
-JSObject* NewCallObject(JSContext* cx, HandleShape shape, HandleObjectGroup group,
-                        uint32_t lexicalBegin);
-JSObject* NewSingletonCallObject(JSContext* cx, HandleShape shape, uint32_t lexicalBegin);
+JSObject* NewCallObject(JSContext* cx, HandleShape shape, HandleObjectGroup group);
+JSObject* NewSingletonCallObject(JSContext* cx, HandleShape shape);
 JSObject* NewStringObject(JSContext* cx, HandleString str);
 
 bool OperatorIn(JSContext* cx, HandleValue key, HandleObject obj, bool* out);

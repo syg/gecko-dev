@@ -1213,11 +1213,6 @@ BindingIter::trace(JSTracer* trc)
     TraceBindingNames(trc, names_, length_);
 }
 void
-SimpleFormalParameterIter::trace(JSTracer* trc)
-{
-    TraceFunctionScopeData(trc, &data_);
-}
-void
 Scope::traceChildren(JSTracer* trc)
 {
     TraceNullableEdge(trc, &enclosing_, "scope enclosing");

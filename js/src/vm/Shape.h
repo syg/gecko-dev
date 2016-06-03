@@ -109,7 +109,6 @@
 
 namespace js {
 
-class Bindings;
 class StaticBlockScope;
 class TenuringTracer;
 
@@ -531,7 +530,6 @@ class Shape : public gc::TenuredCell
 {
     friend class ::JSObject;
     friend class ::JSFunction;
-    friend class Bindings;
     friend class NativeObject;
     friend class PropertyTree;
     friend class StaticBlockScope;

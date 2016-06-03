@@ -7194,9 +7194,9 @@ DebuggerArguments_getArg(JSContext* cx, unsigned argc, Value* vp)
             if (!script->ensureHasAnalyzedArgsUsage(cx))
                 return false;
         }
-        if (unsigned(i) < frame.numFormalArgs() && script->formalIsAliased(i)) {
-            for (AliasedFormalIter fi(script); ; fi++) {
-                if (fi.frameIndex() == unsigned(i)) {
+        if (unsigned(i) < frame.numFormalArgs()) {
+            for (ClosedOverArgumentSlotIter fi(script); fi; fi++) {
+                if (fi.argumentSlot() == unsigned(i)) {
                     arg = frame.callObj().aliasedVar(fi);
                     break;
                 }
@@ -7854,17 +7854,17 @@ DebuggerObject_getParameterNames(JSContext* cx, unsigned argc, Value* vp)
         if (!script)
             return false;
 
-        MOZ_ASSERT(fun->nargs() == script->bindings.numArgs());
+        MOZ_ASSERT(fun->nargs() == script->numArgs());
 
         if (fun->nargs() > 0) {
-            SimpleFormalParameterIter fi(script);
-            for (size_t i = 0; i < fun->nargs(); i++, fi++) {
-                MOZ_ASSERT(fi.position() == i);
+            BindingIter bi(script);
+            for (size_t i = 0; i < fun->nargs(); i++, bi++) {
+                MOZ_ASSERT(bi.argumentSlot() == i);
                 Value v;
-                if (fi.name()->length() == 0)
+                if (bi.name()->length() == 0)
                     v = UndefinedValue();
                 else
-                    v = StringValue(fi.name());
+                    v = StringValue(bi.name());
                 result->setDenseElement(i, v);
             }
         }

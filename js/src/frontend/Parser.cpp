@@ -639,7 +639,6 @@ ModuleBox::ModuleBox(ExclusiveContext* cx, ObjectBox* traceListHead, ModuleObjec
                      ModuleBuilder& builder)
   : ObjectBox(module, traceListHead),
     SharedContext(cx, Kind::ObjectBox, Directives(true), false),
-    bindings(),
     builder(builder)
 {
     thisBinding_ = ThisBinding::Module;
@@ -971,10 +970,6 @@ Parser<FullParseHandler>::standaloneModule(HandleModuleObject module, ModuleBuil
 
     if (!FoldConstants(context, &pn, this))
         return null();
-
-    // TODOshu
-    Rooted<Bindings> bindings(context, modulebox->bindings);
-    modulebox->bindings = bindings;
 
     MOZ_ASSERT(mn->pn_modulebox == modulebox);
     return mn;

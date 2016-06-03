@@ -67,286 +67,6 @@ using mozilla::PodCopy;
 using mozilla::PodZero;
 using mozilla::RotateLeft;
 
-bool
-Bindings::initWithTemporaryStorage(ExclusiveContext* cx, MutableHandle<Bindings> self,
-                                   uint32_t numArgs, uint32_t numVars,
-                                   uint32_t numBodyLevelLexicals, uint32_t numBlockScoped,
-                                   uint32_t numUnaliasedVars, uint32_t numUnaliasedBodyLevelLexicals,
-                                   const Binding* bindingArray, bool isModule /* = false */)
-{
-    MOZ_ASSERT(!self.callObjShape());
-    MOZ_ASSERT(self.bindingArrayUsingTemporaryStorage());
-    MOZ_ASSERT(!self.bindingArray());
-    MOZ_ASSERT(!(uintptr_t(bindingArray) & TEMPORARY_STORAGE_BIT));
-    MOZ_ASSERT(numArgs <= ARGC_LIMIT);
-    MOZ_ASSERT(numVars <= LOCALNO_LIMIT);
-    MOZ_ASSERT(numBlockScoped <= LOCALNO_LIMIT);
-    MOZ_ASSERT(numBodyLevelLexicals <= LOCALNO_LIMIT);
-    mozilla::DebugOnly<uint64_t> totalSlots = uint64_t(numVars) +
-                                              uint64_t(numBodyLevelLexicals) +
-                                              uint64_t(numBlockScoped);
-    MOZ_ASSERT(totalSlots <= LOCALNO_LIMIT);
-    MOZ_ASSERT(UINT32_MAX - numArgs >= totalSlots);
-
-    MOZ_ASSERT(numUnaliasedVars <= numVars);
-    MOZ_ASSERT(numUnaliasedBodyLevelLexicals <= numBodyLevelLexicals);
-
-    self.setBindingArray(bindingArray, TEMPORARY_STORAGE_BIT);
-    self.setNumArgs(numArgs);
-    self.setNumVars(numVars);
-    self.setNumBodyLevelLexicals(numBodyLevelLexicals);
-    self.setNumBlockScoped(numBlockScoped);
-    self.setNumUnaliasedVars(numUnaliasedVars);
-    self.setNumUnaliasedBodyLevelLexicals(numUnaliasedBodyLevelLexicals);
-
-    // Get the initial shape to use when creating CallObjects for this script.
-    // After creation, a CallObject's shape may change completely (via direct eval() or
-    // other operations that mutate the lexical scope). However, since the
-    // lexical bindings added to the initial shape are permanent and the
-    // allocKind/nfixed of a CallObject cannot change, one may assume that the
-    // slot location (whether in the fixed or dynamic slots) of a variable is
-    // the same as in the initial shape. (This is assumed by the interpreter and
-    // JITs when interpreting/compiling aliasedvar ops.)
-
-    // Since unaliased variables are, by definition, only accessed by local
-    // operations and never through the scope chain, only give shapes to
-    // aliased variables. While the debugger may observe any scope object at
-    // any time, such accesses are mediated by DebugScopeProxy (see
-    // DebugScopeProxy::handleUnaliasedAccess).
-    uint32_t nslots = CallObject::RESERVED_SLOTS;
-
-    // Unless there are aliased body-level lexical bindings at all, set the
-    // begin index to an impossible slot number.
-    uint32_t aliasedBodyLevelLexicalBegin = LOCALNO_LIMIT;
-    /* TODOshu
-    for (BindingIter bi(self); bi; bi++) {
-        if (bi->aliased()) {
-            // Per ES6, lexical bindings cannot be accessed until
-            // initialized. Remember the first aliased slot that is a
-            // body-level lexical, so that they may be initialized to sentinel
-            // magic values.
-            if (numBodyLevelLexicals > 0 &&
-                nslots < aliasedBodyLevelLexicalBegin &&
-                bi.isBodyLevelLexical() &&
-                bi.localIndex() >= numVars)
-            {
-                aliasedBodyLevelLexicalBegin = nslots;
-            }
-
-            nslots++;
-        }
-    }
-    */
-    self.setAliasedBodyLevelLexicalBegin(aliasedBodyLevelLexicalBegin);
-
-    // Put as many of nslots inline into the object header as possible.
-    uint32_t nfixed = gc::GetGCKindSlots(gc::GetGCObjectKind(nslots));
-
-    // Start with the empty shape and then append one shape per aliased binding.
-    const Class* cls = isModule ? &ModuleEnvironmentObject::class_ : &CallObject::class_;
-    uint32_t baseShapeFlags = BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE;
-    if (isModule)
-        baseShapeFlags |= BaseShape::NOT_EXTENSIBLE; // Module code is always strict.
-    RootedShape shape(cx,
-        EmptyShape::getInitialShape(cx, cls, TaggedProto(nullptr), nfixed, baseShapeFlags));
-    if (!shape)
-        return false;
-
-#ifdef DEBUG
-    HashSet<PropertyName*> added(cx);
-    if (!added.init()) {
-        ReportOutOfMemory(cx);
-        return false;
-    }
-#endif
-
-    uint32_t slot = CallObject::RESERVED_SLOTS;
-    /*
-    for (BindingIter bi(self); bi; bi++) {
-        if (!bi->aliased())
-            continue;
-
-#ifdef DEBUG
-        // The caller ensures no duplicate aliased names.
-        MOZ_ASSERT(!added.has(bi->name()));
-        if (!added.put(bi->name())) {
-            ReportOutOfMemory(cx);
-            return false;
-        }
-#endif
-
-        StackBaseShape stackBase(cx, cls, baseShapeFlags);
-        UnownedBaseShape* base = BaseShape::getUnowned(cx, stackBase);
-        if (!base)
-            return false;
-
-        unsigned attrs = JSPROP_PERMANENT |
-                         JSPROP_ENUMERATE |
-                         (bi->kind() == Binding::CONSTANT ? JSPROP_READONLY : 0);
-        Rooted<StackShape> child(cx, StackShape(base, NameToId(bi->name()), slot, attrs, 0));
-
-        shape = cx->compartment()->propertyTree.getChild(cx, shape, child);
-        if (!shape)
-            return false;
-
-        MOZ_ASSERT(slot < nslots);
-        slot++;
-    }
-    */
-    MOZ_ASSERT(slot == nslots);
-
-    MOZ_ASSERT(!shape->inDictionary());
-    self.setCallObjShape(shape);
-    return true;
-}
-
-/* static */ bool
-Bindings::initTrivialForScript(ExclusiveContext* cx, HandleScript script)
-{
-    Shape* shape = EmptyShape::getInitialShape(cx, &CallObject::class_, TaggedProto(nullptr),
-                                               CallObject::RESERVED_SLOTS,
-                                               BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE);
-    if (!shape)
-        return false;
-    script->bindings.callObjShape_.init(shape);
-    return true;
-}
-
-uint8_t*
-Bindings::switchToScriptStorage(Binding* newBindingArray)
-{
-    MOZ_ASSERT(bindingArrayUsingTemporaryStorage());
-    MOZ_ASSERT(!(uintptr_t(newBindingArray) & TEMPORARY_STORAGE_BIT));
-
-    if (count() > 0)
-        PodCopy(newBindingArray, bindingArray(), count());
-    bindingArrayAndFlag_ = uintptr_t(newBindingArray);
-    return reinterpret_cast<uint8_t*>(newBindingArray + count());
-}
-
-/* static */ bool
-Bindings::clone(JSContext* cx, MutableHandle<Bindings> self,
-                uint8_t* dstScriptData, HandleScript srcScript)
-{
-    /* The clone has the same bindingArray_ offset as 'src'. */
-    const Bindings& src = srcScript->bindings;
-    ptrdiff_t off = (uint8_t*)src.bindingArray() - srcScript->data;
-    MOZ_ASSERT(off >= 0);
-    MOZ_ASSERT(size_t(off) <= srcScript->dataSize());
-    Binding* dstPackedBindings = (Binding*)(dstScriptData + off);
-
-    /*
-     * Since atoms are shareable throughout the runtime, we can simply copy
-     * the source's bindingArray directly.
-     */
-    if (!initWithTemporaryStorage(cx, self, src.numArgs(), src.numVars(),
-                                  src.numBodyLevelLexicals(),
-                                  src.numBlockScoped(),
-                                  src.numUnaliasedVars(),
-                                  src.numUnaliasedBodyLevelLexicals(),
-                                  src.bindingArray()))
-    {
-        return false;
-    }
-
-    self.switchToScriptStorage(dstPackedBindings);
-    return true;
-}
-
-template<XDRMode mode>
-static bool
-XDRScriptBindings(XDRState<mode>* xdr, LifoAllocScope& las, uint16_t numArgs, uint32_t numVars,
-                  uint16_t numBodyLevelLexicals, uint16_t numBlockScoped,
-                  uint32_t numUnaliasedVars, uint16_t numUnaliasedBodyLevelLexicals,
-                  HandleScript script)
-{
-    JSContext* cx = xdr->cx();
-
-    if (mode == XDR_ENCODE) {
-        for (BindingIter bi(script); bi; bi++) {
-            RootedAtom atom(cx, bi.name());
-            if (!XDRAtom(xdr, &atom))
-                return false;
-        }
-
-        for (BindingIter bi(script); bi; bi++) {
-            uint8_t u8 = (uint8_t(bi.kind()) << 1) | uint8_t(bi.closedOver());
-            if (!xdr->codeUint8(&u8))
-                return false;
-        }
-    } else {
-        uint32_t nameCount = numArgs + numVars + numBodyLevelLexicals;
-
-        AutoValueVector atoms(cx);
-        if (!atoms.resize(nameCount))
-            return false;
-        for (uint32_t i = 0; i < nameCount; i++) {
-            RootedAtom atom(cx);
-            if (!XDRAtom(xdr, &atom))
-                return false;
-            atoms[i].setString(atom);
-        }
-
-        Binding* bindingArray = las.alloc().newArrayUninitialized<Binding>(nameCount);
-        if (!bindingArray)
-            return false;
-        for (uint32_t i = 0; i < nameCount; i++) {
-            uint8_t u8;
-            if (!xdr->codeUint8(&u8))
-                return false;
-
-            PropertyName* name = atoms[i].toString()->asAtom().asPropertyName();
-            Binding::Kind kind = Binding::Kind(u8 >> 1);
-            bool aliased = bool(u8 & 1);
-
-            bindingArray[i] = Binding(name, kind, aliased);
-        }
-
-        Rooted<Bindings> bindings(cx, script->bindings);
-        if (!Bindings::initWithTemporaryStorage(cx, &bindings, numArgs, numVars,
-                                                numBodyLevelLexicals, numBlockScoped,
-                                                numUnaliasedVars, numUnaliasedBodyLevelLexicals,
-                                                bindingArray))
-        {
-            return false;
-        }
-        script->bindings = bindings;
-    }
-
-    return true;
-}
-
-bool
-Bindings::bindingIsAliased(uint32_t bindingIndex)
-{
-    MOZ_ASSERT(bindingIndex < count());
-    return bindingArray()[bindingIndex].aliased();
-}
-
-void
-Binding::trace(JSTracer* trc)
-{
-    PropertyName* name = this->name();
-    TraceManuallyBarrieredEdge(trc, &name, "binding");
-}
-
-void
-Bindings::trace(JSTracer* trc)
-{
-    TraceNullableEdge(trc, &callObjShape_, "callObjShape");
-
-    /*
-     * As the comment in Bindings explains, bindingsArray may point into freed
-     * storage when bindingArrayUsingTemporaryStorage so we don't mark it.
-     * Note: during compilation, atoms are already kept alive by gcKeepAtoms.
-     */
-    if (bindingArrayUsingTemporaryStorage())
-        return;
-
-    for (Binding& b : *this)
-        b.trace(trc);
-}
-
 template<XDRMode mode>
 bool
 js::XDRScriptConst(XDRState<mode>* xdr, MutableHandleValue vp)
@@ -624,13 +344,6 @@ js::XDRScript(XDRState<mode>* xdr, HandleObject enclosingScopeArg, HandleScript 
     natoms = nsrcnotes = 0;
     nconsts = nobjects = nscopes = nregexps = ntrynotes = nscopenotes = nyieldoffsets = 0;
 
-    /* XDR arguments and vars. */
-    uint16_t nargs = 0;
-    uint16_t nblocklocals = 0;
-    uint16_t nbodylevellexicals = 0;
-    uint32_t nvars = 0;
-    uint32_t nunaliasedvars = 0;
-    uint16_t nunaliasedbodylevellexicals = 0;
     if (mode == XDR_ENCODE) {
         script = scriptp.get();
         MOZ_ASSERT_IF(enclosingScript, enclosingScript->compartment() == script->compartment());
@@ -652,26 +365,7 @@ js::XDRScript(XDRState<mode>* xdr, HandleObject enclosingScopeArg, HandleScript 
                 return false;
             }
         }
-
-        nargs = script->bindings.numArgs();
-        nblocklocals = script->bindings.numBlockScoped();
-        nbodylevellexicals = script->bindings.numBodyLevelLexicals();
-        nvars = script->bindings.numVars();
-        nunaliasedvars = script->bindings.numUnaliasedVars();
-        nunaliasedbodylevellexicals = script->bindings.numUnaliasedBodyLevelLexicals();
     }
-    if (!xdr->codeUint16(&nargs))
-        return false;
-    if (!xdr->codeUint16(&nblocklocals))
-        return false;
-    if (!xdr->codeUint16(&nbodylevellexicals))
-        return false;
-    if (!xdr->codeUint32(&nvars))
-        return false;
-    if (!xdr->codeUint32(&nunaliasedvars))
-        return false;
-    if (!xdr->codeUint16(&nunaliasedbodylevellexicals))
-        return false;
 
     if (mode == XDR_ENCODE)
         length = script->length();
@@ -842,12 +536,6 @@ js::XDRScript(XDRState<mode>* xdr, HandleObject enclosingScopeArg, HandleScript 
             script->setFunction(fun);
         }
     }
-
-    /* JSScript::partiallyInit assumes script->bindings is fully initialized. */
-    LifoAllocScope las(&cx->tempLifoAlloc());
-    if (!XDRScriptBindings(xdr, las, nargs, nvars, nbodylevellexicals, nblocklocals,
-                           nunaliasedvars, nunaliasedbodylevellexicals, script))
-        return false;
 
     if (mode == XDR_DECODE) {
         if (!JSScript::partiallyInit(cx, script, nconsts, nobjects, nscopes, ntrynotes,
@@ -2636,7 +2324,7 @@ JS_STATIC_ASSERT(NO_PADDING_BETWEEN_ENTRIES(GCPtrObject, ScopeNote));
 JS_STATIC_ASSERT(NO_PADDING_BETWEEN_ENTRIES(ScopeNote, uint32_t));
 
 static inline size_t
-ScriptDataSize(uint32_t nbindings, uint32_t nconsts, uint32_t nobjects, uint32_t nscopes,
+ScriptDataSize(uint32_t nconsts, uint32_t nobjects, uint32_t nscopes,
                uint32_t ntrynotes, uint32_t nscopenotes, uint32_t nyieldoffsets)
 {
     size_t size = 0;
@@ -2654,12 +2342,7 @@ ScriptDataSize(uint32_t nbindings, uint32_t nconsts, uint32_t nobjects, uint32_t
     if (nyieldoffsets != 0)
         size += sizeof(YieldOffsetArray) + nyieldoffsets * sizeof(uint32_t);
 
-    if (nbindings != 0) {
-	// Make sure bindings are sufficiently aligned.
-        size = JS_ROUNDUP(size, JS_ALIGNMENT_OF(Binding)) + nbindings * sizeof(Binding);
-    }
-
-    return size;
+     return size;
 }
 
 void
@@ -2679,10 +2362,7 @@ JSScript::Create(ExclusiveContext* cx, const ReadOnlyCompileOptions& options,
         return nullptr;
 
     PodZero(script.get());
-    new (&script->bindings) Bindings;
 
-    // TODOshu
-    //script->enclosingStaticScope_ = enclosingScope;
     script->initCompartment(cx);
 
     script->selfHosted_ = options.selfHostingMode;
@@ -2717,8 +2397,8 @@ JSScript::partiallyInit(ExclusiveContext* cx, HandleScript script, uint32_t ncon
                         uint32_t nobjects, uint32_t nscopes, uint32_t ntrynotes,
                         uint32_t nscopenotes, uint32_t nyieldoffsets, uint32_t nTypeSets)
 {
-    size_t size = ScriptDataSize(script->bindings.count(), nconsts, nobjects, nscopes,
-                                 ntrynotes, nscopenotes, nyieldoffsets);
+    size_t size = ScriptDataSize(nconsts, nobjects, nscopes, ntrynotes,
+                                 nscopenotes, nyieldoffsets);
     script->data = AllocScriptData(script->zone(), size);
     if (size && !script->data) {
         ReportOutOfMemory(cx);
@@ -2805,13 +2485,6 @@ JSScript::partiallyInit(ExclusiveContext* cx, HandleScript script, uint32_t ncon
         cursor += vectorSize;
     }
 
-    if (script->bindings.count() != 0) {
-        // Make sure bindings are sufficiently aligned.
-        cursor = reinterpret_cast<uint8_t*>
-            (JS_ROUNDUP(reinterpret_cast<uintptr_t>(cursor), JS_ALIGNMENT_OF(Binding)));
-    }
-    cursor = script->bindings.switchToScriptStorage(reinterpret_cast<Binding*>(cursor));
-
     MOZ_ASSERT(cursor == script->data + size);
     return true;
 }
@@ -2819,9 +2492,6 @@ JSScript::partiallyInit(ExclusiveContext* cx, HandleScript script, uint32_t ncon
 /* static */ bool
 JSScript::fullyInitTrivial(ExclusiveContext* cx, Handle<JSScript*> script)
 {
-    if (!Bindings::initTrivialForScript(cx, script))
-        return false;
-
     if (!partiallyInit(cx, script, 0, 0, 0, 0, 0, 0, 0))
         return false;
 
@@ -2978,12 +2648,8 @@ JSScript::fullyInitFromEmitter(ExclusiveContext* cx, HandleScript script, Byteco
     }
     script->nslots_ = script->nfixed() + bce->maxStackDepth;
 
-    for (unsigned i = 0, n = script->bindings.numArgs(); i < n; ++i) {
-        if (script->formalIsAliased(i)) {
-            script->funHasAnyAliasedFormal_ = true;
-            break;
-        }
-    }
+    ClosedOverArgumentSlotIter fi(script);
+    script->funHasAnyAliasedFormal_ = !!fi;
 
 #ifdef DEBUG
     script->assertLinkedProperties(bce);
@@ -3488,11 +3154,9 @@ js::detail::CopyScript(JSContext* cx, HandleObject scriptStaticScope, HandleScri
         return false;
     }
 
-    /* Bindings */
+    /* Scope */
 
-    Rooted<Bindings> bindings(cx);
-    if (!Bindings::clone(cx, &bindings, data, src))
-        return false;
+    // TODOshu copy body scope
 
     /* Objects */
 
@@ -3571,10 +3235,6 @@ js::detail::CopyScript(JSContext* cx, HandleObject scriptStaticScope, HandleScri
     }
 
     // TODOshu copy scopes.
-
-    /* Now that all fallible allocation is complete, do the copying. */
-
-    dst->bindings = bindings;
 
     /* This assignment must occur before all the Rebase calls. */
     dst->data = data.forget();
@@ -3979,8 +3639,6 @@ JSScript::traceChildren(JSTracer* trc)
             MarkScriptData(trc->runtime(), code());
     }
 
-    bindings.trace(trc);
-
     jit::TraceJitScripts(trc, this);
 }
 
@@ -3993,28 +3651,25 @@ LazyScript::finalize(FreeOp* fop)
 size_t
 JSScript::calculateLiveFixed(jsbytecode* pc)
 {
-    size_t nlivefixed = nbodyfixed();
+    size_t nlivefixed = nfixedvars();
 
-    /* TODOshu
     if (nfixed() != nlivefixed) {
-        NestedStaticScope* staticScope = getStaticBlockScope(pc);
-        if (staticScope)
-            staticScope = MaybeForwarded(staticScope);
-        while (staticScope && !staticScope->is<StaticBlockScope>()) {
-            staticScope = staticScope->enclosingNestedScope();
-            if (staticScope)
-                staticScope = MaybeForwarded(staticScope);
+        Scope* scope = getScope(pc);
+        if (scope)
+            scope = MaybeForwarded(scope);
+
+        while (scope && !scope->is<LexicalScope>()) {
+            scope = scope->enclosing();
+            if (scope)
+                scope = MaybeForwarded(scope);
         }
 
-        if (staticScope && !IsStaticGlobalLexicalScope(staticScope)) {
-            StaticBlockScope& blockScope = staticScope->as<StaticBlockScope>();
-            nlivefixed = blockScope.localOffset() + blockScope.numVariables();
-        }
+        if (scope)
+            nlivefixed = scope->as<LexicalScope>().nextFrameSlot();
     }
-    */
 
     MOZ_ASSERT(nlivefixed <= nfixed());
-    MOZ_ASSERT(nlivefixed >= nbodyfixed());
+    MOZ_ASSERT(nlivefixed >= nfixedvars());
 
     return nlivefixed;
 }
@@ -4199,9 +3854,9 @@ JSScript::argumentsOptimizationFailed(JSContext* cx, HandleScript script)
 bool
 JSScript::formalIsAliased(unsigned argSlot)
 {
-    for (SimpleFormalParameterIter fi(bodyScope()); !fi.done(); fi++) {
-        if (fi.position() == argSlot)
-            return fi.closedOver();
+    for (BindingIter bi(this); bi; bi++) {
+        if (bi.argumentSlot() == argSlot)
+            return bi.closedOver();
     }
     MOZ_CRASH("Argument slot not found");
 }

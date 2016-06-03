@@ -653,7 +653,7 @@ js::XDRInterpretedFunction(XDRState<mode>* xdr, HandleObject enclosingScope, Han
             MOZ_ASSERT(fun->lazyScript() == lazy);
         } else {
             MOZ_ASSERT(fun->nonLazyScript() == script);
-            MOZ_ASSERT(fun->nargs() == script->bindings.numArgs());
+            MOZ_ASSERT(fun->nargs() == script->numArgs());
         }
 
         bool singleton = firstword & HasSingletonType;
@@ -1029,16 +1029,16 @@ js::FunctionToString(JSContext* cx, HandleFunction fun, bool lambdaParen)
                 return nullptr;
 
             // Fish out the argument names.
-            MOZ_ASSERT(script->bindings.numArgs() == fun->nargs());
+            MOZ_ASSERT(script->numArgs() == fun->nargs());
 
-            SimpleFormalParameterIter fi(script);
-            for (unsigned i = 0; i < fun->nargs(); i++, fi++) {
-                MOZ_ASSERT(fi.position() == i);
+            BindingIter bi(script);
+            for (unsigned i = 0; i < fun->nargs(); i++, bi++) {
+                MOZ_ASSERT(bi.argumentSlot() == i);
                 if (i && !out.append(", "))
                     return nullptr;
                 if (i == unsigned(fun->nargs() - 1) && fun->hasRest() && !out.append("..."))
                     return nullptr;
-                if (!out.append(fi.name()))
+                if (!out.append(bi.name()))
                     return nullptr;
             }
             if (!out.append(") {\n"))

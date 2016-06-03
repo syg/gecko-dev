@@ -48,13 +48,12 @@ ScopeObject::setAliasedVar(JSContext* cx, ScopeCoordinate sc, PropertyName* name
 }
 
 inline void
-LexicalScopeBase::setAliasedVar(JSContext* cx, AliasedFormalIter fi, PropertyName* name,
-                                const Value& v)
+LexicalScopeBase::setAliasedVar(JSContext* cx, const BindingIter& bi, const Value& v)
 {
-    MOZ_ASSERT(name == fi->name());
-    setSlot(fi.scopeSlot(), v);
+    MOZ_ASSERT(bi.location().kind() == BindingLocation::Kind::Environment);
+    setSlot(bi.location().slot(), v);
     if (isSingleton())
-        AddTypePropertyId(cx, this, NameToId(name), v);
+        AddTypePropertyId(cx, this, NameToId(bi.name()->asPropertyName()), v);
 }
 
 inline void
@@ -64,20 +63,6 @@ LexicalScopeBase::setAliasedVarFromArguments(JSContext* cx, const Value& argsVal
     setSlot(ArgumentsObject::SlotFromMagicScopeSlotValue(argsValue), v);
     if (isSingleton())
         AddTypePropertyId(cx, this, id, v);
-}
-
-inline void
-LexicalScopeBase::initRemainingSlotsToUninitializedLexicals(uint32_t begin)
-{
-    uint32_t end = slotSpan();
-    for (uint32_t slot = begin; slot < end; slot++)
-        initSlot(slot, MagicValue(JS_UNINITIALIZED_LEXICAL));
-}
-
-inline void
-LexicalScopeBase::initAliasedLexicalsToThrowOnTouch(JSScript* script)
-{
-    initRemainingSlotsToUninitializedLexicals(script->bindings.aliasedBodyLevelLexicalBegin());
 }
 
 template <AllowGC allowGC>

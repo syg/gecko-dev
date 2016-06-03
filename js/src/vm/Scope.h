@@ -45,27 +45,6 @@ enum class ScopeKind : uint8_t
     Module,
 };
 
-static inline bool
-ScopeKindCanHaveBindings(ScopeKind kind)
-{
-    return kind == ScopeKind::Function ||
-           kind == ScopeKind::Lexical ||
-           kind == ScopeKind::Catch ||
-           kind == ScopeKind::Eval ||
-           kind == ScopeKind::StrictEval ||
-           kind == ScopeKind::Global ||
-           kind == ScopeKind::NonSyntactic;
-}
-
-static inline bool
-ScopeKindCanHaveEnvironment(ScopeKind kind)
-{
-    return kind == ScopeKind::Function ||
-           kind == ScopeKind::Lexical ||
-           kind == ScopeKind::Catch ||
-           kind == ScopeKind::StrictEval;
-}
-
 const char* BindingKindString(BindingKind kind);
 const char* ScopeKindString(ScopeKind kind);
 
@@ -189,11 +168,6 @@ class Scope : public js::gc::TenuredCell
 
     Scope* enclosing() const {
         return enclosing_;
-    }
-
-    bool hasBindings() const {
-        MOZ_ASSERT_IF(ScopeKindCanHaveBindings(kind_), data_);
-        return !data_;
     }
 
     void traceChildren(JSTracer* trc);
@@ -393,13 +367,22 @@ class GlobalScope : public Scope
 
     static GlobalScope* create(ExclusiveContext* cx, ScopeKind kind, Data* data);
 
+  private:
+    Data& data() {
+        return *reinterpret_cast<Data*>(data_);
+    }
+
+    const Data& data() const {
+        return *reinterpret_cast<Data*>(data_);
+    }
+
+  public:
     bool isNonSyntactic() const {
         return kind() == ScopeKind::NonSyntactic;
     }
 
-  private:
-    Data& data() {
-        return *reinterpret_cast<Data*>(data_);
+    bool hasBindings() const {
+        return data().length > 0;
     }
 };
 
@@ -476,6 +459,10 @@ class EvalScope : public Scope
 
     bool strict() const {
         return kind() == ScopeKind::StrictEval;
+    }
+
+    bool hasBindings() const {
+        return data().length > 0;
     }
 };
 
@@ -635,13 +622,13 @@ class BindingIter
         return BindingKind::Const;
     }
 
-    bool isSimpleFormalParameter() const {
+    bool hasArgumentSlot() const {
         MOZ_ASSERT(!done());
         return index_ < nonSimpleFormalStart_;
     }
 
-    uint16_t simpleFormalParameterPosition() const {
-        MOZ_ASSERT(isSimpleFormalParameter());
+    uint16_t argumentSlot() const {
+        MOZ_ASSERT(hasArgumentSlot());
         return mozilla::AssertedCast<uint16_t>(index_);
     }
 
@@ -658,51 +645,29 @@ class BindingIter
     void trace(JSTracer* trc);
 };
 
-class SimpleFormalParameterIter
+class ClosedOverArgumentSlotIter : public BindingIter
 {
-    uint16_t index_;
-    FunctionScope::Data& data_;
-
-  public:
-    explicit SimpleFormalParameterIter(Scope* scope)
-      : index_(0),
-        data_(scope->as<FunctionScope>().data())
-    { }
-
-    explicit SimpleFormalParameterIter(JSScript* script);
-
-    bool done() const {
-        return index_ == data_.nonSimpleFormalStart;
+    void settle() {
+        while (hasArgumentSlot() && !closedOver())
+            BindingIter::operator++(1);
+        if (!hasArgumentSlot())
+            index_ = length_;
     }
 
-    explicit operator bool() const {
-        return !done();
+  public:
+    explicit ClosedOverArgumentSlotIter(JSScript* script)
+      : BindingIter(script)
+    {
+        settle();
     }
 
     void operator++(int) {
-        MOZ_ASSERT(!done());
-        index_++;
+        BindingIter::operator++(1);
+        settle();
     }
-
-    uint16_t position() const {
-        MOZ_ASSERT(!done());
-        return index_;
-    }
-
-    JSAtom* name() const {
-        MOZ_ASSERT(!done());
-        return data_.names[index_].name();
-    }
-
-    bool closedOver() {
-        MOZ_ASSERT(!done());
-        return data_.names[index_].closedOver();
-    }
-
-    void trace(JSTracer* trc);
 };
 
-class MOZ_STACK_CLASS ScopeIter
+class ScopeIter
 {
     HeapPtr<Scope*> scope_;
 

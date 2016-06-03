@@ -428,10 +428,6 @@ js::HasNonSyntacticScopeChain(Scope* scope)
     return false;
 }
 
-SimpleFormalParameterIter::SimpleFormalParameterIter(JSScript* script)
-  : SimpleFormalParameterIter(script->bodyScope())
-{ }
-
 JS::ubi::Node::Size
 JS::ubi::Concrete<Scope>::size(mozilla::MallocSizeOf mallocSizeOf) const
 {

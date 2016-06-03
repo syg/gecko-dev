@@ -690,17 +690,13 @@ class ScopeObject : public NativeObject
 
 class LexicalScopeBase : public ScopeObject
 {
-  protected:
-    inline void initRemainingSlotsToUninitializedLexicals(uint32_t begin);
-    inline void initAliasedLexicalsToThrowOnTouch(JSScript* script);
-
   public:
-    /* Get/set the aliased variable referred to by 'fi'. */
-    const Value& aliasedVar(AliasedFormalIter fi) {
-        return getSlot(fi.scopeSlot());
+    /* Get/set the aliased argument referred to by 'bi'. */
+    const Value& aliasedVar(const BindingIter& bi) {
+        MOZ_ASSERT(bi.location().kind() == BindingLocation::Kind::Environment);
+        return getSlot(bi.location().slot());
     }
-    inline void setAliasedVar(JSContext* cx, AliasedFormalIter fi, PropertyName* name,
-                              const Value& v);
+    inline void setAliasedVar(JSContext* cx, const BindingIter& bi, const Value& v);
 
     /*
      * When an aliased var (var accessed by nested closures) is also aliased by
@@ -735,14 +731,14 @@ class CallObject : public LexicalScopeBase
      * group.  The call object must be further initialized to be usable.
      */
     static CallObject*
-    create(JSContext* cx, HandleShape shape, HandleObjectGroup group, uint32_t lexicalBegin);
+    create(JSContext* cx, HandleShape shape, HandleObjectGroup group);
 
     /*
      * Construct a bare-bones call object given a shape and make it into
      * a singleton.  The call object must be initialized to be usable.
      */
     static CallObject*
-    createSingleton(JSContext* cx, HandleShape shape, uint32_t lexicalBegin);
+    createSingleton(JSContext* cx, HandleShape shape);
 
     static CallObject*
     createTemplateObject(JSContext* cx, HandleScript script, gc::InitialHeap heap);
