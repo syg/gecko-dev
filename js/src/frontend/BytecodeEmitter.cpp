@@ -3851,8 +3851,6 @@ BytecodeEmitter::emitFunctionScript(ParseNode* body)
     if (!bodyEmitterScope.enterFunctionBody(this, funbox))
         return false;
 
-    bodyEmitterScope.dump(this);
-
     /*
      * IonBuilder has assumptions about what may occur immediately after
      * script->main (e.g., in the case of destructuring params). Thus, put the

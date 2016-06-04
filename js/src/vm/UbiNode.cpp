@@ -26,6 +26,7 @@
 #include "js/Vector.h"
 #include "vm/Debugger.h"
 #include "vm/GlobalObject.h"
+#include "vm/Scope.h"
 #include "vm/ScopeObject.h"
 #include "vm/Shape.h"
 #include "vm/String.h"
@@ -402,6 +403,7 @@ template class TracerConcrete<js::jit::JitCode>;
 template class TracerConcreteWithCompartment<js::Shape>;
 template class TracerConcreteWithCompartment<js::BaseShape>;
 template class TracerConcrete<js::ObjectGroup>;
+template class TracerConcrete<js::Scope>;
 } // namespace ubi
 } // namespace JS
 

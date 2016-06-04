@@ -23,6 +23,8 @@
 
 #include "vm/ScopeObject-inl.h"
 
+#include <time.h>
+
 using namespace js;
 using namespace js::frontend;
 using mozilla::Maybe;
@@ -367,9 +369,18 @@ BytecodeCompiler::maybeCompleteCompressSource()
     return !maybeSourceCompressor || maybeSourceCompressor->complete();
 }
 
+static long
+elapsed_ns(struct timespec *start, struct timespec *end)
+{
+    return ((end->tv_sec - start->tv_sec) * 1000000000 + (end->tv_nsec - start->tv_nsec));
+}
+
 JSScript*
 BytecodeCompiler::compileScript(HandleObject environment, SharedContext* sc)
 {
+    timespec start, end;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+
     if (!createSourceAndParser())
         return nullptr;
 
@@ -424,6 +435,10 @@ BytecodeCompiler::compileScript(HandleObject environment, SharedContext* sc)
         return nullptr;
 
     MOZ_ASSERT_IF(cx->isJSContext(), !cx->asJSContext()->isExceptionPending());
+
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    fprintf(stdout, "%ld ns\n", elapsed_ns(&start, &end));
+
     return script;
 }
 
