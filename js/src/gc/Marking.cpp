@@ -1217,12 +1217,15 @@ Scope::traceChildren(JSTracer* trc)
 {
     TraceNullableEdge(trc, &enclosing_, "scope enclosing");
     switch (kind_) {
+      case ScopeKind::Function:
+        TraceFunctionScopeData(trc, reinterpret_cast<FunctionScope::Data*>(data_));
+        break;
+      case ScopeKind::ParameterDefaults:
+        TraceScopeDataWithEnvironment(trc, reinterpret_cast<ParameterDefaultsScope::Data*>(data_));
+        break;
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
         TraceScopeDataWithEnvironment(trc, reinterpret_cast<LexicalScope::Data*>(data_));
-        break;
-      case ScopeKind::Function:
-        TraceFunctionScopeData(trc, reinterpret_cast<FunctionScope::Data*>(data_));
         break;
       case ScopeKind::Global:
       case ScopeKind::NonSyntactic:
@@ -1244,15 +1247,6 @@ js::GCMarker::eagerlyMarkChildren(Scope* scope)
     BindingName* names = nullptr;
     uint32_t length = 0;
     switch (scope->kind_) {
-      case ScopeKind::Lexical:
-      case ScopeKind::Catch: {
-        LexicalScope::Data* data = reinterpret_cast<LexicalScope::Data*>(scope->data_);
-        if (data->environmentShape)
-            traverseEdge(scope, static_cast<Shape*>(data->environmentShape));
-        names = data->names;
-        length = data->length;
-        break;
-      }
       case ScopeKind::Function: {
         FunctionScope::Data* data = reinterpret_cast<FunctionScope::Data*>(scope->data_);
         traverseEdge(scope, static_cast<JSObject*>(data->canonicalFunction));
@@ -1262,6 +1256,25 @@ js::GCMarker::eagerlyMarkChildren(Scope* scope)
         length = data->length;
         break;
       }
+      case ScopeKind::ParameterDefaults: {
+        ParameterDefaultsScope::Data* data =
+            reinterpret_cast<ParameterDefaultsScope::Data*>(scope->data_);
+        if (data->environmentShape)
+            traverseEdge(scope, static_cast<Shape*>(data->environmentShape));
+        names = data->names;
+        length = data->length;
+        break;
+      }
+      case ScopeKind::Lexical:
+      case ScopeKind::Catch: {
+        LexicalScope::Data* data = reinterpret_cast<LexicalScope::Data*>(scope->data_);
+        if (data->environmentShape)
+            traverseEdge(scope, static_cast<Shape*>(data->environmentShape));
+        names = data->names;
+        length = data->length;
+        break;
+      }
+
       case ScopeKind::Global:
       case ScopeKind::NonSyntactic: {
         GlobalScope::Data* data = reinterpret_cast<GlobalScope::Data*>(scope->data_);

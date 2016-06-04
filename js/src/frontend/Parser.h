@@ -406,6 +406,28 @@ class ParseContext : public Nestable<ParseContext>
         }
     };
 
+    // Temporarily pop the Scope stack; the innermost scope must have an
+    // enclosing Scope.
+    class MOZ_STACK_CLASS TemporarilyPopScope
+    {
+        Scope** stack_;
+        Scope*  oldInnermost_;
+
+      public:
+        explicit TemporarilyPopScope(ParseContext* pc)
+          : stack_(&pc->innermostScope_),
+            oldInnermost_(*stack_)
+        {
+            MOZ_ASSERT(oldInnermost_->enclosing());
+            *stack_ = oldInnermost_->enclosing();
+        }
+
+        ~TemporarilyPopScope() {
+            MOZ_ASSERT(*stack_ == oldInnermost_->enclosing());
+            *stack_ = oldInnermost_;
+        }
+    };
+
   private:
     // The LifoAlloc for ParseScopes. A separate allocator is used because
     // ParseScopes are large, and unlike ParseNodes, they don't live beyond
@@ -506,7 +528,7 @@ class ParseContext : public Nestable<ParseContext>
         if (isFunctionBox()) {
             if (functionBox()->function()->isNamedLambda())
                 declEnvScope_.emplace(this);
-            //defaultsScope_.emplace(this);
+            defaultsScope_.emplace(this);
         }
         varScope_.emplace(this);
     }
@@ -556,8 +578,7 @@ class ParseContext : public Nestable<ParseContext>
         if (isFunctionBox()) {
             if (functionBox()->function()->isNamedLambda())
                 return declEnvScope();
-            // TODOshu defaults scope
-            // return defaultsScope();
+            return defaultsScope();
         }
         return varScope();
     }
@@ -1244,6 +1265,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     mozilla::Maybe<EvalScope::Data*> newEvalScopeData(ParseContext::Scope& scope,
                                                       uint32_t* functionBindingEnd);
     mozilla::Maybe<FunctionScope::Data*> newFunctionScopeData(ParseContext::Scope& scope);
+    mozilla::Maybe<ParameterDefaultsScope::Data*> newDefaultsScopeData(ParseContext::Scope& scope);
     mozilla::Maybe<LexicalScope::Data*> newLexicalScopeData(ParseContext::Scope& scope);
     mozilla::Maybe<FreeNameArray*> newFreeNameArray(ParseContext::Scope& scope);
     Node finishLexicalScope(ParseContext::Scope& scope, Node body);

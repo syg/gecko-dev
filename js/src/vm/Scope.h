@@ -35,6 +35,7 @@ BindingKindIsLexical(BindingKind kind)
 enum class ScopeKind : uint8_t
 {
     Function,
+    ParameterDefaults,
     Lexical,
     Catch,
     With,
@@ -304,9 +305,6 @@ class FunctionScope : public Scope
     }
 
   public:
-    // Unlike other Scopes, FunctionScopes always has data_ to hold the
-    // canonical function.
-
     uint32_t nextFrameSlot() const {
         return data().nextFrameSlot;
     }
@@ -317,6 +315,62 @@ class FunctionScope : public Scope
 
     JSScript* script() const;
 
+    Shape* environmentShape() const {
+        return data().environmentShape;
+    }
+
+    uint32_t numSimpleFormalParameters() const {
+        return data().nonSimpleFormalStart;
+    }
+};
+
+class ParameterDefaultsScope : public Scope
+{
+    friend class BindingIter;
+    friend class SimpleFormalParameterIter;
+    friend class Scope;
+    static const ScopeKind classScopeKind_ = ScopeKind::ParameterDefaults;
+
+  public:
+    // Data is public because it is created by the frontend. See
+    // Parser<FullParseHandler>::newDefaultsScopeData.
+    struct Data
+    {
+        // Simple formal parameter names are those without default expressions
+        // or destructuring, i.e. those that may be referred to by argument
+        // slots.
+        //
+        // simple formals - [0, nonSimpleFormalStart)
+        //  other formals - [nonSimpleParamStart, length)
+        uint16_t nonSimpleFormalStart;
+        uint32_t length;
+
+        // If there are any aliased bindings, the shape for the
+        // ParameterDefaultsEnvironment. Otherwise nullptr.
+        GCPtrShape environmentShape;
+
+        // The array of tagged JSAtom* names, allocated beyond the end of the
+        // struct.
+        BindingName names[1];
+    };
+
+    static size_t sizeOfData(uint32_t length) {
+        MOZ_ASSERT(length > 0);
+        return sizeof(Data) + (length - 1) * sizeof(BindingName);
+    }
+
+    static ParameterDefaultsScope* create(ExclusiveContext* cx, Data* data, Scope* enclosing);
+
+  private:
+    Data& data() {
+        return *reinterpret_cast<Data*>(data_);
+    }
+
+    const Data& data() const {
+        return *reinterpret_cast<Data*>(data_);
+    }
+
+  public:
     Shape* environmentShape() const {
         return data().environmentShape;
     }
@@ -484,7 +538,14 @@ class BindingIter
 
     uint32_t index_;
 
-    bool hasSlots_;
+    enum CanHaveSlots : uint8_t {
+        CannotHaveSlots = 0,
+        CanHaveArgumentSlots = 1 << 0,
+        CanHaveFrameSlots = 1 << 1,
+        CanHaveEnvironmentSlots = 1 << 2
+    };
+
+    uint8_t canHaveSlots_;
     uint16_t argumentSlot_;
     uint32_t frameSlot_;
     uint32_t environmentSlot_;
@@ -493,7 +554,7 @@ class BindingIter
     BindingName* names_;
 
     void init(uint16_t nonSimpleFormalStart, uint16_t varStart,
-              uint32_t letStart, uint32_t constStart, bool hasSlots,
+              uint32_t letStart, uint32_t constStart, uint8_t canHaveSlots,
               uint32_t firstFrameSlot, uint32_t firstEnvironmentSlot,
               BindingName* names, uint32_t length)
     {
@@ -502,7 +563,7 @@ class BindingIter
         letStart_ = letStart;
         constStart_ = constStart;
         index_ = 0;
-        hasSlots_ = hasSlots;
+        canHaveSlots_ = canHaveSlots;
         argumentSlot_ = 0;
         frameSlot_ = firstFrameSlot;
         environmentSlot_ = firstEnvironmentSlot;
@@ -512,6 +573,7 @@ class BindingIter
 
     void init(LexicalScope::Data& data, uint32_t firstFrameSlot);
     void init(FunctionScope::Data& data);
+    void init(ParameterDefaultsScope::Data& data);
     void init(GlobalScope::Data& data);
     void init(EvalScope::Data& data, bool strict);
 
@@ -525,6 +587,9 @@ class BindingIter
             break;
           case ScopeKind::Function:
             init(scope->as<FunctionScope>().data());
+            break;
+          case ScopeKind::ParameterDefaults:
+            init(scope->as<ParameterDefaultsScope>().data());
             break;
           case ScopeKind::Eval:
             init(scope->as<EvalScope>().data(), scope->kind() == ScopeKind::StrictEval);
@@ -545,6 +610,10 @@ class BindingIter
         init(data);
     }
 
+    explicit BindingIter(ParameterDefaultsScope::Data& data) {
+        init(data);
+    }
+
     explicit BindingIter(GlobalScope::Data& data) {
         init(data);
     }
@@ -561,7 +630,7 @@ class BindingIter
         letStart_(bi.letStart_),
         constStart_(bi.constStart_),
         index_(bi.index_),
-        hasSlots_(bi.hasSlots_),
+        canHaveSlots_(bi.canHaveSlots_),
         argumentSlot_(bi.argumentSlot_),
         frameSlot_(bi.frameSlot_),
         environmentSlot_(bi.environmentSlot_),
@@ -579,15 +648,32 @@ class BindingIter
 
     void operator++(int) {
         MOZ_ASSERT(!done());
-        if (hasSlots_) {
-            if (index_ < nonSimpleFormalStart_)
+        if (canHaveSlots_) {
+            if (index_ < nonSimpleFormalStart_) {
+                MOZ_ASSERT(canHaveArgumentSlots());
                 argumentSlot_++;
-            if (closedOver())
+            }
+            if (closedOver()) {
+                MOZ_ASSERT(canHaveEnvironmentSlots());
                 environmentSlot_++;
-            else if (index_ >= nonSimpleFormalStart_)
+            } else if (index_ >= nonSimpleFormalStart_) {
+                MOZ_ASSERT(canHaveFrameSlots());
                 frameSlot_++;
+            }
         }
         index_++;
+    }
+
+    bool canHaveArgumentSlots() const {
+        return canHaveSlots_ & CanHaveArgumentSlots;
+    }
+
+    bool canHaveFrameSlots() const {
+        return canHaveSlots_ & CanHaveFrameSlots;
+    }
+
+    bool canHaveEnvironmentSlots() const {
+        return canHaveSlots_ & CanHaveEnvironmentSlots;
     }
 
     JSAtom* name() const {
@@ -602,12 +688,17 @@ class BindingIter
 
     BindingLocation location() const {
         MOZ_ASSERT(!done());
-        if (!hasSlots_)
+        if (!canHaveSlots_)
             return BindingLocation::Global();
-        if (closedOver())
+        if (closedOver()) {
+            MOZ_ASSERT(canHaveEnvironmentSlots());
             return BindingLocation::Environment(environmentSlot_);
-        if (index_ < nonSimpleFormalStart_)
+        }
+        if (index_ < nonSimpleFormalStart_) {
+            MOZ_ASSERT(canHaveArgumentSlots());
             return BindingLocation::Argument(argumentSlot_);
+        }
+        MOZ_ASSERT(canHaveFrameSlots());
         return BindingLocation::Frame(frameSlot_);
     }
 
@@ -628,17 +719,17 @@ class BindingIter
     }
 
     uint16_t argumentSlot() const {
-        MOZ_ASSERT(hasArgumentSlot());
+        MOZ_ASSERT(canHaveArgumentSlots());
         return mozilla::AssertedCast<uint16_t>(index_);
     }
 
     uint32_t nextFrameSlot() const {
-        MOZ_ASSERT(hasSlots_);
+        MOZ_ASSERT(canHaveFrameSlots());
         return frameSlot_;
     }
 
     uint32_t nextEnvironmentSlot() const {
-        MOZ_ASSERT(hasSlots_);
+        MOZ_ASSERT(canHaveEnvironmentSlots());
         return environmentSlot_;
     }
 
@@ -648,9 +739,9 @@ class BindingIter
 class ClosedOverArgumentSlotIter : public BindingIter
 {
     void settle() {
-        while (hasArgumentSlot() && !closedOver())
+        while (!done() && hasArgumentSlot() && !closedOver())
             BindingIter::operator++(1);
-        if (!hasArgumentSlot())
+        if (!done() && !hasArgumentSlot())
             index_ = length_;
     }
 

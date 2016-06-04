@@ -123,6 +123,22 @@ static ScopeData*
 CopyScopeData(ExclusiveContext* cx, BindingIter& bi, const Class* cls,
               uint32_t baseShapeFlags, ScopeData* data, size_t dataSize)
 {
+    Shape* envShape = CreateEnvironmentShape(cx, bi, cls, bi.nextEnvironmentSlot(),
+                                             baseShapeFlags);
+    if (!envShape)
+        return nullptr;
+
+    ScopeData* copy = CopyScopeData(cx, data, dataSize);
+    if (copy)
+        copy->environmentShape.init(envShape);
+    return copy;
+}
+
+template <typename ScopeData>
+static ScopeData*
+CopyFrameScopeData(ExclusiveContext* cx, BindingIter& bi, const Class* cls,
+                   uint32_t baseShapeFlags, ScopeData* data, size_t dataSize)
+{
     // Copy a fresh BindingIter for use below.
     BindingIter freshBi(bi);
 
@@ -132,15 +148,7 @@ CopyScopeData(ExclusiveContext* cx, BindingIter& bi, const Class* cls,
         bi++;
     data->nextFrameSlot = bi.nextFrameSlot();
 
-    Shape* envShape = CreateEnvironmentShape(cx, freshBi, cls, bi.nextEnvironmentSlot(),
-                                             baseShapeFlags);
-    if (!envShape)
-        return nullptr;
-
-    ScopeData* copy = CopyScopeData(cx, data, dataSize);
-    if (copy)
-        copy->environmentShape.init(envShape);
-    return copy;
+    return CopyScopeData(cx, freshBi, cls, baseShapeFlags, data, dataSize);
 }
 
 template <typename ScopeData>
@@ -155,13 +163,8 @@ NewEmptyScopeData(ExclusiveContext* cx, size_t dataSize)
 Scope::create(ExclusiveContext* cx, ScopeKind kind, Scope* enclosing, uintptr_t data)
 {
     Scope* scope = Allocate<Scope>(cx);
-
-    // The data pointer is not always allocated memory (cf. EvalScope). It's
-    // up the caller to free on failure.
-    if (!scope)
-        return nullptr;
-
-    new (scope) Scope(kind, enclosing, data);
+    if (scope)
+        new (scope) Scope(kind, enclosing, data);
     return scope;
 }
 
@@ -190,10 +193,10 @@ LexicalScope::create(ExclusiveContext* cx, ScopeKind kind, Data* data,
     // it now that we're creating a permanent VM scope.
     Data* copy;
     BindingIter bi(*data, firstFrameSlot);
-    copy = CopyScopeData(cx, bi,
-                         &ClonedBlockObject::class_,
-                         BaseShape::NOT_EXTENSIBLE | BaseShape::DELEGATE,
-                         data, sizeOfData(data->length));
+    copy = CopyFrameScopeData(cx, bi,
+                              &ClonedBlockObject::class_,
+                              BaseShape::NOT_EXTENSIBLE | BaseShape::DELEGATE,
+                              data, sizeOfData(data->length));
     if (!copy)
         return nullptr;
 
@@ -211,14 +214,12 @@ FunctionScope::create(ExclusiveContext* cx, Data* data, JSFunction* fun, Scope* 
     Data* copy;
     if (data) {
         BindingIter bi(*data);
-        copy = CopyScopeData(cx, bi,
-                             &CallObject::class_,
-                             BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE,
-                             data, sizeOfData(data->length));
+        copy = CopyFrameScopeData(cx, bi,
+                                  &CallObject::class_,
+                                  BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE,
+                                  data, sizeOfData(data->length));
     } else {
         copy = NewEmptyScopeData<Data>(cx, sizeOfData(1));
-        if (copy)
-            copy->nextFrameSlot = LOCALNO_LIMIT;
     }
 
     if (!copy)
@@ -237,6 +238,32 @@ JSScript*
 FunctionScope::script() const
 {
     return canonicalFunction()->nonLazyScript();
+}
+
+/* static */ ParameterDefaultsScope*
+ParameterDefaultsScope::create(ExclusiveContext* cx, Data* data, Scope* enclosing)
+{
+    // The data that's passed in is from the frontend and is LifoAlloc'd. Copy
+    // it now that we're creating a permanent VM scope.
+    Data* copy;
+    if (data) {
+        BindingIter bi(*data);
+        copy = CopyScopeData(cx, bi,
+                             &ClonedBlockObject::class_,
+                             BaseShape::NOT_EXTENSIBLE | BaseShape::DELEGATE,
+                             data, sizeOfData(data->length));
+    } else {
+        copy = NewEmptyScopeData<Data>(cx, sizeOfData(1));
+    }
+
+    if (!copy)
+        return nullptr;
+
+    Scope* scope = Scope::create(cx, ScopeKind::ParameterDefaults, enclosing,
+                                 reinterpret_cast<uintptr_t>(copy));
+    if (!scope)
+        js_free(copy);
+    return static_cast<ParameterDefaultsScope*>(scope);
 }
 
 /* static */ GlobalScope*
@@ -284,19 +311,15 @@ EvalScope::create(ExclusiveContext* cx, ScopeKind scopeKind, Data* data, Scope* 
     if (data) {
         if (scopeKind == ScopeKind::StrictEval) {
             BindingIter bi(*data, true);
-            copy = CopyScopeData(cx, bi,
-                                 &CallObject::class_,
-                                 BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE,
-                                 data, sizeOfData(data->length));
+            copy = CopyFrameScopeData(cx, bi,
+                                      &CallObject::class_,
+                                      BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE,
+                                      data, sizeOfData(data->length));
         } else {
             copy = CopyScopeData(cx, data, sizeOfData(data->length));
         }
     } else {
         copy = NewEmptyScopeData<Data>(cx, sizeOfData(1));
-        if (copy) {
-            copy->nextFrameSlot = LOCALNO_LIMIT;
-            copy->environmentShape.init(nullptr);
-        }
     }
 
     if (!copy)
@@ -314,6 +337,9 @@ ScopeIter::hasSyntacticEnvironment() const
     switch (scope()->kind()) {
       case ScopeKind::Function:
         return !!scope()->as<FunctionScope>().environmentShape();
+
+      case ScopeKind::ParameterDefaults:
+        return !!scope()->as<ParameterDefaultsScope>().environmentShape();
 
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
@@ -341,6 +367,9 @@ ScopeIter::environmentShape() const
     switch (scope()->kind()) {
       case ScopeKind::Function:
         return scope()->as<FunctionScope>().environmentShape();
+
+      case ScopeKind::ParameterDefaults:
+        return scope()->as<ParameterDefaultsScope>().environmentShape();
 
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
@@ -371,15 +400,26 @@ void
 BindingIter::init(LexicalScope::Data& data, uint32_t firstFrameSlot)
 {
     init(0, 0, 0, data.constStart,
-         true, firstFrameSlot, JSSLOT_FREE(&ClonedBlockObject::class_),
+         CanHaveFrameSlots | CanHaveEnvironmentSlots,
+         firstFrameSlot, JSSLOT_FREE(&ClonedBlockObject::class_),
          data.names, data.length);
 }
 
 void
 BindingIter::init(FunctionScope::Data& data)
 {
-    init(data.nonSimpleFormalStart, data.varStart, data.length, data.length,
-         true, 0, JSSLOT_FREE(&CallObject::class_),
+    init(data.nonSimpleFormalStart, data.varStart, data.length, 0,
+         CanHaveArgumentSlots | CanHaveFrameSlots | CanHaveEnvironmentSlots,
+         0, JSSLOT_FREE(&CallObject::class_),
+         data.names, data.length);
+}
+
+void
+BindingIter::init(ParameterDefaultsScope::Data& data)
+{
+    init(data.nonSimpleFormalStart, data.length, 0, 0,
+         CanHaveArgumentSlots | CanHaveEnvironmentSlots,
+         0, JSSLOT_FREE(&ClonedBlockObject::class_),
          data.names, data.length);
 }
 
@@ -387,7 +427,8 @@ void
 BindingIter::init(GlobalScope::Data& data)
 {
     init(0, 0, data.letStart, data.constStart,
-         false, UINT32_MAX, UINT32_MAX,
+         CannotHaveSlots,
+         UINT32_MAX, UINT32_MAX,
          data.names, data.length);
 }
 
@@ -396,11 +437,12 @@ BindingIter::init(EvalScope::Data& data, bool strict)
 {
     if (strict) {
         init(0, 0, data.length, data.length,
-             true, 0, JSSLOT_FREE(&CallObject::class_),
+             CanHaveFrameSlots | CanHaveEnvironmentSlots,
+             0, JSSLOT_FREE(&CallObject::class_),
              data.names, data.length);
     } else {
         init(0, 0, data.length, data.length,
-             false, UINT32_MAX, UINT32_MAX,
+             CannotHaveSlots, UINT32_MAX, UINT32_MAX,
              data.names, data.length);
     }
 }

@@ -517,7 +517,7 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
 
         explicit Data(LifoAlloc& alloc)
           : nameCache(alloc),
-            nextFrameSlot(UINT32_MAX),
+            nextFrameSlot(0),
             hasEnvironment(false)
         { }
     };
@@ -582,7 +582,6 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
     Scope* enclosingScope(BytecodeEmitter* bce);
 
     MOZ_MUST_USE bool resolveFreeNames(BytecodeEmitter* bce, FreeNameArray* freeNames);
-    MOZ_MUST_USE bool resolveDeclEnv(BytecodeEmitter* bce, LexicalScope::Data* bindings);
 
   public:
     using Nestable<EmitterScope>::enclosing;
@@ -598,8 +597,9 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
 
     MOZ_MUST_USE bool enterLexical(BytecodeEmitter* bce, ScopeKind kind,
                                    LexicalScope::Data* bindings, FreeNameArray* freeNames);
-    MOZ_MUST_USE bool enterFunction(BytecodeEmitter* bce, Maybe<EmitterScope>& declEnvEmitterScope,
-                                    FunctionBox* funbox);
+    MOZ_MUST_USE bool enterDeclEnv(BytecodeEmitter* bce, FunctionBox* funbox);
+    MOZ_MUST_USE bool enterParameterDefaults(BytecodeEmitter* bce, FunctionBox* funbox);
+    MOZ_MUST_USE bool enterFunctionBody(BytecodeEmitter* bce, FunctionBox* funbox);
     MOZ_MUST_USE bool enterGlobal(BytecodeEmitter* bce, GlobalSharedContext* globalsc);
     MOZ_MUST_USE bool enterEval(BytecodeEmitter* bce, EvalSharedContext* evalsc);
     MOZ_MUST_USE bool enterWith(BytecodeEmitter* bce);
@@ -784,6 +784,7 @@ BytecodeEmitter::EmitterScope::resolveFreeNames(BytecodeEmitter* bce, FreeNameAr
 
                 switch (si.kind()) {
                   case ScopeKind::Function:
+                  case ScopeKind::ParameterDefaults:
                   case ScopeKind::Lexical:
                   case ScopeKind::Catch:
                   case ScopeKind::StrictEval:
@@ -834,33 +835,6 @@ BytecodeEmitter::EmitterScope::resolveFreeNames(BytecodeEmitter* bce, FreeNameAr
         if (!putNameInCache(bce, name, loc))
             return false;
      }
-
-    return true;
-}
-
-bool
-BytecodeEmitter::EmitterScope::resolveDeclEnv(BytecodeEmitter* bce, LexicalScope::Data* bindings)
-{
-    if (!ensureData(bce))
-        return false;
-
-    // The lambda name, if not closed over, emits JSOP_CALLEE and has
-    // no frame slot, so set the first frame slot to LOCALNO_LIMIT.
-    BindingIter bi(*bindings, LOCALNO_LIMIT);
-    MOZ_ASSERT(bi);
-
-    NameLocation loc = NameLocation::NamedLambdaCallee();
-    if (bi.location().kind() == BindingLocation::Kind::Environment) {
-        loc = NameLocation::fromBinding(BindingKind::Const, bi.location());
-        data().hasEnvironment = true;
-    }
-
-    if (!putNameInCache(bce, bi.name(), loc))
-        return false;
-
-    // There is exactly one binding in the decl env scope.
-    bi++;
-    MOZ_ASSERT(!bi);
 
     return true;
 }
@@ -926,20 +900,51 @@ BytecodeEmitter::EmitterScope::enterLexical(BytecodeEmitter* bce, ScopeKind kind
 }
 
 bool
-BytecodeEmitter::EmitterScope::enterFunction(BytecodeEmitter* bce,
-                                             Maybe<EmitterScope>& declEnvEmitterScope,
-                                             FunctionBox* funbox)
+BytecodeEmitter::EmitterScope::enterDeclEnv(BytecodeEmitter* bce, FunctionBox* funbox)
+{
+    MOZ_ASSERT(funbox->declEnvBindings);
+
+    if (!ensureData(bce))
+        return false;
+
+    // The lambda name, if not closed over, emits JSOP_CALLEE and has
+    // no frame slot, so set the first frame slot to LOCALNO_LIMIT.
+    BindingIter bi(*funbox->declEnvBindings, LOCALNO_LIMIT);
+    MOZ_ASSERT(bi);
+
+    NameLocation loc = NameLocation::NamedLambdaCallee();
+    if (bi.location().kind() == BindingLocation::Kind::Environment) {
+        loc = NameLocation::fromBinding(BindingKind::Const, bi.location());
+        data().hasEnvironment = true;
+    }
+
+    if (!putNameInCache(bce, bi.name(), loc))
+        return false;
+
+    // There is exactly one binding in the decl env scope.
+    bi++;
+    MOZ_ASSERT(!bi);
+
+    FreeNameArray* freeNames = funbox->hasDefaults()
+                               ? funbox->defaultsScopeFreeNames
+                               : funbox->funScopeFreeNames;
+    if (!resolveFreeNames(bce, freeNames))
+        return false;
+
+    auto createDeclEnvScope = [=](ExclusiveContext* cx, Scope* enclosing) {
+        // TODOshu maybe its own scope kind since decl envs have no frame?
+        return LexicalScope::create(cx, ScopeKind::Lexical, funbox->declEnvBindings, 0, enclosing);
+    };
+    return internScope(bce, createDeclEnvScope);
+}
+
+bool
+BytecodeEmitter::EmitterScope::enterFunctionBody(BytecodeEmitter* bce, FunctionBox* funbox)
 {
     MOZ_ASSERT(this == bce->innermostEmitterScope);
 
     if (!ensureData(bce))
         return false;
-
-    if (funbox->function()->isNamedLambda() && funbox->declEnvBindings) {
-        declEnvEmitterScope.emplace(bce);
-        if (!declEnvEmitterScope->resolveDeclEnv(bce, funbox->declEnvBindings))
-            return false;
-    }
 
     // Resolve body-level bindings, if there are any.
     if (FunctionScope::Data* bindings = funbox->funScopeBindings) {
@@ -1159,6 +1164,14 @@ BytecodeEmitter::EmitterScope::enterWith(BytecodeEmitter* bce)
     return bce->emitInternedScopeOp(index(), JSOP_ENTERWITH);
 }
 
+static inline bool
+ScopeKindNeedsNote(ScopeKind kind)
+{
+    return kind == ScopeKind::Lexical ||
+           kind == ScopeKind::Catch ||
+           kind == ScopeKind::With;
+}
+
 bool
 BytecodeEmitter::EmitterScope::leave(BytecodeEmitter* bce, bool nonLocal)
 {
@@ -1166,7 +1179,8 @@ BytecodeEmitter::EmitterScope::leave(BytecodeEmitter* bce, bool nonLocal)
     // we must be the innermost scope.
     MOZ_ASSERT_IF(!nonLocal, this == bce->innermostEmitterScope);
 
-    switch (scope(bce)->kind()) {
+    ScopeKind kind = scope(bce)->kind();
+    switch (kind) {
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
         if (!bce->emit1(data().hasEnvironment ? JSOP_POPBLOCKSCOPE : JSOP_DEBUGLEAVEBLOCK))
@@ -1179,6 +1193,7 @@ BytecodeEmitter::EmitterScope::leave(BytecodeEmitter* bce, bool nonLocal)
         break;
 
       case ScopeKind::Function:
+      case ScopeKind::ParameterDefaults:
       case ScopeKind::Eval:
       case ScopeKind::StrictEval:
       case ScopeKind::Global:
@@ -1189,9 +1204,7 @@ BytecodeEmitter::EmitterScope::leave(BytecodeEmitter* bce, bool nonLocal)
 
     // Popping scopes due to non-local jumps generate additional scope
     // notes. See NonLocalExitControl::prepareForNonLocalJump.
-    //
-    // Body-level scopes do not have notes.
-    if (!nonLocal && enclosing())
+    if (!nonLocal && ScopeKindNeedsNote(kind))
         bce->scopeNoteList.recordEnd(noteIndex_, bce->offset(), bce->inPrologue());
 
     // Record the maximum frame size.
@@ -3794,13 +3807,21 @@ BytecodeEmitter::emitFunctionScript(ParseNode* body)
     // The ordering of these EmitterScopes is important. The decl env scope
     // needs to enclose the defaults scope needs to enclose the function
     // scope.
+
     Maybe<EmitterScope> declEnvEmitterScope;
-    EmitterScope emitterScope(this);
+    if (funbox->declEnvBindings) {
+        declEnvEmitterScope.emplace(this);
+        if (!declEnvEmitterScope->enterDeclEnv(this, funbox))
+            return false;
+    }
+
+    Maybe<EmitterScope> defaultsEmitterScope;
+    EmitterScope bodyEmitterScope(this);
 
     // TODOshu defaults scope bindings
-    if (!emitterScope.enterFunction(this, declEnvEmitterScope, funbox))
+    if (!bodyEmitterScope.enterFunctionBody(this, funbox))
         return false;
-    emitterScope.dump(this);
+    bodyEmitterScope.dump(this);
 
     /*
      * IonBuilder has assumptions about what may occur immediately after
@@ -3906,7 +3927,7 @@ BytecodeEmitter::emitFunctionScript(ParseNode* body)
         MOZ_ASSERT(!script->hasRunOnce());
     }
 
-    if (!emitterScope.leave(this))
+    if (!bodyEmitterScope.leave(this))
         return false;
 
     tellDebuggerAboutCompiledScript(cx);
@@ -8078,9 +8099,6 @@ BytecodeEmitter::emitFunctionFormalParametersAndBody(ParseNode *pn)
     RootedFunction fun(cx, sc->asFunctionBox()->function());
     ParseNode* pnlast = pn->last();
 
-    // Carefully emit everything in the right order:
-    // 1. Defaults and Destructuring for each argument
-    // 2. Functions
     bool hasDefaults = sc->asFunctionBox()->hasDefaults();
     ParseNode* rest = nullptr;
     if (fun->hasRest() && hasDefaults) {

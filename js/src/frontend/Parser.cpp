@@ -47,6 +47,7 @@ using mozilla::Maybe;
 using mozilla::Nothing;
 using mozilla::Some;
 using mozilla::PodCopy;
+using mozilla::PodZero;
 
 using JS::AutoGCRooter;
 
@@ -271,10 +272,8 @@ ParseContext::init()
                 return false;
         }
 
-        /* TODOshu defaults scope
         if (!defaultsScope_->init(this))
             return false;
-        */
     }
     return varScope_->init(this);
 }
@@ -290,10 +289,8 @@ ParseContext::finishFunctionScopes()
 
     JSFunction* fun = functionBox()->function();
     if (fun->isNamedLambda()) {
-        /* TODOshu defaults scope
         if (!defaultsScope().propagateFreeNames(this))
             return false;
-        */
 
         // If the function name of a named lambda is closed over, we mark the
         // function as needing a dynamic environment holding itself.
@@ -777,7 +774,7 @@ Parser<ParseHandler>::reportRedeclaration(HandlePropertyName name, DeclarationKi
            DeclarationKindString(kind), bytes.ptr());
 }
 
-// noteSimpleFormalParameter is called for both the arguments of a regular
+// noteFormalParameter is called for both the arguments of a regular
 // function definition and the arguments specified by the Function
 // constructor.
 //
@@ -1003,6 +1000,20 @@ Parser<FullParseHandler>::checkStatementsEOF()
     return true;
 }
 
+template <typename Scope>
+static typename Scope::Data*
+AllocScopeData(ExclusiveContext* cx, LifoAlloc& alloc, uint32_t numBindings)
+{
+    size_t allocSize = Scope::sizeOfData(numBindings);
+    typename Scope::Data* bindings = static_cast<typename Scope::Data*>(alloc.alloc(allocSize));
+    if (!bindings) {
+        ReportOutOfMemory(cx);
+        return nullptr;
+    }
+    PodZero(bindings);
+    return bindings;
+}
+
 template <>
 Maybe<GlobalScope::Data*>
 Parser<FullParseHandler>::newGlobalScopeData(ParseContext::Scope& scope,
@@ -1041,36 +1052,33 @@ Parser<FullParseHandler>::newGlobalScopeData(ParseContext::Scope& scope,
 
     GlobalScope::Data* bindings = nullptr;
     uint32_t numBindings = funs.length() + vars.length() + lets.length() + consts.length();
-    if (numBindings == 0)
-        return Some(bindings);
 
-    size_t allocSize = GlobalScope::sizeOfData(numBindings);
-    bindings = static_cast<GlobalScope::Data*>(alloc.alloc(allocSize));
-    if (!bindings) {
-        ReportOutOfMemory(context);
-        return Nothing();
+    if (numBindings > 0) {
+        bindings = AllocScopeData<GlobalScope>(context, alloc, numBindings);
+        if (!bindings)
+            return Nothing();
+
+        // The ordering here is important. See comments in GlobalScope.
+        BindingName* start = bindings->names;
+        BindingName* cursor = start;
+
+        // Keep track of what vars are functions. This is only used in BCE to omit
+        // superfluous DEFVARs.
+        PodCopy(cursor, funs.begin(), funs.length());
+        cursor += funs.length();
+        *functionBindingEnd = cursor - start;
+
+        PodCopy(cursor, vars.begin(), vars.length());
+        cursor += vars.length();
+        bindings->letStart = cursor - start;
+
+        PodCopy(cursor, lets.begin(), lets.length());
+        cursor += lets.length();
+        bindings->constStart = cursor - start;
+
+        PodCopy(cursor, consts.begin(), consts.length());
+        bindings->length = numBindings;
     }
-
-    // The ordering here is important. See comments in GlobalScope.
-    BindingName* start = bindings->names;
-    BindingName* cursor = start;
-
-    // Keep track of what vars are functions. This is only used in BCE to omit
-    // superfluous DEFVARs.
-    PodCopy(cursor, funs.begin(), funs.length());
-    cursor += funs.length();
-    *functionBindingEnd = cursor - start;
-
-    PodCopy(cursor, vars.begin(), vars.length());
-    cursor += vars.length();
-    bindings->letStart = cursor - start;
-
-    PodCopy(cursor, lets.begin(), lets.length());
-    cursor += lets.length();
-    bindings->constStart = cursor - start;
-
-    PodCopy(cursor, consts.begin(), consts.length());
-    bindings->length = numBindings;
 
     return Some(bindings);
 }
@@ -1099,32 +1107,44 @@ Parser<FullParseHandler>::newEvalScopeData(ParseContext::Scope& scope,
 
     EvalScope::Data* bindings = nullptr;
     uint32_t numBindings = vars.length();
-    if (numBindings == 0)
-        return Some(bindings);
 
-    size_t allocSize = EvalScope::sizeOfData(numBindings);
-    bindings = static_cast<EvalScope::Data*>(alloc.alloc(allocSize));
-    if (!bindings) {
-        ReportOutOfMemory(context);
-        return Nothing();
+    if (numBindings > 0) {
+        bindings = AllocScopeData<EvalScope>(context, alloc, numBindings);
+        if (!bindings)
+            return Nothing();
+
+        BindingName* start = bindings->names;
+        BindingName* cursor = start;
+
+        // Keep track of what vars are functions. This is only used in BCE to omit
+        // superfluous DEFVARs.
+        PodCopy(cursor, funs.begin(), funs.length());
+        cursor += funs.length();
+        *functionBindingEnd = cursor - start;
+
+        PodCopy(cursor, vars.begin(), vars.length());
+        bindings->length = numBindings;
     }
 
-    bindings->nextFrameSlot = LOCALNO_LIMIT;
-    bindings->environmentShape.init(nullptr);
-
-    BindingName* start = bindings->names;
-    BindingName* cursor = start;
-
-    // Keep track of what vars are functions. This is only used in BCE to omit
-    // superfluous DEFVARs.
-    PodCopy(cursor, funs.begin(), funs.length());
-    cursor += funs.length();
-    *functionBindingEnd = cursor - start;
-
-    PodCopy(cursor, vars.begin(), vars.length());
-    bindings->length = numBindings;
-
     return Some(bindings);
+}
+
+static bool
+CollectSimpleFormalParameters(ParseContext* pc, ParseContext::Scope& scope,
+                              Vector<BindingName>& simpleFormals)
+{
+    // Simple parameter names must be added in order of appearance as, if not
+    // closed over, they may be referenced using argument slots.
+    bool closeOverAllBindings = pc->sc()->closeOverAllBindings();
+    for (size_t i = 0; i < pc->simpleFormalParameterNames.length(); i++) {
+        JSAtom* name = pc->simpleFormalParameterNames[i];
+        DeclaredNamePtr p = scope.lookupDeclaredName(name);
+        MOZ_ASSERT(p->value().kind() == DeclarationKind::SimpleFormalParameter);
+        if (!simpleFormals.append(BindingName(name, closeOverAllBindings ||
+                                                    p->value().closedOver())))
+            return false;
+    }
+    return true;
 }
 
 template <>
@@ -1135,15 +1155,8 @@ Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope)
     Vector<BindingName> formals(context);
     Vector<BindingName> vars(context);
 
-    // Simple parameter names must be added in order of appearance as, if not
-    // closed over, they may be referenced using argument slots.
-    for (size_t i = 0; i < pc->simpleFormalParameterNames.length(); i++) {
-        JSAtom* name = pc->simpleFormalParameterNames[i];
-        DeclaredNamePtr p = scope.lookupDeclaredName(name);
-        MOZ_ASSERT(p->value().kind() == DeclarationKind::SimpleFormalParameter);
-        if (!simpleFormals.append(BindingName(name, p->value().closedOver())))
-            return Nothing();
-    }
+    if (!CollectSimpleFormalParameters(pc, scope, simpleFormals))
+        return Nothing();
 
     bool closeOverAllBindings = pc->sc()->closeOverAllBindings();
     for (BindingIter bi = scope.bindings(pc); bi; bi++) {
@@ -1167,34 +1180,75 @@ Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope)
 
     FunctionScope::Data* bindings = nullptr;
     uint32_t numBindings = simpleFormals.length() + formals.length() + vars.length();
-    if (numBindings == 0)
-        return Some(bindings);
 
-    size_t allocSize = FunctionScope::sizeOfData(numBindings);
-    bindings = static_cast<FunctionScope::Data*>(alloc.alloc(allocSize));
-    if (!bindings) {
-        ReportOutOfMemory(context);
-        return Nothing();
+    if (numBindings > 0) {
+        bindings = AllocScopeData<FunctionScope>(context, alloc, numBindings);
+        if (!bindings)
+            return Nothing();
+
+        // The ordering here is important. See comments in FunctionScope.
+        BindingName* start = bindings->names;
+        BindingName* cursor = start;
+
+        PodCopy(cursor, simpleFormals.begin(), simpleFormals.length());
+        cursor += simpleFormals.length();
+        bindings->nonSimpleFormalStart = cursor - start;
+
+        PodCopy(cursor, formals.begin(), formals.length());
+        cursor += formals.length();
+        bindings->varStart = cursor - start;
+
+        PodCopy(cursor, vars.begin(), vars.length());
+        bindings->length = numBindings;
     }
 
-    bindings->nextFrameSlot = LOCALNO_LIMIT;
-    bindings->canonicalFunction.init(nullptr);
-    bindings->environmentShape.init(nullptr);
+    return Some(bindings);
+}
 
-    // The ordering here is important. See comments in FunctionScope.
-    BindingName* start = bindings->names;
-    BindingName* cursor = start;
+template <>
+Maybe<ParameterDefaultsScope::Data*>
+Parser<FullParseHandler>::newDefaultsScopeData(ParseContext::Scope& scope)
+{
+    Vector<BindingName> simpleFormals(context);
+    Vector<BindingName> formals(context);
 
-    PodCopy(cursor, simpleFormals.begin(), simpleFormals.length());
-    cursor += simpleFormals.length();
-    bindings->nonSimpleFormalStart = cursor - start;
+    // Simple parameter names must be added in order of appearance as, if not
+    // closed over, they may be referenced using argument slots.
+    if (!CollectSimpleFormalParameters(pc, scope, simpleFormals))
+        return Nothing();
 
-    PodCopy(cursor, formals.begin(), formals.length());
-    cursor += formals.length();
-    bindings->varStart = cursor - start;
+    bool closeOverAllBindings = pc->sc()->closeOverAllBindings();
+    for (BindingIter bi = scope.bindings(pc); bi; bi++) {
+        MOZ_ASSERT(bi.kind() == BindingKind::FormalParameter);
+        BindingName binding(bi.name(), closeOverAllBindings || bi.closedOver());
+        // Simple parameter names are already handled above.
+        if (bi.declarationKind() != DeclarationKind::SimpleFormalParameter) {
+            if (!formals.append(binding))
+                return Nothing();
+        }
+    }
 
-    PodCopy(cursor, vars.begin(), vars.length());
-    bindings->length = numBindings;
+    ParameterDefaultsScope::Data* bindings = nullptr;
+    uint32_t numBindings = simpleFormals.length() + formals.length();
+
+    if (numBindings > 0) {
+        bindings = AllocScopeData<ParameterDefaultsScope>(context, alloc, numBindings);
+        if (!bindings)
+            return Nothing();
+
+        bindings->environmentShape.init(nullptr);
+
+        // The ordering here is important. See comments in FunctionScope.
+        BindingName* start = bindings->names;
+        BindingName* cursor = start;
+
+        PodCopy(cursor, simpleFormals.begin(), simpleFormals.length());
+        cursor += simpleFormals.length();
+        bindings->nonSimpleFormalStart = cursor - start;
+
+        PodCopy(cursor, formals.begin(), formals.length());
+        bindings->length = numBindings;
+    }
 
     return Some(bindings);
 }
@@ -1225,29 +1279,23 @@ Parser<FullParseHandler>::newLexicalScopeData(ParseContext::Scope& scope)
 
     LexicalScope::Data* bindings = nullptr;
     uint32_t numBindings = lets.length() + consts.length();
-    if (numBindings == 0)
-        return Some(bindings);
 
-    size_t allocSize = LexicalScope::sizeOfData(numBindings);
-    bindings = static_cast<LexicalScope::Data*>(alloc.alloc(allocSize));
-    if (!bindings) {
-        ReportOutOfMemory(context);
-        return Nothing();
+    if (numBindings > 0) {
+        bindings = AllocScopeData<LexicalScope>(context, alloc, numBindings);
+        if (!bindings)
+            return Nothing();
+
+        // The ordering here is important. See comments in LexicalScope.
+        BindingName* cursor = bindings->names;
+        BindingName* start = cursor;
+
+        PodCopy(cursor, lets.begin(), lets.length());
+        cursor += lets.length();
+        bindings->constStart = cursor - start;
+
+        PodCopy(cursor, consts.begin(), consts.length());
+        bindings->length = numBindings;
     }
-
-    bindings->nextFrameSlot = LOCALNO_LIMIT;
-    bindings->environmentShape.init(nullptr);
-
-    // The ordering here is important. See comments in LexicalScope.
-    BindingName* cursor = bindings->names;
-    BindingName* start = cursor;
-
-    PodCopy(cursor, lets.begin(), lets.length());
-    cursor += lets.length();
-    bindings->constStart = cursor - start;
-
-    PodCopy(cursor, consts.begin(), consts.length());
-    bindings->length = numBindings;
 
     return Some(bindings);
 }
@@ -1465,11 +1513,12 @@ Parser<FullParseHandler>::finishFunction()
             return false;
         funbox->declEnvBindings = *bindings;
 
-        // We don't care about the free names of the named lambda scope.
+        // We don't care about the free names of the named lambda scope; it's
+        // the same as the set of free names in the defaults scope or the var
+        // scope, depending on whether the function has defaults.
     }
 
-    /* TODOshu defaults scope
-    {
+    if (funbox->hasDefaults()) {
         Maybe<LexicalScope::Data*> bindings = newLexicalScopeData(pc->defaultsScope());
         if (!bindings)
             return false;
@@ -1479,7 +1528,6 @@ Parser<FullParseHandler>::finishFunction()
             return false;
         funbox->defaultsScopeFreeNames = *freeNames;
     }
-    */
 
     {
         Maybe<FunctionScope::Data*> bindings = newFunctionScopeData(pc->varScope());
@@ -1513,7 +1561,7 @@ Parser<SyntaxParseHandler>::finishFunction()
     */
 
     Rooted<GCVector<JSAtom*>> freeVariables(context, GCVector<JSAtom*>(context));
-    for (FreeNameIter fni = pc->varScope().freeNames(pc); fni; fni++) {
+    for (FreeNameIter fni = pc->outermostScope().freeNames(pc); fni; fni++) {
         if (!freeVariables.append(fni.name()))
             return false;
     }
@@ -2099,6 +2147,15 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
             if (!tokenStream.matchToken(&matched, TOK_ASSIGN))
                 return false;
             if (matched) {
+                // Default expressions have their own scope to ensure that
+                // closures created by default expressions do not have
+                // visibility of any bindings in the function body.
+                //
+                // The default expression scope encloses the body scope, so
+                // pop the body scope while parsing default expressions.
+                ParseContext::TemporarilyPopScope popBodyScope(pc);
+                MOZ_ASSERT(pc->innermostScope() == &pc->defaultsScope());
+
                 // A default argument without parentheses would look like:
                 // a = expr => body, but both operators are right-associative, so
                 // that would have been parsed as a = (expr => body) instead.
@@ -2153,8 +2210,24 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
             }
         }
 
-        if (!hasDefaults)
+        // If we had default expressions, declare all formal parameters in the
+        // defaults scope.
+        if (hasDefaults) {
+            ParseContext::Scope& defaultsScope = pc->defaultsScope();
+            for (BindingIter bi = pc->varScope().bindings(pc); bi; bi++) {
+                DeclarationKind declKind = bi.declarationKind();
+                if (declKind == DeclarationKind::SimpleFormalParameter ||
+                    declKind == DeclarationKind::FormalParameter)
+                {
+                    AddDeclaredNamePtr p = defaultsScope.lookupDeclaredNameForAdd(bi.name());
+                    MOZ_ASSERT(!p);
+                    if (!defaultsScope.addDeclaredName(pc, p, bi.name(), declKind))
+                        return false;
+                }
+            }
+        } else {
             funbox->length = numSimpleFormals - hasRest;
+        }
 
         funbox->function()->setArgCount(numSimpleFormals);
     } else if (IsSetterKind(kind)) {
