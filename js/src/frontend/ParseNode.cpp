@@ -1058,20 +1058,6 @@ LexicalScopeNode::dump(int indent)
                 IndentNewLine(nameIndent);
         }
     }
-    fprintf(stderr, "] [");
-    if (!isEmptyScope() && scopeFreeNames()) {
-        FreeNameArray* freeNames = scopeFreeNames();
-        for (uint32_t i = 0; i < freeNames->length; i++) {
-            JSAtom* name = freeNames->names[i];
-            JS::AutoCheckCannotGC nogc;
-            if (name->hasLatin1Chars())
-                DumpName(name->latin1Chars(nogc), name->length());
-            else
-                DumpName(name->twoByteChars(nogc), name->length());
-            if (i < freeNames->length - 1)
-                IndentNewLine(nameIndent);
-        }
-    }
     fprintf(stderr, "]");
     indent += 2;
     IndentNewLine(indent);

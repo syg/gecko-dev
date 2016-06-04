@@ -213,6 +213,10 @@ class ExclusiveContext : public ContextFriendFields,
         return perThreadData->dtoaState;
     }
 
+    frontend::NameTablePools& frontendTablePools() {
+        return perThreadData->frontendTablePools;
+    }
+
     /*
      * "Entering" a compartment changes cx->compartment (which changes
      * cx->global). Note that this does not push any InterpreterFrame which means

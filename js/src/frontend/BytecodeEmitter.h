@@ -116,10 +116,6 @@ struct CGYieldOffsetList {
 typedef Vector<jsbytecode, 0> BytecodeVector;
 typedef Vector<jssrcnote, 0> SrcNotesVector;
 
-typedef uintptr_t jsatomid;
-typedef InlineMap<JSAtom*, jsatomid, 24> AtomIndexMap;
-
-
 // Linked list of jump instructions that need to be patched. The linked list is
 // stored in the bytes of the incomplete bytecode that will be patched, so no
 // extra memory is needed, and patching the instructions destroys the list.
@@ -180,16 +176,6 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     class TDZCheckCache;
     class NestableControl;
     class EmitterScope;
-    class NameLocation;
-
-    // The LifoAlloc for ParseScopes. A separate allocator is used because
-    // EmitterScopes are large and don't live beyond the BytecodeEmitter's
-    // lifetime.
-    //
-    // Ideally EmitterScopes would be stack allocated, but the C++ stack limit
-    // is a concern when parsing.
-    static const size_t InlineScopesPerAllocChunk = 16;
-    LifoAlloc scopeAlloc;
 
     SharedContext* const sc;      /* context shared between parsing and bytecode generation */
 
@@ -218,7 +204,7 @@ struct MOZ_STACK_CLASS BytecodeEmitter
 
     Parser<FullParseHandler>* const parser;
 
-    AtomIndexMap    atomIndices;    /* literals indexed for mapping */
+    AtomIndexMap*   atomIndices;    /* literals indexed for mapping */
     unsigned        firstLine;      /* first line, for JSScript::initFromEmitter */
 
     uint32_t        maxFixedSlots;  /* maximum number of fixed frame slots so far */
@@ -299,6 +285,10 @@ struct MOZ_STACK_CLASS BytecodeEmitter
                     HandleScript script, Handle<LazyScript*> lazyScript,
                     TokenPos bodyPosition, EmitterMode emitterMode = Normal);
 
+    ~BytecodeEmitter();
+
+    bool init();
+
     template <typename Predicate /* (NestableControl*) -> bool */>
     NestableControl* findInnermostNestableControl(Predicate predicate) const;
 
@@ -314,15 +304,16 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     Scope* innermostScope() const;
 
     MOZ_ALWAYS_INLINE
-    MOZ_MUST_USE bool makeAtomIndex(JSAtom* atom, jsatomid* indexp) {
-        AtomIndexMap::AddPtr p = atomIndices.lookupForAdd(atom);
+    MOZ_MUST_USE bool makeAtomIndex(JSAtom* atom, uint32_t* indexp) {
+        MOZ_ASSERT(atomIndices);
+        AtomIndexMap::AddPtr p = atomIndices->lookupForAdd(atom);
         if (p) {
             *indexp = p->value();
             return true;
         }
 
-        jsatomid index = atomIndices.count();
-        if (!atomIndices.add(p, atom, index))
+        uint32_t index = atomIndices->count();
+        if (!atomIndices->add(p, atom, index))
             return false;
 
         *indexp = index;

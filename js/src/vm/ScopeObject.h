@@ -547,45 +547,6 @@ class StaticScopeIter
 /*****************************************************************************/
 
 /*
- * A "scope coordinate" describes how to get from head of the scope chain to a
- * given lexically-enclosing variable. A scope coordinate has two dimensions:
- *  - hops: the number of scope objects on the scope chain to skip
- *  - slot: the slot on the scope object holding the variable's value
- */
-class ScopeCoordinate
-{
-    uint32_t hops_;
-    uint32_t slot_;
-
-    /*
-     * Technically, hops_/slot_ are SCOPECOORD_(HOPS|SLOT)_BITS wide.  Since
-     * ScopeCoordinate is a temporary value, don't bother with a bitfield as
-     * this only adds overhead.
-     */
-    static_assert(SCOPECOORD_HOPS_BITS <= 32, "We have enough bits below");
-    static_assert(SCOPECOORD_SLOT_BITS <= 32, "We have enough bits below");
-
-  public:
-    explicit inline ScopeCoordinate(jsbytecode* pc)
-      : hops_(GET_SCOPECOORD_HOPS(pc)), slot_(GET_SCOPECOORD_SLOT(pc + SCOPECOORD_HOPS_LEN))
-    {
-        MOZ_ASSERT(JOF_OPTYPE(JSOp(*pc)) == JOF_SCOPECOORD);
-    }
-
-    inline ScopeCoordinate() {}
-
-    void setHops(uint32_t hops) { MOZ_ASSERT(hops < SCOPECOORD_HOPS_LIMIT); hops_ = hops; }
-    void setSlot(uint32_t slot) { MOZ_ASSERT(slot < SCOPECOORD_SLOT_LIMIT); slot_ = slot; }
-
-    uint32_t hops() const { MOZ_ASSERT(hops_ < SCOPECOORD_HOPS_LIMIT); return hops_; }
-    uint32_t slot() const { MOZ_ASSERT(slot_ < SCOPECOORD_SLOT_LIMIT); return slot_; }
-
-    bool operator==(const ScopeCoordinate& rhs) const {
-        return hops() == rhs.hops() && slot() == rhs.slot();
-    }
-};
-
-/*
  * Return a shape representing the static scope containing the variable
  * accessed by the ALIASEDVAR op at 'pc'.
  */

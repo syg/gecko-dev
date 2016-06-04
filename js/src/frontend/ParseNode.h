@@ -446,12 +446,6 @@ enum ParseNodeArity
     PN_SCOPE                            /* lexical scope */
 };
 
-struct FreeNameArray
-{
-    uint32_t length;
-    JSAtom* names[1];
-};
-
 class LoopControlStatement;
 class BreakStatement;
 class ContinueStatement;
@@ -568,7 +562,6 @@ class ParseNode
         } name;
         struct {
             LexicalScope::Data* bindings;
-            FreeNameArray*      freeNames;
             ParseNode*          body;
         } scope;
         struct {
@@ -629,11 +622,6 @@ class ParseNode
     LexicalScope::Data* scopeBindings() const {
         MOZ_ASSERT(!isEmptyScope());
         return pn_u.scope.bindings;
-    }
-
-    FreeNameArray* scopeFreeNames() const {
-        MOZ_ASSERT(pn_arity == PN_SCOPE);
-        return pn_u.scope.freeNames;
     }
 
     ParseNode* scopeBody() const {
@@ -948,19 +936,10 @@ struct NameNode : public ParseNode
 
 struct LexicalScopeNode : public ParseNode
 {
-    LexicalScopeNode(LexicalScope::Data* bindings, FreeNameArray* freeNames, ParseNode* body)
+    LexicalScopeNode(LexicalScope::Data* bindings, ParseNode* body)
       : ParseNode(PNK_LEXICALSCOPE, JSOP_NOP, PN_SCOPE, body->pn_pos)
     {
         pn_u.scope.bindings = bindings;
-        pn_u.scope.freeNames = freeNames;
-        pn_u.scope.body = body;
-    }
-
-    LexicalScopeNode(FreeNameArray* freeNames, ParseNode* body)
-      : ParseNode(PNK_LEXICALSCOPE, JSOP_NOP, PN_SCOPE, body->pn_pos)
-    {
-        pn_u.scope.bindings = nullptr;
-        pn_u.scope.freeNames = freeNames;
         pn_u.scope.body = body;
     }
 
@@ -1325,10 +1304,6 @@ struct ClassNode : public TernaryNode {
     LexicalScope::Data* scopeBindings() const {
         MOZ_ASSERT(pn_kid3->is<LexicalScopeNode>());
         return pn_kid3->scopeBindings();
-    }
-    FreeNameArray* scopeFreeNames() const {
-        MOZ_ASSERT(pn_kid3->is<LexicalScopeNode>());
-        return pn_kid3->scopeFreeNames();
     }
 };
 

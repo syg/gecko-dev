@@ -27,6 +27,7 @@
 #endif
 #include "builtin/AtomicsObject.h"
 #include "ds/FixedSizeHash.h"
+#include "frontend/NameTables.h"
 #include "gc/GCRuntime.h"
 #include "gc/Tracer.h"
 #include "irregexp/RegExpStack.h"
@@ -566,8 +567,9 @@ class PerThreadData : public PerThreadDataFriendFields
     bool gcSweeping;
 #endif
 
-    // Number of active bytecode compilation on this thread.
-    unsigned activeCompilations;
+    // Pools used for recycling name maps and sets when parsing and emitting
+    // bytecode. Purged on GC when there are no active script compilations.
+    frontend::NameTablePools frontendTablePools;
 
     explicit PerThreadData(JSRuntime* runtime);
     ~PerThreadData();
@@ -579,8 +581,6 @@ class PerThreadData : public PerThreadDataFriendFields
     inline JSRuntime* runtimeIfOnOwnerThread();
 
     inline bool exclusiveThreadsPresent();
-    inline void addActiveCompilation(AutoLockForExclusiveAccess& lock);
-    inline void removeActiveCompilation(AutoLockForExclusiveAccess& lock);
 
     // For threads which may be associated with different runtimes, depending
     // on the work they are doing.
@@ -1338,24 +1338,6 @@ struct JSRuntime : public JS::shadow::Runtime,
     js::EvalCache       evalCache;
     js::LazyScriptCache lazyScriptCache;
 
-    // Pool of maps used during parse/emit. This may be modified by threads
-    // with an ExclusiveContext and requires a lock. Active compilations
-    // prevent the pool from being purged during GCs.
-  private:
-    unsigned activeCompilations_;
-  public:
-    bool hasActiveCompilations() {
-        return activeCompilations_ != 0;
-    }
-    void addActiveCompilation(js::AutoLockForExclusiveAccess& lock) {
-        MOZ_ASSERT(currentThreadHasExclusiveAccess());
-        activeCompilations_++;
-    }
-    void removeActiveCompilation(js::AutoLockForExclusiveAccess& lock) {
-        MOZ_ASSERT(currentThreadHasExclusiveAccess());
-        activeCompilations_--;
-    }
-
     // Count of AutoKeepAtoms instances on the main thread's stack. When any
     // instances exist, atoms in the runtime will not be collected. Threads
     // with an ExclusiveContext do not increment this value, but the presence
@@ -1836,21 +1818,6 @@ inline bool
 PerThreadData::exclusiveThreadsPresent()
 {
     return runtime_->exclusiveThreadsPresent();
-}
-
-inline void
-PerThreadData::addActiveCompilation(AutoLockForExclusiveAccess& lock)
-{
-    activeCompilations++;
-    runtime_->addActiveCompilation(lock);
-}
-
-inline void
-PerThreadData::removeActiveCompilation(AutoLockForExclusiveAccess& lock)
-{
-    MOZ_ASSERT(activeCompilations);
-    activeCompilations--;
-    runtime_->removeActiveCompilation(lock);
 }
 
 /************************************************************************/

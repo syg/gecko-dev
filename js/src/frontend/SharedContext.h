@@ -59,11 +59,16 @@ StatementKindIsUnlabeledBreakTarget(StatementKind kind)
     return StatementKindIsLoop(kind) || kind == StatementKind::Switch;
 }
 
+template <typename Concrete>
+class TemporarilyPopNestable;
+
 // A base class for nestable structures in the frontend, such as statements
 // and scopes.
 template <typename Concrete>
 class MOZ_STACK_CLASS Nestable
 {
+    friend class TemporarilyPopNestable<Concrete>;
+
     Concrete** stack_;
     Concrete*  enclosing_;
 
@@ -121,12 +126,12 @@ class TemporarilyPopNestable
       : stack_(stack),
         oldInnermost_(*stack)
     {
-        MOZ_ASSERT(oldInnermost_->enclosing());
-        *stack_ = oldInnermost_->enclosing();
+        MOZ_ASSERT(oldInnermost_->enclosing_);
+        *stack_ = oldInnermost_->enclosing_;
     }
 
     ~TemporarilyPopNestable() {
-        MOZ_ASSERT(*stack_ == oldInnermost_->enclosing());
+        MOZ_ASSERT(*stack_ == oldInnermost_->enclosing_);
         *stack_ = oldInnermost_;
     }
 };
@@ -474,11 +479,9 @@ class FunctionBox : public ObjectBox, public SharedContext
 
     // Names from the scope for parameter default expressions, if any.
     ParameterDefaultsScope::Data* defaultsScopeBindings;
-    FreeNameArray* defaultsScopeFreeNames;
 
     // Names from the 'var' scope of the function.
     FunctionScope::Data* funScopeBindings;
-    FreeNameArray* funScopeFreeNames;
 
     ParseNode*      functionNode;           /* back pointer used by asm.js for error messages */
     uint32_t        bufStart;

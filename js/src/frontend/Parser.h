@@ -15,6 +15,7 @@
 
 #include "frontend/BytecodeCompiler.h"
 #include "frontend/FullParseHandler.h"
+#include "frontend/NameTables.h"
 #include "frontend/SharedContext.h"
 #include "frontend/SyntaxParseHandler.h"
 
@@ -25,54 +26,6 @@ namespace js {
 class ModuleObject;
 
 namespace frontend {
-
-enum class DeclarationKind : uint8_t
-{
-    SimpleFormalParameter,
-    FormalParameter,
-    Var,
-    Let,
-    Const,
-    Import,
-    BodyLevelFunction,
-    LexicalFunction,
-    CatchParameter
-};
-
-static inline bool
-DeclarationKindIsLexical(DeclarationKind kind)
-{
-    return kind == DeclarationKind::Let ||
-           kind == DeclarationKind::Const ||
-           kind == DeclarationKind::Import ||
-           kind == DeclarationKind::CatchParameter;
-}
-
-static inline BindingKind
-DeclarationKindToBindingKind(DeclarationKind kind)
-{
-    switch (kind) {
-      case DeclarationKind::SimpleFormalParameter:
-      case DeclarationKind::FormalParameter:
-        return BindingKind::FormalParameter;
-
-      case DeclarationKind::Var:
-      case DeclarationKind::BodyLevelFunction:
-        return BindingKind::Var;
-
-      case DeclarationKind::Let:
-      case DeclarationKind::Import:
-      case DeclarationKind::LexicalFunction:
-      case DeclarationKind::CatchParameter:
-        return BindingKind::Let;
-
-      case DeclarationKind::Const:
-        return BindingKind::Const;
-
-      default:
-        MOZ_CRASH("Bad DeclarationKind");
-    }
-}
 
 /*
  * The struct ParseContext stores information about the current parsing context,
@@ -142,86 +95,27 @@ class ParseContext : public Nestable<ParseContext>
     // Tracks declared and used names within a scope.
     class Scope : public Nestable<Scope>
     {
-        class DeclaredNameInfo
-        {
-            friend class Scope;
+        // Names declared in this scope. Corresponds to the union of
+        // VarDeclaredNames and LexicallyDeclaredNames in the ES spec.
+        //
+        // A 'var' declared name is a member of the declared name set of every
+        // scope in its scope contour.
+        //
+        // A lexically declared name is a member only of the declared name set of
+        // the scope in which it is declared.
+        DeclaredNameMap* declared_;
 
-            DeclarationKind kind_;
+        // Names used in this scope.
+        UsedNameSet* used_;
 
-            // If the declared name is a binding, whether the binding is
-            // closed over. Its value is meaningless if the declared name is
-            // not a binding (i.e., a 'var' declared name in a non-'var'
-            // scope).
-            bool closedOver_;
-
-          public:
-            // Default constructor for InlineMap.
-            DeclaredNameInfo()
-              : kind_(DeclarationKind::Var),
-                closedOver_(false)
-            { }
-
-            explicit DeclaredNameInfo(DeclarationKind kind)
-              : kind_(kind),
-                closedOver_(false)
-            { }
-
-            DeclarationKind kind() const {
-                return kind_;
-            }
-
-            void setClosedOver() {
-                closedOver_ = true;
-            }
-
-            bool closedOver() const {
-                return closedOver_;
-            }
-        };
-
-        using DeclaredNameMap = InlineMap<JSAtom*,
-                                          DeclaredNameInfo,
-                                          8,
-                                          DefaultHasher<JSAtom*>,
-                                          LifoAllocPolicy<Fallible>>;
-
-        using UsedNameSet = InlineSet<JSAtom*,
-                                      24,
-                                      DefaultHasher<JSAtom*>,
-                                      LifoAllocPolicy<Fallible>>;
-
-        // Data is LifoAlloc'd to save C++ stack.
-        struct Data
-        {
-            // Names declared in this scope. Corresponds to the union of
-            // VarDeclaredNames and LexicallyDeclaredNames in the ES spec.
-            //
-            // A 'var' declared name is a member of the declared name set of every
-            // scope in its scope contour.
-            //
-            // A lexically declared name is a member only of the declared name set of
-            // the scope in which it is declared.
-            DeclaredNameMap declared;
-
-            // Names used in this scope.
-            UsedNameSet used;
-
-            explicit Data(LifoAlloc& alloc)
-              : declared(alloc),
-                used(alloc)
-            { }
-        };
-
-        Data* data_;
-
-        Data& data() {
-            MOZ_ASSERT(data_);
-            return *data_;
+        DeclaredNameMap& declared() {
+            MOZ_ASSERT(declared_);
+            return *declared_;
         }
 
-        const Data& data() const {
-            MOZ_ASSERT(data_);
-            return *data_;
+        UsedNameSet& used() {
+            MOZ_ASSERT(used_);
+            return *used_;
         }
 
         bool maybeReportOOM(ParseContext* pc, bool result) {
@@ -238,38 +132,47 @@ class ParseContext : public Nestable<ParseContext>
 
         explicit Scope(ParseContext* pc)
           : Nestable<Scope>(&pc->innermostScope_),
-            data_(nullptr)
+            declared_(nullptr),
+            used_(nullptr)
         { }
 
-        ~Scope();
+        void release(ParseContext* pc) {
+            ExclusiveContext* cx = pc->sc()->context;
+            cx->frontendTablePools().releaseMap(&declared_);
+            cx->frontendTablePools().releaseSet(&used_);
+        }
 
         void dump(ParseContext* pc);
 
         bool init(ParseContext* pc) {
-            data_ = pc->scopeAlloc_.new_<Data>(pc->scopeAlloc_);
-            return maybeReportOOM(pc, !!data_);
+            MOZ_ASSERT(!declared_);
+            MOZ_ASSERT(!used_);
+            ExclusiveContext* cx = pc->sc()->context;
+            declared_ = cx->frontendTablePools().acquireMap<DeclaredNameMap>(cx);
+            used_ = cx->frontendTablePools().acquireSet<UsedNameSet>(cx);
+            return declared_ && used_;
         }
 
         DeclaredNamePtr lookupDeclaredName(JSAtom* name) {
-            return data().declared.lookup(name);
+            return declared().lookup(name);
         }
 
         AddDeclaredNamePtr lookupDeclaredNameForAdd(JSAtom* name) {
-            return data().declared.lookupForAdd(name);
+            return declared().lookupForAdd(name);
         }
 
         bool addDeclaredName(ParseContext* pc, AddDeclaredNamePtr& p, JSAtom* name,
                              DeclarationKind kind)
         {
-            return maybeReportOOM(pc, data().declared.add(p, name, DeclaredNameInfo(kind)));
+            return maybeReportOOM(pc, declared().add(p, name, DeclaredNameInfo(kind)));
         }
 
         bool addUsedName(ParseContext* pc, JSAtom* name) {
-            return maybeReportOOM(pc, data().used.put(name));
+            return maybeReportOOM(pc, used().put(name));
         }
 
         bool hasUsedName(JSAtom* name) {
-            return data().used.has(name);
+            return used().has(name);
         }
 
         // An iterator for the set of free names in the current scope: the set
@@ -285,20 +188,20 @@ class ParseContext : public Nestable<ParseContext>
             FreeNameIter(Scope& scope, bool isVarScope)
               : isVarScope_(isVarScope),
                 scope_(scope),
-                usedRange_(scope.data().used.all())
+                usedRange_(scope.used().all())
             {
                 settle();
             }
 
             void settle() {
                 while (!usedRange_.empty()) {
-                    DeclaredNameMap::Ptr p = scope_.data().declared.lookup(usedRange_.front());
+                    DeclaredNameMap::Ptr p = scope_.declared().lookup(usedRange_.front());
                     if (!p)
                         break;
                     // A use of a 'var' declared in a lexical scope is
                     // considered free, as it's not binding in that lexical
                     // scope.
-                    if (!isVarScope_ && p->value().kind() == DeclarationKind::Var)
+                    if (!isVarScope_ && p->value()->kind() == DeclarationKind::Var)
                         break;
                     usedRange_.popFront();
                 }
@@ -349,7 +252,7 @@ class ParseContext : public Nestable<ParseContext>
 
             BindingIter(Scope& scope, bool isVarScope)
               : isVarScope_(isVarScope),
-                declaredRange_(scope.data().declared.all())
+                declaredRange_(scope.declared().all())
             {
                 settle();
             }
@@ -358,7 +261,7 @@ class ParseContext : public Nestable<ParseContext>
                 if (isVarScope_)
                     return;
                 while (!declaredRange_.empty()) {
-                    if (DeclarationKindIsLexical(declaredRange_.front().value().kind()))
+                    if (DeclarationKindIsLexical(declaredRange_.front().value()->kind()))
                         break;
                     declaredRange_.popFront();
                 }
@@ -380,7 +283,7 @@ class ParseContext : public Nestable<ParseContext>
 
             DeclarationKind declarationKind() {
                 MOZ_ASSERT(!done());
-                return declaredRange_.front().value().kind();
+                return declaredRange_.front().value()->kind();
             }
 
             BindingKind kind() {
@@ -389,7 +292,7 @@ class ParseContext : public Nestable<ParseContext>
 
             bool closedOver() {
                 MOZ_ASSERT(!done());
-                return declaredRange_.front().value().closedOver();
+                return declaredRange_.front().value()->closedOver();
             }
 
             void operator++(int) {
@@ -400,10 +303,6 @@ class ParseContext : public Nestable<ParseContext>
         };
 
         inline BindingIter bindings(ParseContext* pc);
-
-        static size_t sizeOfData() {
-            return sizeof(Data);
-        }
     };
 
     class TemporarilyPopScope : public TemporarilyPopNestable<Scope>
@@ -415,15 +314,6 @@ class ParseContext : public Nestable<ParseContext>
     };
 
   private:
-    // The LifoAlloc for ParseScopes. A separate allocator is used because
-    // ParseScopes are large, and unlike ParseNodes, they don't live beyond
-    // the ParseContext's lifetime.
-    //
-    // Ideally ParseScopes would be stack allocated, but the C++ stack limit
-    // is a concern when parsing.
-    static const size_t InlineScopesPerAllocChunk = 16;
-    LifoAlloc scopeAlloc_;
-
     // Context shared between parsing and bytecode generation.
     SharedContext* sc_;
 
@@ -496,8 +386,6 @@ class ParseContext : public Nestable<ParseContext>
     template <typename ParseHandler>
     ParseContext(Parser<ParseHandler>* prs, SharedContext* sc, Directives* newDirectives)
       : Nestable<ParseContext>(&prs->pc),
-        scopeAlloc_(mozilla::RoundUpPow2(InlineScopesPerAllocChunk *
-                                         ParseContext::Scope::sizeOfData())),
         sc_(sc),
         innermostStatement_(nullptr),
         innermostScope_(nullptr),
@@ -522,7 +410,7 @@ class ParseContext : public Nestable<ParseContext>
     ~ParseContext();
 
     bool init();
-    bool finishFunctionScopes();
+    bool finishExtraFunctionScopes();
 
     SharedContext* sc() {
         return sc_;
@@ -702,6 +590,7 @@ enum TripledotHandling { TripledotAllowed, TripledotProhibited };
 template <typename ParseHandler>
 class Parser : private JS::AutoGCRooter, public StrictModeGetter
 {
+  private:
     /*
      * A class for temporarily stashing errors while parsing continues.
      *
@@ -774,9 +663,12 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
 
     LifoAlloc& alloc;
 
-    TokenStream         tokenStream;
-    LifoAlloc::Mark     tempPoolMark;
+    TokenStream tokenStream;
+    LifoAlloc::Mark tempPoolMark;
 
+  private:
+
+  public:
     /* list of parsed objects for GC tracing */
     ObjectBox* traceListHead;
 
@@ -830,8 +722,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
 
     Parser(ExclusiveContext* cx, LifoAlloc* alloc, const ReadOnlyCompileOptions& options,
            const char16_t* chars, size_t length, bool foldConstants,
-           Parser<SyntaxParseHandler>* syntaxParser,
-           LazyScript* lazyOuterFunction);
+           Parser<SyntaxParseHandler>* syntaxParser, LazyScript* lazyOuterFunction);
     ~Parser();
 
     bool checkOptions();
@@ -1254,7 +1145,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     mozilla::Maybe<FunctionScope::Data*> newFunctionScopeData(ParseContext::Scope& scope);
     mozilla::Maybe<ParameterDefaultsScope::Data*> newDefaultsScopeData(ParseContext::Scope& scope);
     mozilla::Maybe<LexicalScope::Data*> newLexicalScopeData(ParseContext::Scope& scope);
-    mozilla::Maybe<FreeNameArray*> newFreeNameArray(ParseContext::Scope& scope);
+    Node makeLexicalScope(ParseContext::Scope& scope, Node body);
     Node finishLexicalScope(ParseContext::Scope& scope, Node body);
 
     Node propertyName(YieldHandling yieldHandling, Node propList,

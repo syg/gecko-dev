@@ -76,7 +76,7 @@ class MOZ_STACK_CLASS BytecodeCompiler
     bool createParser();
     bool createSourceAndParser();
     bool createScript();
-    void emplaceEmitter(SharedContext* sharedContext);
+    bool createEmitter(SharedContext* sharedContext);
     bool handleParseFailure(const Directives& newDirectives);
     bool prepareTree(ParseNode** pn);
     bool deoptimizeArgumentsInEnclosingScripts(JSContext* cx, HandleObject environment);
@@ -257,13 +257,14 @@ BytecodeCompiler::createScript()
     return script != nullptr;
 }
 
-void
-BytecodeCompiler::emplaceEmitter(SharedContext* sharedContext)
+bool
+BytecodeCompiler::createEmitter(SharedContext* sharedContext)
 {
     BytecodeEmitter::EmitterMode emitterMode =
         options.selfHostingMode ? BytecodeEmitter::SelfHosting : BytecodeEmitter::Normal;
     emitter.emplace(/* parent = */ nullptr, parser.ptr(), sharedContext, script,
                     /* lazyScript = */ nullptr, options.lineno, emitterMode);
+    return emitter->init();
 }
 
 bool
@@ -378,16 +379,14 @@ elapsed_ns(struct timespec *start, struct timespec *end)
 JSScript*
 BytecodeCompiler::compileScript(HandleObject environment, SharedContext* sc)
 {
-    timespec start, end;
-    clock_gettime(CLOCK_MONOTONIC, &start);
-
     if (!createSourceAndParser())
         return nullptr;
 
     if (!createScript())
         return nullptr;
 
-    emplaceEmitter(sc);
+    if (!createEmitter(sc))
+        return nullptr;
 
     for (;;) {
         ParseContext pc(parser.ptr(), sc, /* newDirectives = */ nullptr);
@@ -435,9 +434,6 @@ BytecodeCompiler::compileScript(HandleObject environment, SharedContext* sc)
         return nullptr;
 
     MOZ_ASSERT_IF(cx->isJSContext(), !cx->asJSContext()->isExceptionPending());
-
-    clock_gettime(CLOCK_MONOTONIC, &end);
-    fprintf(stdout, "%ld ns\n", elapsed_ns(&start, &end));
 
     return script;
 }
@@ -489,7 +485,8 @@ BytecodeCompiler::compileModule()
 
     module->setInitialEnvironment(dynamicScope);
 
-    emplaceEmitter(pn->pn_modulebox);
+    if (!createEmitter(pn->pn_modulebox))
+        return nullptr;
     if (!emitter->emitModuleScript(pn->pn_body))
         return nullptr;
 
@@ -545,7 +542,8 @@ BytecodeCompiler::compileFunctionBody(MutableHandleFunction fun,
         if (!createScript())
             return false;
 
-        emplaceEmitter(fn->pn_funbox);
+        if (!createEmitter(fn->pn_funbox))
+            return false;
         if (!emitter->emitFunctionScript(fn->pn_body))
             return false;
     } else {
@@ -635,12 +633,26 @@ frontend::CompileGlobalScript(ExclusiveContext* cx, LifoAlloc* alloc, ScopeKind 
                               SourceCompressionTask* extraSct,
                               ScriptSourceObject** sourceObjectOut)
 {
-    MOZ_ASSERT(scopeKind == ScopeKind::Global || scopeKind == ScopeKind::NonSyntactic);
-    BytecodeCompiler compiler(cx, alloc, options, srcBuf, /* enclosingScope = */ nullptr,
-                              TraceLogger_ParserCompileScript);
-    AutoInitializeSourceObject autoSSO(compiler, sourceObjectOut);
-    compiler.maybeSetSourceCompressor(extraSct);
-    return compiler.compileGlobalScript(scopeKind);
+    timespec start, end;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+
+    JSScript* script;
+    for (uint32_t i = 0; i < 100; i++) {
+        MOZ_ASSERT(scopeKind == ScopeKind::Global || scopeKind == ScopeKind::NonSyntactic);
+        BytecodeCompiler compiler(cx, alloc, options, srcBuf, /* enclosingScope = */ nullptr,
+                                  TraceLogger_ParserCompileScript);
+        AutoInitializeSourceObject autoSSO(compiler, sourceObjectOut);
+        compiler.maybeSetSourceCompressor(extraSct);
+        script = compiler.compileGlobalScript(scopeKind);
+        if (!script)
+            return nullptr;
+    }
+
+    clock_gettime(CLOCK_MONOTONIC, &end);
+
+    fprintf(stdout, "%ld ns avg\n", elapsed_ns(&start, &end) / 100);
+
+    return script;
 }
 
 JSScript*
@@ -740,6 +752,8 @@ frontend::CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy, const cha
 
     BytecodeEmitter bce(/* parent = */ nullptr, &parser, pn->pn_funbox, script, lazy,
                         pn->pn_pos, BytecodeEmitter::LazyFunction);
+    if (!bce.init())
+        return false;
 
     return bce.emitFunctionScript(pn->pn_body);
 }

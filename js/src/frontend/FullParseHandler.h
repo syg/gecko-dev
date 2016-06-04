@@ -677,9 +677,8 @@ class FullParseHandler
         pn->pn_modulebox = modulebox;
     }
 
-    ParseNode* newLexicalScope(LexicalScope::Data* bindings, FreeNameArray* freeNames,
-                               ParseNode* body) {
-        return new_<LexicalScopeNode>(bindings, freeNames, body);
+    ParseNode* newLexicalScope(LexicalScope::Data* bindings, ParseNode* body) {
+        return new_<LexicalScopeNode>(bindings, body);
     }
 
     ParseNode* newAssignment(ParseNodeKind kind, ParseNode* lhs, ParseNode* rhs,

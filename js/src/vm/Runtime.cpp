@@ -84,20 +84,19 @@ js::DisableExtraThreads()
 const JSSecurityCallbacks js::NullSecurityCallbacks = { };
 
 PerThreadData::PerThreadData(JSRuntime* runtime)
-  : PerThreadDataFriendFields(),
-    runtime_(runtime),
+  : PerThreadDataFriendFields()
+  , runtime_(runtime)
 #ifdef JS_TRACE_LOGGING
-    traceLogger(nullptr),
+  , traceLogger(nullptr)
 #endif
-    autoFlushICache_(nullptr),
-    dtoaState(nullptr),
-    suppressGC(0),
+  , autoFlushICache_(nullptr)
+  , dtoaState(nullptr)
+  , suppressGC(0)
 #ifdef DEBUG
-    ionCompiling(false),
-    ionCompilingSafeForMinorGC(false),
-    gcSweeping(false),
+  , ionCompiling(false)
+  , ionCompilingSafeForMinorGC(false)
+  , gcSweeping(false)
 #endif
-    activeCompilations(0)
 {}
 
 PerThreadData::~PerThreadData()
@@ -227,7 +226,6 @@ JSRuntime::JSRuntime(JSRuntime* parentRuntime)
     numGrouping(0),
 #endif
     mathCache_(nullptr),
-    activeCompilations_(0),
     keepAtoms_(0),
     trustedPrincipals_(nullptr),
     beingDestroyed_(false),

@@ -100,6 +100,8 @@ class InlineTable
     }
 
   public:
+    static const size_t SizeOfInlineEntries = sizeof(InlineEntry) * InlineEntries;
+
     explicit InlineTable(AllocPolicy a = AllocPolicy())
       : inlNext_(0),
         inlCount_(0),
@@ -483,10 +485,13 @@ class InlineMap
     Impl impl_;
 
   public:
+    using Table  = Map;
     using Ptr    = typename Impl::Ptr;
     using AddPtr = typename Impl::AddPtr;
     using Range  = typename Impl::Range;
     using Lookup = typename HashPolicy::Lookup;
+
+    static const size_t SizeOfInlineEntries = Impl::SizeOfInlineEntries;
 
     explicit InlineMap(AllocPolicy a = AllocPolicy())
       : impl_(a)
@@ -605,10 +610,13 @@ class InlineSet
     Impl impl_;
 
   public:
+    using Table  = Set;
     using Ptr    = typename Impl::Ptr;
     using AddPtr = typename Impl::AddPtr;
     using Range  = typename Impl::Range;
     using Lookup = typename HashPolicy::Lookup;
+
+    static const size_t SizeOfInlineEntries = Impl::SizeOfInlineEntries;
 
     explicit InlineSet(AllocPolicy a = AllocPolicy())
       : impl_(a)

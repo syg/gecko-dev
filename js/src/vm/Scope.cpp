@@ -30,6 +30,7 @@ js::BindingKindString(BindingKind kind)
       case BindingKind::Const:
         return "const";
     }
+    MOZ_CRASH("Bad BindingKind");
 }
 
 const char*
@@ -56,6 +57,7 @@ js::ScopeKindString(ScopeKind kind)
       case ScopeKind::Module:
         return "module";
     }
+    MOZ_CRASH("Bad ScopeKind");
 }
 
 static Shape*
@@ -77,7 +79,7 @@ NextEnvironmentShape(ExclusiveContext* cx, JSAtom* name, BindingKind bindKind, u
         return nullptr;
 
     unsigned attrs = JSPROP_PERMANENT | JSPROP_ENUMERATE |
-        bindKind == BindingKind::Const ? JSPROP_READONLY : 0;
+                     (bindKind == BindingKind::Const ? JSPROP_READONLY : 0);
     jsid id = NameToId(name->asPropertyName());
     Rooted<StackShape> child(cx, StackShape(base, id, slot, attrs, 0));
     return cx->compartment()->propertyTree.getChild(cx, shape, child);
@@ -357,6 +359,8 @@ ScopeIter::hasSyntacticEnvironment() const
       case ScopeKind::NonSyntactic:
         return false;
     }
+
+    MOZ_CRASH("Bad ScopeKind");
 }
 
 Shape*
@@ -453,6 +457,17 @@ js::ScopeChainLength(Scope* scope)
     uint32_t length = 0;
     for (ScopeIter si(scope); si; si++)
         length++;
+    return length;
+}
+
+uint32_t
+js::EnvironmentChainLength(Scope* scope)
+{
+    uint32_t length = 0;
+    for (ScopeIter si(scope); si; si++) {
+        if (si.hasSyntacticEnvironment())
+            length++;
+    }
     return length;
 }
 

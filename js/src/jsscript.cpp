@@ -2563,12 +2563,12 @@ JSScript::linkToModuleFromEmitter(js::ExclusiveContext* cx, JS::Handle<JSScript*
 }
 
 static void
-InitAtomMap(frontend::AtomIndexMap& indices, GCPtrAtom* atoms)
+InitAtomMap(frontend::AtomIndexMap* indices, GCPtrAtom* atoms)
 {
-    for (AtomIndexMap::Range r = indices.all(); !r.empty(); r.popFront()) {
+    for (AtomIndexMap::Range r = indices->all(); !r.empty(); r.popFront()) {
         JSAtom* atom = r.front().key();
-        jsatomid index = r.front().value();
-        MOZ_ASSERT(index < indices.count());
+        uint32_t index = r.front().value();
+        MOZ_ASSERT(index < indices->count());
         atoms[index].init(atom);
     }
 }
@@ -2577,7 +2577,7 @@ InitAtomMap(frontend::AtomIndexMap& indices, GCPtrAtom* atoms)
 JSScript::fullyInitFromEmitter(ExclusiveContext* cx, HandleScript script, BytecodeEmitter* bce)
 {
     /* The counts of indexed things must be checked during code generation. */
-    MOZ_ASSERT(bce->atomIndices.count() <= INDEX_LIMIT);
+    MOZ_ASSERT(bce->atomIndices->count() <= INDEX_LIMIT);
     MOZ_ASSERT(bce->objectList.length <= INDEX_LIMIT);
 
     uint32_t mainLength = bce->offset();
@@ -2585,7 +2585,7 @@ JSScript::fullyInitFromEmitter(ExclusiveContext* cx, HandleScript script, Byteco
     uint32_t nsrcnotes;
     if (!bce->finishTakingSrcNotes(&nsrcnotes))
         return false;
-    uint32_t natoms = bce->atomIndices.count();
+    uint32_t natoms = bce->atomIndices->count();
     if (!partiallyInit(cx, script,
                        bce->constList.length(), bce->objectList.length, bce->scopeList.length(),
                        bce->tryNoteList.length(), bce->scopeNoteList.length(),
