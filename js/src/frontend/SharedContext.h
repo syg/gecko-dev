@@ -474,11 +474,9 @@ class FunctionBox : public ObjectBox, public SharedContext
 
     // Names from the scope for parameter default expressions, if any.
     ParameterDefaultsScope::Data* defaultsScopeBindings;
-    FreeNameArray* defaultsScopeFreeNames;
 
     // Names from the 'var' scope of the function.
     FunctionScope::Data* funScopeBindings;
-    FreeNameArray* funScopeFreeNames;
 
     ParseNode*      functionNode;           /* back pointer used by asm.js for error messages */
     uint32_t        bufStart;

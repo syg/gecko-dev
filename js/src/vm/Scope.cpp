@@ -456,6 +456,17 @@ js::ScopeChainLength(Scope* scope)
     return length;
 }
 
+uint32_t
+js::EnvironmentChainLength(Scope* scope)
+{
+    uint32_t length = 0;
+    for (ScopeIter si(scope); si; si++) {
+        if (si.hasSyntacticEnvironment())
+            length++;
+    }
+    return length;
+}
+
 bool
 js::HasNonSyntacticScopeChain(Scope* scope)
 {

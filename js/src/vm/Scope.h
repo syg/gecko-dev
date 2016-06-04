@@ -810,6 +810,10 @@ class ScopeIter
 // Starting at scope, count the number of scopes.
 uint32_t ScopeChainLength(Scope* scope);
 
+// Starting at scope, count the number of scopes that have syntactic
+// environments.
+uint32_t EnvironmentChainLength(Scope* scope);
+
 // Starting at scope, is there a scope of kind ScopeKind::NonSyntactic?
 bool HasNonSyntacticScopeChain(Scope* scope);
 

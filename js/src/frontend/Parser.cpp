@@ -330,9 +330,7 @@ FunctionBox::FunctionBox(ExclusiveContext* cx, LifoAlloc& alloc, ObjectBox* trac
     SharedContext(cx, Kind::ObjectBox, directives, extraWarnings),
     declEnvBindings(nullptr),
     defaultsScopeBindings(nullptr),
-    defaultsScopeFreeNames(nullptr),
     funScopeBindings(nullptr),
-    funScopeFreeNames(nullptr),
     functionNode(nullptr),
     bufStart(0),
     bufEnd(0),
@@ -1324,35 +1322,6 @@ Parser<FullParseHandler>::newLexicalScopeData(ParseContext::Scope& scope)
 }
 
 template <>
-Maybe<FreeNameArray*>
-Parser<FullParseHandler>::newFreeNameArray(ParseContext::Scope& scope)
-{
-    uint32_t numFreeNames = 0;
-    for (FreeNameIter fni = scope.freeNames(pc); fni; fni++)
-        numFreeNames++;
-
-    FreeNameArray* freeNames = nullptr;
-    if (numFreeNames == 0)
-        return Some(freeNames);
-
-    size_t allocSize = sizeof(FreeNameArray) + (numFreeNames - 1) * sizeof(JSAtom*);
-    freeNames = static_cast<FreeNameArray*>(alloc.alloc(allocSize));
-    if (!freeNames) {
-        ReportOutOfMemory(context);
-        return Nothing();
-    }
-
-    FreeNameIter fni = scope.freeNames(pc);
-    for (uint32_t i = 0; i < numFreeNames; i++) {
-        freeNames->names[i] = fni.name();
-        fni++;
-    }
-
-    freeNames->length = numFreeNames;
-    return Some(freeNames);
-}
-
-template <>
 ParseNode*
 Parser<FullParseHandler>::finishLexicalScope(ParseContext::Scope& scope, ParseNode* body)
 {
@@ -1361,10 +1330,7 @@ Parser<FullParseHandler>::finishLexicalScope(ParseContext::Scope& scope, ParseNo
     Maybe<LexicalScope::Data*> bindings = newLexicalScopeData(scope);
     if (!bindings)
         return nullptr;
-    Maybe<FreeNameArray*> freeNames = newFreeNameArray(scope);
-    if (!freeNames)
-        return nullptr;
-    return handler.newLexicalScope(*bindings, *freeNames, body);
+    return handler.newLexicalScope(*bindings, body);
 }
 
 template <>
@@ -1530,6 +1496,20 @@ Parser<FullParseHandler>::finishFunction()
 
     FunctionBox* funbox = pc->functionBox();
 
+    {
+        Maybe<FunctionScope::Data*> bindings = newFunctionScopeData(pc->varScope());
+        if (!bindings)
+            return false;
+        funbox->funScopeBindings = *bindings;
+    }
+
+    if (funbox->hasDefaults()) {
+        Maybe<ParameterDefaultsScope::Data*> bindings = newDefaultsScopeData(pc->defaultsScope());
+        if (!bindings)
+            return false;
+        funbox->defaultsScopeBindings = *bindings;
+    }
+
     if (funbox->function()->isNamedLambda()) {
         Maybe<LexicalScope::Data*> bindings = newLexicalScopeData(pc->declEnvScope());
         if (!bindings)
@@ -1539,28 +1519,6 @@ Parser<FullParseHandler>::finishFunction()
         // We don't care about the free names of the named lambda scope; it's
         // the same as the set of free names in the defaults scope or the var
         // scope, depending on whether the function has defaults.
-    }
-
-    if (funbox->hasDefaults()) {
-        Maybe<ParameterDefaultsScope::Data*> bindings = newDefaultsScopeData(pc->defaultsScope());
-        if (!bindings)
-            return false;
-        funbox->defaultsScopeBindings = *bindings;
-        Maybe<FreeNameArray*> freeNames = newFreeNameArray(pc->defaultsScope());
-        if (!freeNames)
-            return false;
-        funbox->defaultsScopeFreeNames = *freeNames;
-    }
-
-    {
-        Maybe<FunctionScope::Data*> bindings = newFunctionScopeData(pc->varScope());
-        if (!bindings)
-            return false;
-        funbox->funScopeBindings = *bindings;
-        Maybe<FreeNameArray*> freeNames = newFreeNameArray(pc->varScope());
-        if (!freeNames)
-            return false;
-        funbox->funScopeFreeNames = *freeNames;
     }
 
     return true;

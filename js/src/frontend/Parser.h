@@ -1254,7 +1254,6 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     mozilla::Maybe<FunctionScope::Data*> newFunctionScopeData(ParseContext::Scope& scope);
     mozilla::Maybe<ParameterDefaultsScope::Data*> newDefaultsScopeData(ParseContext::Scope& scope);
     mozilla::Maybe<LexicalScope::Data*> newLexicalScopeData(ParseContext::Scope& scope);
-    mozilla::Maybe<FreeNameArray*> newFreeNameArray(ParseContext::Scope& scope);
     Node finishLexicalScope(ParseContext::Scope& scope, Node body);
 
     Node propertyName(YieldHandling yieldHandling, Node propList,
