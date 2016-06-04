@@ -229,11 +229,11 @@ class LexicalScope : public Scope
     }
 
     uint32_t nextFrameSlot() const {
-        return data_ ? data().nextFrameSlot : LOCALNO_LIMIT;
+        return data().nextFrameSlot;
     }
 
     Shape* environmentShape() const {
-        return data_ ? data().environmentShape : nullptr;
+        return data().environmentShape;
     }
 };
 
@@ -504,11 +504,11 @@ class EvalScope : public Scope
 
   public:
     uint32_t nextFrameSlot() const {
-        return data_ ? data().nextFrameSlot : LOCALNO_LIMIT;
+        return data().nextFrameSlot;
     }
 
     Shape* environmentShape() const {
-        return data_ ? data().environmentShape : nullptr;
+        return data().environmentShape;
     }
 
     bool strict() const {
