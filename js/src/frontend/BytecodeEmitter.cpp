@@ -135,12 +135,41 @@ class BytecodeEmitter::NestableControl : public Nestable<BytecodeEmitter::Nestab
     }
 };
 
+// Template specializations are disallowed in different namespaces; specialize
+// all the NestableControl subtypes up front.
+namespace js {
+namespace frontend {
+
 template <>
 bool
 BytecodeEmitter::NestableControl::is<BreakableControl>() const
 {
     return StatementKindIsUnlabeledBreakTarget(kind_) || kind_ == StatementKind::Label;
 }
+
+template <>
+bool
+BytecodeEmitter::NestableControl::is<LabelControl>() const
+{
+    return kind_ == StatementKind::Label;
+}
+
+template <>
+bool
+BytecodeEmitter::NestableControl::is<LoopControl>() const
+{
+    return StatementKindIsLoop(kind_);
+}
+
+template <>
+bool
+BytecodeEmitter::NestableControl::is<TryFinallyControl>() const
+{
+    return kind_ == StatementKind::Try || kind_ == StatementKind::Finally;
+}
+
+} // namespace frontend
+} // namespace js
 
 class BreakableControl : public BytecodeEmitter::NestableControl
 {
@@ -167,13 +196,6 @@ class BreakableControl : public BytecodeEmitter::NestableControl
     }
 };
 
-template <>
-bool
-BytecodeEmitter::NestableControl::is<LabelControl>() const
-{
-    return kind_ == StatementKind::Label;
-}
-
 class LabelControl : public BreakableControl
 {
     RootedAtom label_;
@@ -196,13 +218,6 @@ class LabelControl : public BreakableControl
         return startOffset_;
     }
 };
-
-template <>
-bool
-BytecodeEmitter::NestableControl::is<LoopControl>() const
-{
-    return StatementKindIsLoop(kind_);
-}
 
 class LoopControl : public BreakableControl
 {
@@ -273,13 +288,6 @@ class LoopControl : public BreakableControl
         return true;
     }
 };
-
-template <>
-bool
-BytecodeEmitter::NestableControl::is<TryFinallyControl>() const
-{
-    return kind_ == StatementKind::Try || kind_ == StatementKind::Finally;
-}
 
 class TryFinallyControl : public BytecodeEmitter::NestableControl
 {
@@ -438,7 +446,7 @@ class BytecodeEmitter::NameLocation
     }
 
     bool nextHopFits() const {
-        return hops_ + 1 < SCOPECOORD_HOPS_LIMIT;
+        return hops_ < SCOPECOORD_HOPS_LIMIT - 1;
     }
 
     NameLocation nextHop() {
