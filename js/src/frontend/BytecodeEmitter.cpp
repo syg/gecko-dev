@@ -575,10 +575,8 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
 
     MOZ_MUST_USE bool checkEnvironmentDepth(BytecodeEmitter* bce) {
         uint32_t hops;
-        if (enclosing())
-            hops = enclosing()->data().environmentDepth;
-        else if (bce->parent)
-            hops = bce->parent->innermostEmitterScope->data().environmentDepth;
+        if (EmitterScope* emitterScope = enclosing(&bce))
+            hops = emitterScope->data().environmentDepth;
         else
             hops = EnvironmentChainLength(bce->sc->compilationEnclosingScope());
         if (hops > SCOPECOORD_HOPS_LIMIT - 1)
@@ -598,30 +596,48 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
         return true;
     }
 
-    bool lookupInCache(JSAtom* name, NameLocation* loc) {
-        if (data().shortCircuitFreeNameLocation) {
-            *loc = *data().shortCircuitFreeNameLocation;
-            return true;
-        }
-        if (NameLocationCache::Ptr p = data().nameCache.lookup(name)) {
-            *loc = p->value();
-            return true;
-        }
-        return false;
+    Maybe<NameLocation> lookupInCache(JSAtom* name) {
+        if (data().shortCircuitFreeNameLocation)
+            return data().shortCircuitFreeNameLocation;
+        if (NameLocationCache::Ptr p = data().nameCache.lookup(name))
+            return Some(p->value());
+        return Nothing();
     }
 
-    NameLocation search(BytecodeEmitter* bce, JSAtom* name);
+    EmitterScope* enclosing(BytecodeEmitter** bce) const {
+        // There is an enclosing intra-script scope.
+        if (enclosingInScript())
+            return enclosingInScript();
+
+        // We are currently compiling the enclosing script, look in the
+        // enclosing BCE.
+        if ((*bce)->parent) {
+            *bce = (*bce)->parent;
+            return (*bce)->innermostEmitterScope;
+        }
+
+        return nullptr;
+    }
+
+    Scope* enclosingScope(BytecodeEmitter* bce) const {
+        if (EmitterScope* es = enclosing(&bce))
+            return es->scope(bce);
+
+        // The enclosing script is already compiled or the current script is the
+        // global script.
+        return bce->sc->compilationEnclosingScope();
+    }
+
+    NameLocation searchInEnclosingScope(JSAtom* name, Scope* scope, uint8_t hops);
+    NameLocation searchAndCache(BytecodeEmitter* bce, JSAtom* name);
 
     // Insert a VM Scope into the BCE scope vector and return the scope *note*
     // index.
     template <typename ScopeCreator>
     MOZ_MUST_USE bool internScope(BytecodeEmitter* bce, ScopeCreator createScope);
     MOZ_MUST_USE bool appendScopeNote(BytecodeEmitter* bce);
-    Scope* enclosingScope(BytecodeEmitter* bce);
 
   public:
-    using Nestable<EmitterScope>::enclosing;
-
     EmitterScope(BytecodeEmitter* bce)
       : Nestable<EmitterScope>(&bce->innermostEmitterScope),
         data_(nullptr)
@@ -655,7 +671,7 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
 
     // The first frame slot used.
     uint32_t frameSlotStart() const {
-        return enclosing() ? enclosing()->data().nextFrameSlot : 0;
+        return enclosingInScript() ? enclosingInScript()->data().nextFrameSlot : 0;
     }
 
     // The last frame slot used + 1.
@@ -667,11 +683,15 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
         return frameSlotEnd() - frameSlotStart();
     }
 
+    EmitterScope* enclosingInScript() const {
+        return Nestable<EmitterScope>::enclosing();
+    }
+
     NameLocation lookup(BytecodeEmitter* bce, JSAtom* name) {
-        NameLocation loc;
-        if (lookupInCache(name, &loc))
-            return loc;
-        return search(bce, name);
+        Maybe<NameLocation> loc = lookupInCache(name);
+        if (loc)
+            return *loc;
+        return searchAndCache(bce, name);
     }
 
     static size_t sizeOfData() {
@@ -741,69 +761,17 @@ BytecodeEmitter::EmitterScope::internScope(BytecodeEmitter* bce, ScopeCreator cr
 bool
 BytecodeEmitter::EmitterScope::appendScopeNote(BytecodeEmitter* bce)
 {
-    MOZ_ASSERT(enclosing(), "Scope notes are not needed for body-level scopes.");
+    MOZ_ASSERT(enclosingInScript(), "Scope notes are not needed for body-level scopes.");
     data().noteIndex = bce->scopeNoteList.length();
     return bce->scopeNoteList.append(index(), bce->offset(), bce->inPrologue(),
-                                     enclosing()->noteIndex());
-}
-
-Scope*
-BytecodeEmitter::EmitterScope::enclosingScope(BytecodeEmitter* bce)
-{
-    // There is an enclosing intra-script scope.
-    if (enclosing())
-        return enclosing()->scope(bce);
-
-    // We are currently compiling the enclosing script.
-    if (bce->parent)
-        return bce->parent->innermostScope();
-
-    // The enclosing script is already compiled or the current script is the
-    // global script.
-    return bce->sc->compilationEnclosingScope();
+                                     enclosingInScript()->noteIndex());
 }
 
 NameLocation
-BytecodeEmitter::EmitterScope::search(BytecodeEmitter* bce, JSAtom* name)
+BytecodeEmitter::EmitterScope::searchInEnclosingScope(JSAtom* name, Scope* scope, uint8_t hops)
 {
-    NameLocation loc;
-    uint8_t hops = 0;
-
-    EmitterScope* emitterScope = this;
-    DebugOnly<bool> inCurrentScript = true;
-
-    // Start searching in the current compilation.
-    while (emitterScope) {
-        if (emitterScope->data().hasEnvironment)
-            hops++;
-
-        if (emitterScope->lookupInCache(name, &loc)) {
-            // Each script has its own frame. A free name that is accessed
-            // from an inner script must not be a frame slot access. If this
-            // assertion is hit, it is a bug in the free name analysis in the
-            // parser.
-            MOZ_ASSERT_IF(!inCurrentScript, loc.kind() != NameLocation::Kind::FrameSlot);
-            if (loc.kind() == NameLocation::Kind::EnvironmentCoordinate)
-                loc = loc.addHops(hops);
-            return loc;
-        }
-
-        // There's an enclosing intra-script scope, continue searching.
-        emitterScope = emitterScope->enclosing();
-
-        // There's an enclosing script we are current compiling.
-        if (!emitterScope && bce->parent) {
-            bce = bce->parent;
-            emitterScope = bce->innermostEmitterScope;
-            inCurrentScript = false;
-        }
-    }
-
-    // If the name is not found in the current compilation, walk the Scope
-    // chain encompassing the compilation.
-    for (ScopeIter si(bce->sc->compilationEnclosingScope()); si; si++) {
+    for (ScopeIter si(scope); si; si++) {
         bool hasEnv = si.hasSyntacticEnvironment();
-        bool nameFound = false;
 
         if (hasEnv) {
             MOZ_ASSERT(hops < SCOPECOORD_HOPS_LIMIT - 1);
@@ -826,40 +794,74 @@ BytecodeEmitter::EmitterScope::search(BytecodeEmitter* bce, JSAtom* name)
                     // the name analysis.
                     BindingLocation bindLoc = bi.location();
                     MOZ_ASSERT(bindLoc.kind() == BindingLocation::Kind::Environment);
-                    loc = NameLocation::EnvironmentCoordinate(bi.kind(), hops, bindLoc.slot());
-                    nameFound = true;
+                    return NameLocation::EnvironmentCoordinate(bi.kind(), hops, bindLoc.slot());
                 }
             }
 
             // Don't try to look for names past an eval boundary.
             if (si.kind() == ScopeKind::StrictEval)
-                nameFound = true;
+                return NameLocation::Dynamic();
 
             break;
 
           case ScopeKind::Global:
-            loc = NameLocation::Global(BindingKind::Var);
-            nameFound = true;
-            break;
+            return NameLocation::Global(BindingKind::Var);
 
           case ScopeKind::With:
           case ScopeKind::Module:
           case ScopeKind::Eval:
           case ScopeKind::NonSyntactic:
-            // Leave access as dynamic.
-            nameFound = true;
+            return NameLocation::Dynamic();
+        }
+    }
+
+    MOZ_CRASH("Malformed scope chain");
+}
+
+NameLocation
+BytecodeEmitter::EmitterScope::searchAndCache(BytecodeEmitter* bce, JSAtom* name)
+{
+    Maybe<NameLocation> loc;
+    uint8_t hops = data().hasEnvironment ? 1 : 0;
+    DebugOnly<bool> inCurrentScript = true;
+
+    // Start searching in the current compilation.
+    for (EmitterScope* es = enclosing(&bce); es; es = es->enclosing(&bce)) {
+        loc = es->lookupInCache(name);
+        if (loc) {
+            if (loc->kind() == NameLocation::Kind::EnvironmentCoordinate)
+                *loc = loc->addHops(hops);
             break;
         }
 
-        if (nameFound)
-            break;
+        if (es->data().hasEnvironment)
+            hops++;
+
+#ifdef DEBUG
+        if (!es->enclosingInScript())
+            inCurrentScript = false;
+#endif
     }
 
-    // A name that is found beyond the current compilation cannot be on the
-    // frame.
-    MOZ_ASSERT(loc.kind() != NameLocation::Kind::FrameSlot);
+    // If the name is not found in the current compilation, walk the Scope
+    // chain encompassing the compilation.
+    if (!loc) {
+        inCurrentScript = false;
+        loc = Some(searchInEnclosingScope(name, bce->sc->compilationEnclosingScope(), hops));
+    }
 
-    return loc;
+    // Each script has its own frame. A free name that is accessed
+    // from an inner script must not be a frame slot access. If this
+    // assertion is hit, it is a bug in the free name analysis in the
+    // parser.
+    MOZ_ASSERT_IF(!inCurrentScript, loc->kind() != NameLocation::Kind::FrameSlot);
+
+    // It is always correct to not cache the location. Ignore OOMs to make
+    // lookups infallible.
+    if (!putNameInCache(bce, name, *loc))
+        bce->cx->recoverFromOutOfMemory();
+
+    return *loc;
 }
 
 bool
@@ -872,7 +874,7 @@ BytecodeEmitter::EmitterScope::enterLexical(BytecodeEmitter* bce, ScopeKind kind
         return false;
 
     // Resolve bindings.
-    uint32_t firstFrameSlot = enclosing() ? enclosing()->data().nextFrameSlot : 0;
+    uint32_t firstFrameSlot = enclosingInScript() ? enclosingInScript()->data().nextFrameSlot : 0;
     BindingIter bi(*bindings, firstFrameSlot);
     for (; bi; bi++) {
         if (!checkSlotLimits(bce, bi))
@@ -1883,7 +1885,7 @@ NonLocalExitControl::prepareForNonLocalJump(BytecodeEmitter::NestableControl* ta
     // that manipulates the stack.
     for (EmitterScope* es = bce_->innermostEmitterScope;
          es != (target ? target->emitterScope() : nullptr);
-         es = es->enclosing())
+         es = es->enclosingInScript())
     {
         if (!es->leave(bce_, /* nonLocal = */ true))
             return false;
@@ -1892,8 +1894,8 @@ NonLocalExitControl::prepareForNonLocalJump(BytecodeEmitter::NestableControl* ta
         // record the extent of the enclosing scope. These notes will have
         // their ends recorded in ~NonLocalExitContrl().
         uint32_t enclosingNoteIndex = ScopeNote::NoScopeIndex;
-        if (es->enclosing())
-            enclosingNoteIndex = es->enclosing()->noteIndex();
+        if (es->enclosingInScript())
+            enclosingNoteIndex = es->enclosingInScript()->noteIndex();
         if (!bce_->scopeNoteList.append(enclosingNoteIndex, bce_->offset(), bce_->inPrologue(),
                                         openScopeNoteIndex_))
             return false;
@@ -2581,7 +2583,7 @@ BytecodeEmitter::needsImplicitThis()
         return true;
 
     // Otherwise see if the current point is under a 'with'.
-    for (EmitterScope* es = innermostEmitterScope; es; es = es->enclosing()) {
+    for (EmitterScope* es = innermostEmitterScope; es; es = es->enclosingInScript()) {
         if (es->scope(this)->kind() == ScopeKind::With)
             return true;
     }

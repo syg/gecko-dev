@@ -378,9 +378,6 @@ elapsed_ns(struct timespec *start, struct timespec *end)
 JSScript*
 BytecodeCompiler::compileScript(HandleObject environment, SharedContext* sc)
 {
-    timespec start, end;
-    clock_gettime(CLOCK_MONOTONIC, &start);
-
     if (!createSourceAndParser())
         return nullptr;
 
@@ -435,9 +432,6 @@ BytecodeCompiler::compileScript(HandleObject environment, SharedContext* sc)
         return nullptr;
 
     MOZ_ASSERT_IF(cx->isJSContext(), !cx->asJSContext()->isExceptionPending());
-
-    clock_gettime(CLOCK_MONOTONIC, &end);
-    fprintf(stdout, "%ld ns\n", elapsed_ns(&start, &end));
 
     return script;
 }
@@ -635,12 +629,26 @@ frontend::CompileGlobalScript(ExclusiveContext* cx, LifoAlloc* alloc, ScopeKind 
                               SourceCompressionTask* extraSct,
                               ScriptSourceObject** sourceObjectOut)
 {
-    MOZ_ASSERT(scopeKind == ScopeKind::Global || scopeKind == ScopeKind::NonSyntactic);
-    BytecodeCompiler compiler(cx, alloc, options, srcBuf, /* enclosingScope = */ nullptr,
-                              TraceLogger_ParserCompileScript);
-    AutoInitializeSourceObject autoSSO(compiler, sourceObjectOut);
-    compiler.maybeSetSourceCompressor(extraSct);
-    return compiler.compileGlobalScript(scopeKind);
+    timespec start, end;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+
+    JSScript* script;
+    for (uint32_t i = 0; i < 50; i++) {
+        MOZ_ASSERT(scopeKind == ScopeKind::Global || scopeKind == ScopeKind::NonSyntactic);
+        BytecodeCompiler compiler(cx, alloc, options, srcBuf, /* enclosingScope = */ nullptr,
+                                  TraceLogger_ParserCompileScript);
+        AutoInitializeSourceObject autoSSO(compiler, sourceObjectOut);
+        compiler.maybeSetSourceCompressor(extraSct);
+        script = compiler.compileGlobalScript(scopeKind);
+        if (!script)
+            return nullptr;
+    }
+
+    clock_gettime(CLOCK_MONOTONIC, &end);
+
+    fprintf(stdout, "%ld ns avg\n", elapsed_ns(&start, &end) / 50);
+
+    return script;
 }
 
 JSScript*

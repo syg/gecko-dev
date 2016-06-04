@@ -598,7 +598,7 @@ class BindingIter
             init(scope->as<GlobalScope>().data());
             break;
           default:
-            MOZ_CRASH("Scope cannot have bindings.");
+            MOZ_CRASH("Scope cannot have bindings");
         }
     }
 
