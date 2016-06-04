@@ -902,6 +902,7 @@ BytecodeEmitter::EmitterScope::enterLexical(BytecodeEmitter* bce, ScopeKind kind
 bool
 BytecodeEmitter::EmitterScope::enterDeclEnv(BytecodeEmitter* bce, FunctionBox* funbox)
 {
+    MOZ_ASSERT(this == bce->innermostEmitterScope);
     MOZ_ASSERT(funbox->declEnvBindings);
 
     if (!ensureData(bce))
@@ -936,6 +937,34 @@ BytecodeEmitter::EmitterScope::enterDeclEnv(BytecodeEmitter* bce, FunctionBox* f
         return LexicalScope::create(cx, ScopeKind::Lexical, funbox->declEnvBindings, 0, enclosing);
     };
     return internScope(bce, createDeclEnvScope);
+}
+
+bool
+BytecodeEmitter::EmitterScope::enterParameterDefaults(BytecodeEmitter* bce, FunctionBox* funbox)
+{
+    MOZ_ASSERT(this == bce->innermostEmitterScope);
+    MOZ_ASSERT(funbox->defaultsScopeBindings);
+
+    if (!ensureData(bce))
+        return false;
+
+    ParameterDefaultsScope::Data* bindings = funbox->defaultsScopeBindings;
+    for (BindingIter bi(*bindings); bi; bi++) {
+        // If there are defaults, duplicate formal parameters are not allowed,
+        // so no need to check for duplicates.
+        MOZ_ASSERT(bi.kind() == BindingKind::FormalParameter);
+        NameLocation loc = NameLocation::fromBinding(bi.kind(), bi.location());
+        if (!putNameInCache(bce, bi.name(), loc))
+            return false;
+    }
+
+    if (!resolveFreeNames(bce, funbox->defaultsScopeFreeNames))
+        return false;
+
+    auto createDefaultsScope = [=](ExclusiveContext* cx, Scope* enclosing) {
+        return ParameterDefaultsScope::create(cx, bindings, enclosing);
+    };
+    return internScope(bce, createDefaultsScope);
 }
 
 bool
@@ -997,6 +1026,14 @@ BytecodeEmitter::EmitterScope::enterFunctionBody(BytecodeEmitter* bce, FunctionB
     };
     return internScope(bce, createFunctionScope);
 }
+
+class TemporarilyPopEmitterScope : public TemporarilyPopNestable<BytecodeEmitter::EmitterScope>
+{
+  public:
+    explicit TemporarilyPopEmitterScope(BytecodeEmitter* bce)
+      : TemporarilyPopNestable<BytecodeEmitter::EmitterScope>(&bce->innermostEmitterScope)
+    { }
+};
 
 class PrologueBindingIter : public BindingIter
 {
@@ -1296,7 +1333,6 @@ BytecodeEmitter::BytecodeEmitter(BytecodeEmitter* parent,
     hasTryFinally(false),
     emittingForInit(false),
     emittingRunOnceLambda(false),
-    insideModule(false),
     emitterMode(emitterMode),
     functionBodyEndPosSet(false)
 {
@@ -3758,16 +3794,6 @@ BytecodeEmitter::emitSetThis(ParseNode* pn)
     return emitSetName(nameNode, emitRhs);
 }
 
-static bool
-IsModuleOnScopeChain(Scope* scope)
-{
-    for (ScopeIter si(scope); si; si++) {
-        if (si.kind() == ScopeKind::Module)
-            return true;
-    }
-    return false;
-}
-
 bool
 BytecodeEmitter::emitScript(ParseNode* body)
 {
@@ -3800,9 +3826,8 @@ BytecodeEmitter::emitScript(ParseNode* body)
 bool
 BytecodeEmitter::emitFunctionScript(ParseNode* body)
 {
-    TDZCheckCache tdzCache(this);
-
     FunctionBox* funbox = sc->asFunctionBox();
+    TDZCheckCache tdzCache(this);
 
     // The ordering of these EmitterScopes is important. The decl env scope
     // needs to enclose the defaults scope needs to enclose the function
@@ -3816,9 +3841,13 @@ BytecodeEmitter::emitFunctionScript(ParseNode* body)
     }
 
     Maybe<EmitterScope> defaultsEmitterScope;
-    EmitterScope bodyEmitterScope(this);
+    if (funbox->defaultsScopeBindings) {
+        defaultsEmitterScope.emplace(this);
+        if (!defaultsEmitterScope->enterParameterDefaults(this, funbox))
+            return false;
+    }
 
-    // TODOshu defaults scope bindings
+    EmitterScope bodyEmitterScope(this);
     if (!bodyEmitterScope.enterFunctionBody(this, funbox))
         return false;
 
@@ -3834,9 +3863,6 @@ BytecodeEmitter::emitFunctionScript(ParseNode* body)
     // Link the function and the script to each other, so that StaticScopeIter
     // may walk the scope chain of currently compiling scripts.
     JSScript::linkToFunctionFromEmitter(cx, script, funbox);
-
-    // Determine whether the function is defined inside a module.
-    insideModule = IsModuleOnScopeChain(innermostScope());
 
     if (funbox->argumentsHasLocalBinding()) {
         MOZ_ASSERT(offset() == 0);  /* See JSScript::argumentsBytecode. */
@@ -3928,6 +3954,9 @@ BytecodeEmitter::emitFunctionScript(ParseNode* body)
         MOZ_ASSERT(!script->hasRunOnce());
     }
 
+    // The decl env and defaults scopes are neither intra-script scopes that
+    // need scope notes nor have any frame slots, so omit calling
+    // EmitterScope::leave on them.
     if (!bodyEmitterScope.leave(this))
         return false;
 
@@ -3939,8 +3968,6 @@ BytecodeEmitter::emitFunctionScript(ParseNode* body)
 bool
 BytecodeEmitter::emitModuleScript(ParseNode* body)
 {
-    insideModule = true;
-
     /*
      * IonBuilder has assumptions about what may occur immediately after
      * script->main (e.g., in the case of destructuring params). Thus, put the
@@ -8096,10 +8123,11 @@ BytecodeEmitter::emitTypeof(ParseNode* node, JSOp op)
 bool
 BytecodeEmitter::emitFunctionFormalParametersAndBody(ParseNode *pn)
 {
-    RootedFunction fun(cx, sc->asFunctionBox()->function());
+    FunctionBox* funbox = sc->asFunctionBox();
+    RootedFunction fun(cx, funbox->function());
     ParseNode* pnlast = pn->last();
 
-    bool hasDefaults = sc->asFunctionBox()->hasDefaults();
+    bool hasDefaults = funbox->hasDefaults();
     ParseNode* rest = nullptr;
     if (fun->hasRest() && hasDefaults) {
         // Defaults with a rest parameter need special handling. The
@@ -8151,29 +8179,29 @@ BytecodeEmitter::emitDefaultsAndDestructuring(ParseNode* pn)
     MOZ_ASSERT(pn->isKind(PNK_PARAMSBODY));
 
     ParseNode* pnlast = pn->last();
-    for (ParseNode* arg = pn->pn_head; arg != pnlast; arg = arg->pn_next) {
-        MOZ_ASSERT(arg->isKind(PNK_NAME) || arg->isKind(PNK_ASSIGN));
-        ParseNode* argName = nullptr;
-        ParseNode* defNode = nullptr;
-        ParseNode* destruct = nullptr;
+    uint16_t argSlot = 0;
+    for (ParseNode* arg = pn->pn_head; arg != pnlast; arg = arg->pn_next, argSlot++) {
+        ParseNode* bindingElement = arg;
+        ParseNode* initializer = nullptr;
         if (arg->isKind(PNK_ASSIGN)) {
-            argName = arg->pn_left;
-            defNode = arg->pn_right;
-        } else if (arg->pn_atom == cx->names().empty) {
-            argName = arg;
-            destruct = arg->expr();
-            MOZ_ASSERT(destruct);
-            if (destruct->isKind(PNK_ASSIGN)) {
-                defNode = destruct->pn_right;
-                destruct = destruct->pn_left;
-            }
+            bindingElement = arg->pn_left;
+            initializer = arg->pn_right;
         }
-        if (defNode) {
-            // TODOshu
-            /*
-            if (!bindNameToSlot(argName))
-                return false;
-            if (!emitVarOp(argName, JSOP_GETARG))
+
+        // Left-hand sides are either simple names, destructuring patterns, or
+        // assignments.
+        MOZ_ASSERT(bindingElement->isKind(PNK_NAME) ||
+                   bindingElement->isKind(PNK_ARRAY) ||
+                   bindingElement->isKind(PNK_ARRAYCOMP) ||
+                   bindingElement->isKind(PNK_OBJECT));
+
+        if (initializer) {
+            // The initializer is scoped to the default expression scope,
+            // which encloses the function body scope. Pop the body scope
+            // while emitting the initializer.
+            TemporarilyPopEmitterScope popBodyScope(this);
+
+            if (!emitArgOp(JSOP_GETARG, argSlot))
                 return false;
             if (!emit1(JSOP_UNDEFINED))
                 return false;
@@ -8185,20 +8213,20 @@ BytecodeEmitter::emitDefaultsAndDestructuring(ParseNode* pn)
             JumpList jump;
             if (!emitJump(JSOP_IFEQ, &jump))
                 return false;
-            if (!emitTree(defNode))
+            if (!emitTree(initializer))
                 return false;
-            if (!emitVarOp(argName, JSOP_SETARG))
+            if (!emitArgOp(JSOP_SETARG, argSlot))
                 return false;
             if (!emit1(JSOP_POP))
                 return false;
             if (!emitJumpTargetAndPatch(jump))
                 return false;
-            */
         }
-        if (destruct) {
-            if (!emitTree(argName))
+
+        if (!bindingElement->isKind(PNK_NAME)) {
+            if (!emitArgOp(JSOP_GETARG, argSlot))
                 return false;
-            if (!emitDestructuringOps(destruct))
+            if (!emitDestructuringOps(bindingElement))
                  return false;
             if (!emit1(JSOP_POP))
                 return false;

@@ -406,26 +406,12 @@ class ParseContext : public Nestable<ParseContext>
         }
     };
 
-    // Temporarily pop the Scope stack; the innermost scope must have an
-    // enclosing Scope.
-    class MOZ_STACK_CLASS TemporarilyPopScope
+    class TemporarilyPopScope : public TemporarilyPopNestable<Scope>
     {
-        Scope** stack_;
-        Scope*  oldInnermost_;
-
       public:
         explicit TemporarilyPopScope(ParseContext* pc)
-          : stack_(&pc->innermostScope_),
-            oldInnermost_(*stack_)
-        {
-            MOZ_ASSERT(oldInnermost_->enclosing());
-            *stack_ = oldInnermost_->enclosing();
-        }
-
-        ~TemporarilyPopScope() {
-            MOZ_ASSERT(*stack_ == oldInnermost_->enclosing());
-            *stack_ = oldInnermost_;
-        }
+          : TemporarilyPopNestable<Scope>(&pc->innermostScope_)
+        { }
     };
 
   private:

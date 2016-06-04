@@ -811,7 +811,13 @@ Parser<ParseHandler>::noteSimpleFormalParameter(Node fn, HandlePropertyName name
 
         if (duplicatedParam)
             *duplicatedParam = true;
+    } else {
+        if (!pc->varScope().addDeclaredName(pc, p, name, DeclarationKind::SimpleFormalParameter))
+            return false;
     }
+
+    if (!pc->simpleFormalParameterNames.append(name))
+        return false;
 
     Node paramNode = newName(name);
     if (!paramNode)
@@ -821,12 +827,6 @@ Parser<ParseHandler>::noteSimpleFormalParameter(Node fn, HandlePropertyName name
         return false;
 
     handler.addFunctionFormalParameter(fn, paramNode);
-
-    if (!pc->simpleFormalParameterNames.append(name))
-        return false;
-
-    if (!p && !pc->varScope().addDeclaredName(pc, p, name, DeclarationKind::SimpleFormalParameter))
-        return false;
 
     return true;
 }
@@ -843,7 +843,9 @@ Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind 
     if (!checkStrictBinding(name, node))
         return false;
 
-    if (kind == DeclarationKind::Var || kind == DeclarationKind::BodyLevelFunction) {
+    switch (kind) {
+      case DeclarationKind::Var:
+      case DeclarationKind::BodyLevelFunction:
         // It is an early error if a 'var' declaration appears inside a
         // scope contour that has a lexical declaration of the same name. For
         // example, the following are early errors:
@@ -871,7 +873,26 @@ Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind 
                     return false;
             }
         }
-    } else {
+
+        break;
+
+      case DeclarationKind::FormalParameter: {
+        // It is an early error if any non-simple formal parameter name (i.e.,
+        // destructuring formal parameter) is duplicated.
+
+        AddDeclaredNamePtr p = pc->varScope().lookupDeclaredNameForAdd(name);
+        if (p) {
+            report(ParseError, false, null(), JSMSG_BAD_DUP_ARGS);
+            return false;
+        }
+
+        if (!pc->varScope().addDeclaredName(pc, p, name, kind))
+            return false;
+
+        break;
+      }
+
+      default: {
         // It is an early error if there is another declaration with the same name
         // in the same scope.
 
@@ -894,6 +915,9 @@ Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind 
 
         if (!scope->addDeclaredName(pc, p, name, kind))
             return false;
+
+        break;
+      }
     }
 
     return true;
@@ -1518,7 +1542,7 @@ Parser<FullParseHandler>::finishFunction()
     }
 
     if (funbox->hasDefaults()) {
-        Maybe<LexicalScope::Data*> bindings = newLexicalScopeData(pc->defaultsScope());
+        Maybe<ParameterDefaultsScope::Data*> bindings = newDefaultsScopeData(pc->defaultsScope());
         if (!bindings)
             return false;
         funbox->defaultsScopeBindings = *bindings;
@@ -2065,18 +2089,7 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
                 if (!destruct)
                     return false;
 
-                /*
-                 * Make a single anonymous positional parameter, and store
-                 * destructuring expression into the node.
-                 */
-                HandlePropertyName name = context->names().empty;
-                Node arg = newName(name);
-                if (!arg)
-                    return false;
-
-                handler.addFunctionFormalParameter(funcpn, arg);
-
-                handler.setLastFunctionFormalParameterDestructuring(funcpn, destruct);
+                handler.addFunctionFormalParameter(funcpn, destruct);
                 break;
               }
 

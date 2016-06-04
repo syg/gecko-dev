@@ -318,7 +318,6 @@ class SyntaxParseHandler
                                     Node catchGuard, Node catchBody) { return true; }
 
     MOZ_MUST_USE bool setLastFunctionFormalParameterDefault(Node funcpn, Node pn) { return true; }
-    void setLastFunctionFormalParameterDestructuring(Node funcpn, Node pn) {}
     Node newFunctionDefinition() { return NodeFunctionDefinition; }
     void setFunctionFormalParametersAndBody(Node pn, Node kid) {}
     void setFunctionBody(Node pn, Node kid) {}

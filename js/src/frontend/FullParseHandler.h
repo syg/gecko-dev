@@ -53,7 +53,7 @@ class FullParseHandler
         return tokenStream.currentToken().pos;
     }
 
-    inline ParseNode* makeAssignmentFromArg(ParseNode* arg, ParseNode* lhs, ParseNode* rhs);
+    inline ParseNode* makeAssignmentFromArg(ParseNode* lhs, ParseNode* rhs);
     inline void replaceLastFunctionFormalParameter(ParseNode* funcpn, ParseNode* pn);
 
   public:
@@ -893,7 +893,7 @@ FullParseHandler::addCatchBlock(ParseNode* catchList, ParseNode* lexicalScope,
 }
 
 inline ParseNode*
-FullParseHandler::makeAssignmentFromArg(ParseNode* arg, ParseNode* lhs, ParseNode* rhs)
+FullParseHandler::makeAssignmentFromArg(ParseNode* lhs, ParseNode* rhs)
 {
     return newBinary(PNK_ASSIGN, lhs, rhs, JSOP_NOP);
 }
@@ -921,26 +921,11 @@ inline bool
 FullParseHandler::setLastFunctionFormalParameterDefault(ParseNode* funcpn, ParseNode* defaultValue)
 {
     ParseNode* arg = funcpn->pn_body->last();
-    MOZ_ASSERT(arg->isKind(PNK_NAME));
-    ParseNode* lhs = arg->pn_expr ? arg->pn_expr : arg;
-    ParseNode* pn = makeAssignmentFromArg(arg, lhs, defaultValue);
+    ParseNode* pn = makeAssignmentFromArg(arg, defaultValue);
     if (!pn)
         return false;
-
-    if (arg->pn_expr)
-        arg->pn_expr = pn;
-    else
-        replaceLastFunctionFormalParameter(funcpn, pn);
+    replaceLastFunctionFormalParameter(funcpn, pn);
     return true;
-}
-
-inline void
-FullParseHandler::setLastFunctionFormalParameterDestructuring(ParseNode* funcpn,
-                                                              ParseNode* destruct)
-{
-    ParseNode* arg = funcpn->pn_body->last();
-    MOZ_ASSERT(arg->isKind(PNK_NAME));
-    arg->pn_expr = destruct;
 }
 
 inline bool

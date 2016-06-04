@@ -259,8 +259,6 @@ struct MOZ_STACK_CLASS BytecodeEmitter
 
     bool isRunOnceLambda();
 
-    bool            insideModule:1;     /* True if compiling inside a module. */
-
     enum EmitterMode {
         Normal,
 

@@ -109,6 +109,28 @@ class MOZ_STACK_CLASS Nestable
     }
 };
 
+// Scoped pop the top of the nestable stack.
+template <typename Concrete>
+class TemporarilyPopNestable
+{
+    Concrete** stack_;
+    Concrete*  oldInnermost_;
+
+  public:
+    explicit TemporarilyPopNestable(Concrete** stack)
+      : stack_(stack),
+        oldInnermost_(*stack)
+    {
+        MOZ_ASSERT(oldInnermost_->enclosing());
+        *stack_ = oldInnermost_->enclosing();
+    }
+
+    ~TemporarilyPopNestable() {
+        MOZ_ASSERT(*stack_ == oldInnermost_->enclosing());
+        *stack_ = oldInnermost_;
+    }
+};
+
 // These flags apply to both global and function contexts.
 class AnyContextFlags
 {
@@ -451,7 +473,7 @@ class FunctionBox : public ObjectBox, public SharedContext
     LexicalScope::Data* declEnvBindings;
 
     // Names from the scope for parameter default expressions, if any.
-    LexicalScope::Data* defaultsScopeBindings;
+    ParameterDefaultsScope::Data* defaultsScopeBindings;
     FreeNameArray* defaultsScopeFreeNames;
 
     // Names from the 'var' scope of the function.
