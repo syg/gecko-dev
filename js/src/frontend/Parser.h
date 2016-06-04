@@ -327,8 +327,8 @@ class ParseContext : public Nestable<ParseContext>
 
         inline FreeNameIter freeNames(ParseContext* pc);
 
-        // Propagate all free names from the current scope to all enclosing
-        // scopes. Required on scope exit.
+        // Propagate all free names from the current scope to the enclosing
+        // scope. Required on scope exit.
         bool propagateFreeNames(ParseContext* pc);
 
         // Mark the free names from an inner function as closed over. For each
@@ -578,7 +578,8 @@ class ParseContext : public Nestable<ParseContext>
         if (isFunctionBox()) {
             if (functionBox()->function()->isNamedLambda())
                 return declEnvScope();
-            return defaultsScope();
+            if (functionBox()->hasDefaults())
+                return defaultsScope();
         }
         return varScope();
     }

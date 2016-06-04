@@ -162,9 +162,9 @@ ParseContext::Scope::dump(ParseContext* pc)
 bool
 ParseContext::Scope::propagateFreeNames(ParseContext* pc)
 {
-    for (Scope* scope = this; scope->enclosing(); scope = scope->enclosing()) {
-        for (FreeNameIter fni = scope->freeNames(pc); fni; fni++) {
-            if (!scope->enclosing()->addUsedName(pc, fni.name()))
+    if (Scope* enclosingScope = enclosing()) {
+        for (FreeNameIter fni = freeNames(pc); fni; fni++) {
+            if (!enclosingScope->addUsedName(pc, fni.name()))
                 return false;
         }
     }
@@ -281,11 +281,9 @@ ParseContext::init()
 bool
 ParseContext::finishFunctionScopes()
 {
-    // Propagate free names through extra scopes that functions have.
-    if (!varScope().propagateFreeNames(this))
+    // Propagate free names through extra scopes that functions have if needed.
+    if (&varScope() != &outermostScope() && !varScope().propagateFreeNames(this))
         return false;
-
-    varScope().dump(this);
 
     JSFunction* fun = functionBox()->function();
     if (fun->isNamedLambda()) {
@@ -858,7 +856,10 @@ Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind 
         //   { var x; var x; }
         //   { { let x; } var x; }
 
-        for (ParseContext::Scope* scope = pc->innermostScope(); scope; scope = scope->enclosing()) {
+        for (ParseContext::Scope* scope = pc->innermostScope();
+             scope != pc->varScope().enclosing();
+             scope = scope->enclosing())
+        {
             AddDeclaredNamePtr p = scope->lookupDeclaredNameForAdd(name);
             if (p) {
                 if (p->value().kind() != DeclarationKind::Var) {
@@ -1235,8 +1236,6 @@ Parser<FullParseHandler>::newDefaultsScopeData(ParseContext::Scope& scope)
         bindings = AllocScopeData<ParameterDefaultsScope>(context, alloc, numBindings);
         if (!bindings)
             return Nothing();
-
-        bindings->environmentShape.init(nullptr);
 
         // The ordering here is important. See comments in FunctionScope.
         BindingName* start = bindings->names;
@@ -3530,10 +3529,6 @@ Parser<ParseHandler>::blockStatement(YieldHandling yieldHandling, unsigned error
         return null();
 
     MUST_MATCH_TOKEN_MOD(TOK_RC, TokenStream::Operand, errorNumber);
-
-    static uint32_t counter = 0;
-    fprintf(stdout, "block scope %u\n", counter++);
-    scope.dump(pc);
 
     return finishLexicalScope(scope, list);
 }

@@ -3821,6 +3821,7 @@ BytecodeEmitter::emitFunctionScript(ParseNode* body)
     // TODOshu defaults scope bindings
     if (!bodyEmitterScope.enterFunctionBody(this, funbox))
         return false;
+
     bodyEmitterScope.dump(this);
 
     /*
@@ -5369,7 +5370,6 @@ BytecodeEmitter::emitLexicalScope(ParseNode* pn)
     ScopeKind kind = body->isKind(PNK_CATCH) ? ScopeKind::Catch : ScopeKind::Lexical;
     if (!emitterScope.enterLexical(this, kind, pn->scopeBindings(), pn->scopeFreeNames()))
         return false;
-    emitterScope.dump(this);
 
     if (body->isKind(PNK_STATEMENTLIST) && body->pn_xflags & PNX_FUNCDEFS) {
         // This block contains function statements whose definitions are

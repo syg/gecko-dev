@@ -29,8 +29,6 @@ js::BindingKindString(BindingKind kind)
         return "let";
       case BindingKind::Const:
         return "const";
-      default:
-        MOZ_CRASH("Bad BindingKind");
     }
 }
 
@@ -40,6 +38,8 @@ js::ScopeKindString(ScopeKind kind)
     switch (kind) {
       case ScopeKind::Function:
         return "function";
+      case ScopeKind::ParameterDefaults:
+        return "parameter defaults";
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
         return "lexical";
@@ -53,8 +53,8 @@ js::ScopeKindString(ScopeKind kind)
         return "global";
       case ScopeKind::NonSyntactic:
         return "non-syntactic";
-      default:
-        MOZ_CRASH("Bad ScopeKind");
+      case ScopeKind::Module:
+        return "module";
     }
 }
 
