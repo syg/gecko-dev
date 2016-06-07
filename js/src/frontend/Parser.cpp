@@ -2062,12 +2062,10 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
                 if (hasDefaults || hasRest) {
                     if (!noteDeclaredName(name, DeclarationKind::FormalParameter))
                         return false;
-                } else {
-                    if (!noteSimpleFormalParameter(funcpn, name, disallowDuplicateParams,
-                                                   &duplicatedParam))
-                    {
-                        return false;
-                    }
+                } else if (!noteSimpleFormalParameter(funcpn, name, disallowDuplicateParams,
+                                                      &duplicatedParam))
+                {
+                    return false;
                 }
 
                 break;
