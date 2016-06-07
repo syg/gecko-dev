@@ -421,8 +421,8 @@ BindingIter::init(FunctionScope::Data& data)
 void
 BindingIter::init(ParameterDefaultsScope::Data& data)
 {
-    init(data.nonSimpleFormalStart, data.length, 0, 0,
-         CanHaveArgumentSlots | CanHaveEnvironmentSlots,
+    init(0, data.length, 0, 0,
+         CanHaveFrameSlots | CanHaveEnvironmentSlots,
          0, JSSLOT_FREE(&ClonedBlockObject::class_),
          data.names, data.length);
 }

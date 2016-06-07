@@ -699,10 +699,10 @@ BytecodeEmitter::EmitterScope::enterLexical(BytecodeEmitter* bce, ScopeKind kind
     }
 
     // Create and intern the VM scope.
-    auto createLexicalScope = [=](ExclusiveContext* cx, Scope* enclosing) {
+    auto createScope = [kind, bindings, firstFrameSlot](ExclusiveContext* cx, Scope* enclosing) {
         return LexicalScope::create(cx, kind, bindings, firstFrameSlot, enclosing);
     };
-    if (!internScope(bce, createLexicalScope))
+    if (!internScope(bce, createScope))
         return false;
 
     // After interning the VM scope we can get the scope index.
@@ -745,11 +745,11 @@ BytecodeEmitter::EmitterScope::enterDeclEnv(BytecodeEmitter* bce, FunctionBox* f
     bi++;
     MOZ_ASSERT(!bi);
 
-    auto createDeclEnvScope = [=](ExclusiveContext* cx, Scope* enclosing) {
+    auto createScope = [funbox](ExclusiveContext* cx, Scope* enclosing) {
         // TODOshu maybe its own scope kind since decl envs have no frame?
         return LexicalScope::create(cx, ScopeKind::Lexical, funbox->declEnvBindings, 0, enclosing);
     };
-    if (!internScope(bce, createDeclEnvScope))
+    if (!internScope(bce, createScope))
         return false;
 
     return checkEnvironmentDepth(bce);
@@ -766,6 +766,9 @@ BytecodeEmitter::EmitterScope::enterParameterDefaults(BytecodeEmitter* bce, Func
 
     ParameterDefaultsScope::Data* bindings = funbox->defaultsScopeBindings;
     for (BindingIter bi(*bindings); bi; bi++) {
+        if (!checkSlotLimits(bce, bi))
+            return false;
+
         // If there are defaults, duplicate formal parameters are not allowed,
         // so no need to check for duplicates.
         MOZ_ASSERT(bi.kind() == BindingKind::FormalParameter);
@@ -774,10 +777,10 @@ BytecodeEmitter::EmitterScope::enterParameterDefaults(BytecodeEmitter* bce, Func
             return false;
     }
 
-    auto createDefaultsScope = [=](ExclusiveContext* cx, Scope* enclosing) {
+    auto createScope = [bindings](ExclusiveContext* cx, Scope* enclosing) {
         return ParameterDefaultsScope::create(cx, bindings, enclosing);
     };
-    if (!internScope(bce, createDefaultsScope))
+    if (!internScope(bce, createScope))
         return false;
 
     return checkEnvironmentDepth(bce);
@@ -832,11 +835,10 @@ BytecodeEmitter::EmitterScope::enterFunctionBody(BytecodeEmitter* bce, FunctionB
         shortCircuitFreeNameLocation_ = Some(NameLocation::Dynamic());
 
     // Create and intern the VM scope.
-    auto createFunctionScope = [=](ExclusiveContext* cx, Scope* enclosing) {
-        return FunctionScope::create(cx, funbox->funScopeBindings, funbox->function(),
-                                     enclosing);
+    auto createScope = [funbox](ExclusiveContext* cx, Scope* enclosing) {
+        return FunctionScope::create(cx, funbox->funScopeBindings, funbox->function(), enclosing);
     };
-    if (!internScope(bce, createFunctionScope))
+    if (!internScope(bce, createScope))
         return false;
 
     return checkEnvironmentDepth(bce);
@@ -905,11 +907,11 @@ BytecodeEmitter::EmitterScope::enterGlobal(BytecodeEmitter* bce, GlobalSharedCon
         // lazily upon first access.
         shortCircuitFreeNameLocation_ = Some(NameLocation::Intrinsic());
 
-        auto createSelfHostedGlobalScope = [=](ExclusiveContext* cx, Scope* enclosing) {
+        auto createScope = [](ExclusiveContext* cx, Scope* enclosing) {
             MOZ_ASSERT(!enclosing);
             return cx->emptyGlobalScope();
         };
-        return internScope(bce, createSelfHostedGlobalScope);
+        return internScope(bce, createScope);
     }
 
     // Resolve binding names and emit DEF{VAR,LET,CONST} prologue ops.
@@ -943,11 +945,11 @@ BytecodeEmitter::EmitterScope::enterGlobal(BytecodeEmitter* bce, GlobalSharedCon
     else
         shortCircuitFreeNameLocation_ = Some(NameLocation::Dynamic());
 
-    auto createGlobalScope = [=](ExclusiveContext* cx, Scope* enclosing) {
+    auto createScope = [globalsc](ExclusiveContext* cx, Scope* enclosing) {
         MOZ_ASSERT(!enclosing);
         return GlobalScope::create(cx, globalsc->scopeKind(), globalsc->bindings);
     };
-    return internScope(bce, createGlobalScope);
+    return internScope(bce, createScope);
 }
 
 bool
@@ -989,11 +991,11 @@ BytecodeEmitter::EmitterScope::enterEval(BytecodeEmitter* bce, EvalSharedContext
     // For simplicity, treat all free name lookups in eval scripts as dynamic.
     shortCircuitFreeNameLocation_ = Some(NameLocation::Dynamic());
 
-    auto createEvalScope = [=](ExclusiveContext* cx, Scope* enclosing) {
+    auto createScope = [evalsc](ExclusiveContext* cx, Scope* enclosing) {
         ScopeKind scopeKind = evalsc->strict() ? ScopeKind::StrictEval : ScopeKind::Eval;
         return EvalScope::create(cx, scopeKind, evalsc->bindings, enclosing);
     };
-    return internScope(bce, createEvalScope);
+    return internScope(bce, createScope);
 }
 
 bool
@@ -1007,10 +1009,10 @@ BytecodeEmitter::EmitterScope::enterWith(BytecodeEmitter* bce)
     // 'with' make all accesses dynamic and unanalyzable.
     shortCircuitFreeNameLocation_ = Some(NameLocation::Dynamic());
 
-    auto createWithScope = [=](ExclusiveContext* cx, Scope* enclosing) {
+    auto createScope = [](ExclusiveContext* cx, Scope* enclosing) {
         return WithScope::create(cx, enclosing);
     };
-    if (!internScope(bce, createWithScope))
+    if (!internScope(bce, createScope))
         return false;
 
     return bce->emitInternedScopeOp(index(), JSOP_ENTERWITH);
@@ -2924,23 +2926,25 @@ BytecodeEmitter::emitNameIncDec(ParseNode* pn)
     bool post;
     JSOp binop = GetIncDecInfo(pn->getKind(), &post);
 
-    auto emitRhs = [=](BytecodeEmitter* bce, const NameLocation& loc, bool emittedBindOp) {
+    auto emitRhs = [pn, post, binop](BytecodeEmitter* bce, const NameLocation& loc,
+                                     bool emittedBindOp)
+    {
         JSAtom* name = pn->pn_kid->name();
         if (!EmitGetNameAtLocation(bce, name, loc, false)) // SCOPE? V
             return false;
-        if (!emit1(JSOP_POS))                              // SCOPE? N
+        if (!bce->emit1(JSOP_POS))                         // SCOPE? N
             return false;
-        if (post && !emit1(JSOP_DUP))                      // SCOPE? N? N
+        if (post && !bce->emit1(JSOP_DUP))                 // SCOPE? N? N
             return false;
-        if (!emit1(JSOP_ONE))                              // SCOPE? N? N 1
+        if (!bce->emit1(JSOP_ONE))                         // SCOPE? N? N 1
             return false;
-        if (!emit1(binop))                                 // SCOPE? N? N+1
+        if (!bce->emit1(binop))                            // SCOPE? N? N+1
             return false;
 
         if (post && emittedBindOp) {
-            if (!emit2(JSOP_PICK, 2))                      // N? N+1 SCOPE?
+            if (!bce->emit2(JSOP_PICK, 2))                 // N? N+1 SCOPE?
                 return false;
-            if (!emit1(JSOP_SWAP))                         // N? SCOPE? N+1
+            if (!bce->emit1(JSOP_SWAP))                    // N? SCOPE? N+1
                 return false;
         }
 
@@ -3577,7 +3581,7 @@ BytecodeEmitter::emitInitializeFunctionSpecialName(JSAtom* name, JSOp initialOp)
     MOZ_ASSERT(sc->isFunctionBox());
     MOZ_ASSERT(initialOp == JSOP_FUNCTIONTHIS || initialOp == JSOP_ARGUMENTS);
 
-    auto emitInitial = [=](BytecodeEmitter* bce, const NameLocation& loc, bool emittedBindOp) {
+    auto emitInitial = [initialOp](BytecodeEmitter* bce, const NameLocation&, bool) {
         return bce->emit1(initialOp);
     };
 
@@ -3603,17 +3607,17 @@ BytecodeEmitter::emitSetThis(ParseNode* pn)
     ParseNode* nameNode = pn->pn_left;
     JSAtom* name = pn->pn_left->name();
 
-    auto emitRhs = [=](BytecodeEmitter* bce, const NameLocation& loc, bool) {
+    auto emitRhs = [name, pn](BytecodeEmitter* bce, const NameLocation& loc, bool) {
         // First, get the original |this| and throw if we already initialized it.
         if (!EmitGetNameAtLocation(bce, name, loc, false))
             return false;
-        if (!emit1(JSOP_CHECKTHISREINIT))
+        if (!bce->emit1(JSOP_CHECKTHISREINIT))
             return false;
-        if (!emit1(JSOP_POP))
+        if (!bce->emit1(JSOP_POP))
             return false;
 
         // Emit the new |this| value.
-        return emitTree(pn->pn_right);
+        return bce->emitTree(pn->pn_right);
     };
 
     return emitSetName(nameNode, emitRhs);
@@ -3907,7 +3911,7 @@ BytecodeEmitter::emitDestructuringLHS(ParseNode* target)
     } else {
         switch (target->getKind()) {
           case PNK_NAME: {
-            auto emitSwapScopeAndRhs = [](BytecodeEmitter* bce, const NameLocation& lhsLoc,
+            auto emitSwapScopeAndRhs = [](BytecodeEmitter* bce, const NameLocation&,
                                           bool emittedBindOp)
             {
                 if (emittedBindOp) {
@@ -4344,7 +4348,7 @@ BytecodeEmitter::emitDeclarationList(ParseNode* declList)
             auto emitInitializeToUndefined = [](BytecodeEmitter* bce, ParseNode *pn) {
                 MOZ_ASSERT(bce->lookupName(pn->name()).hasKnownSlot());
                 MOZ_ASSERT(bce->lookupName(pn->name()).isLexical());
-                auto emitUndefined = [](BytecodeEmitter* bce, const NameLocation& lhsLoc, bool) {
+                auto emitUndefined = [](BytecodeEmitter* bce, const NameLocation&, bool) {
                     return bce->emit1(JSOP_UNDEFINED);
                 };
                 if (!bce->emitInitializeName(pn, emitUndefined))
@@ -4459,7 +4463,9 @@ BytecodeEmitter::emitAssignment(ParseNode* lhs, JSOp op, ParseNode* rhs)
     // Name assignments are handled separately because choosing ops and when
     // to emit BINDNAME is involved and should avoid duplication.
     if (lhs->isKind(PNK_NAME)) {
-        auto emitRhs = [=](BytecodeEmitter* bce, const NameLocation& lhsLoc, bool emittedBindOp) {
+        auto emitRhs = [op, lhs, rhs](BytecodeEmitter* bce, const NameLocation& lhsLoc,
+                                      bool emittedBindOp)
+        {
             // For compound assignments, first get the LHS value, then emit
             // the RHS and the op.
             if (op != JSOP_NOP) {
@@ -6439,7 +6445,7 @@ BytecodeEmitter::emitBreak(PropertyName* label)
     SrcNoteType noteType;
     if (label) {
         // Any statement with the matching label may be the break target.
-        auto hasSameLabel = [&](LabelControl* labelControl) {
+        auto hasSameLabel = [label](LabelControl* labelControl) {
             return labelControl->label() == label;
         };
         target = findInnermostNestableControl<LabelControl>(hasSameLabel);

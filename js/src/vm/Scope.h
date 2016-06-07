@@ -286,7 +286,6 @@ Scope::is<LexicalScope>() const
 class FunctionScope : public Scope
 {
     friend class BindingIter;
-    friend class SimpleFormalParameterIter;
     friend class Scope;
     static const ScopeKind classScopeKind_ = ScopeKind::Function;
 
@@ -366,7 +365,6 @@ class FunctionScope : public Scope
 class ParameterDefaultsScope : public Scope
 {
     friend class BindingIter;
-    friend class SimpleFormalParameterIter;
     friend class Scope;
     static const ScopeKind classScopeKind_ = ScopeKind::ParameterDefaults;
 
@@ -375,14 +373,12 @@ class ParameterDefaultsScope : public Scope
     // Parser<FullParseHandler>::newDefaultsScopeData.
     struct Data
     {
-        // Simple formal parameter names are those without default expressions
-        // or destructuring, i.e. those that may be referred to by argument
-        // slots.
+        // If there are defaults expressions, formal parameters are TDZ'd and
+        // thus cannot be accessed via argument slots. All slots are
+        // FormalParameters.
         //
-        // simple formals - [0, nonSimpleFormalStart)
-        //  other formals - [nonSimpleParamStart, length)
-        uint16_t nonSimpleFormalStart;
-        uint32_t length;
+        // formals - [0, length)
+        uint16_t length;
 
         // If there are any aliased bindings, the shape for the
         // ParameterDefaultsEnvironment. Otherwise nullptr.
@@ -412,10 +408,6 @@ class ParameterDefaultsScope : public Scope
   public:
     Shape* environmentShape() const {
         return data().environmentShape;
-    }
-
-    uint32_t numSimpleFormalParameters() const {
-        return data().nonSimpleFormalStart;
     }
 };
 

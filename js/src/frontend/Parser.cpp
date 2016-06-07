@@ -1130,24 +1130,6 @@ Parser<FullParseHandler>::newEvalScopeData(ParseContext::Scope& scope,
     return Some(bindings);
 }
 
-static bool
-CollectSimpleFormalParameters(ParseContext* pc, ParseContext::Scope& scope,
-                              Vector<BindingName>& simpleFormals)
-{
-    // Simple parameter names must be added in order of appearance as they are
-    // referenced using argument slots.
-    bool closeOverAllBindings = pc->sc()->closeOverAllBindings();
-    for (size_t i = 0; i < pc->simpleFormalParameterNames.length(); i++) {
-        JSAtom* name = pc->simpleFormalParameterNames[i];
-        DeclaredNamePtr p = scope.lookupDeclaredName(name);
-        MOZ_ASSERT(p->value()->kind() == DeclarationKind::SimpleFormalParameter);
-        if (!simpleFormals.append(BindingName(name, closeOverAllBindings ||
-                                                    p->value()->closedOver())))
-            return false;
-    }
-    return true;
-}
-
 template <>
 Maybe<FunctionScope::Data*>
 Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope, bool hasDefaults)
@@ -1156,14 +1138,28 @@ Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope, bool 
     Vector<BindingName> formals(context);
     Vector<BindingName> vars(context);
 
+    bool closeOverAllBindings = pc->sc()->closeOverAllBindings();
+
     // If there are default expressions, no formal parameters may be
     // considered "simple" (i.e. accessed via argument slots), as after
     // defaults initialization the values of the arguments are copied into to
     // the body scope.
-    if (!hasDefaults, !CollectSimpleFormalParameters(pc, scope, simpleFormals))
-        return Nothing();
+    //
+    // Simple parameter names must be added in order of appearance as they are
+    // referenced using argument slots.
+    if (!hasDefaults) {
+        for (size_t i = 0; i < pc->simpleFormalParameterNames.length(); i++) {
+            JSAtom* name = pc->simpleFormalParameterNames[i];
+            DeclaredNamePtr p = scope.lookupDeclaredName(name);
+            MOZ_ASSERT(p->value()->kind() == DeclarationKind::SimpleFormalParameter);
+            if (!simpleFormals.append(BindingName(name, closeOverAllBindings ||
+                                                  p->value()->closedOver())))
+            {
+                return Nothing();
+            }
+        }
+    }
 
-    bool closeOverAllBindings = pc->sc()->closeOverAllBindings();
     for (BindingIter bi = scope.bindings(pc); bi; bi++) {
         BindingName binding(bi.name(), closeOverAllBindings || bi.closedOver());
         switch (bi.kind()) {
@@ -1213,44 +1209,28 @@ Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope, bool 
 
 template <>
 Maybe<ParameterDefaultsScope::Data*>
-Parser<FullParseHandler>::newDefaultsScopeData(ParseContext::Scope& scope)
+Parser<FullParseHandler>::newParameterDefaultsScopeData(ParseContext::Scope& scope)
 {
-    Vector<BindingName> simpleFormals(context);
     Vector<BindingName> formals(context);
-
-    // Simple parameter names must be added in order of appearance as, if not
-    // closed over, they may be referenced using argument slots.
-    if (!CollectSimpleFormalParameters(pc, scope, simpleFormals))
-        return Nothing();
 
     bool closeOverAllBindings = pc->sc()->closeOverAllBindings();
     for (BindingIter bi = scope.bindings(pc); bi; bi++) {
         MOZ_ASSERT(bi.kind() == BindingKind::FormalParameter);
         BindingName binding(bi.name(), closeOverAllBindings || bi.closedOver());
         // Simple parameter names are already handled above.
-        if (bi.declarationKind() != DeclarationKind::SimpleFormalParameter) {
-            if (!formals.append(binding))
-                return Nothing();
-        }
+        if (!formals.append(binding))
+            return Nothing();
     }
 
     ParameterDefaultsScope::Data* bindings = nullptr;
-    uint32_t numBindings = simpleFormals.length() + formals.length();
+    uint32_t numBindings = formals.length();
 
     if (numBindings > 0) {
         bindings = AllocScopeData<ParameterDefaultsScope>(context, alloc, numBindings);
         if (!bindings)
             return Nothing();
 
-        // The ordering here is important. See comments in FunctionScope.
-        BindingName* start = bindings->names;
-        BindingName* cursor = start;
-
-        PodCopy(cursor, simpleFormals.begin(), simpleFormals.length());
-        cursor += simpleFormals.length();
-        bindings->nonSimpleFormalStart = cursor - start;
-
-        PodCopy(cursor, formals.begin(), formals.length());
+        PodCopy(bindings->names, formals.begin(), formals.length());
         bindings->length = numBindings;
     }
 
@@ -1496,7 +1476,8 @@ Parser<FullParseHandler>::finishFunction()
     }
 
     if (hasDefaults) {
-        Maybe<ParameterDefaultsScope::Data*> bindings = newDefaultsScopeData(pc->defaultsScope());
+        Maybe<ParameterDefaultsScope::Data*> bindings =
+            newParameterDefaultsScopeData(pc->defaultsScope());
         if (!bindings)
             return false;
         funbox->defaultsScopeBindings = *bindings;
@@ -5041,7 +5022,7 @@ Parser<ParseHandler>::breakStatement(YieldHandling yieldHandling)
     // be any kind) with the same label. Unlabeled 'break' statements target
     // the innermost loop or switch statement.
     if (label) {
-        auto hasSameLabel = [&](ParseContext::LabelStatement* stmt) {
+        auto hasSameLabel = [&label](ParseContext::LabelStatement* stmt) {
             return stmt->label() == label;
         };
 
@@ -5306,7 +5287,7 @@ Parser<ParseHandler>::labeledStatement(YieldHandling yieldHandling)
     uint32_t begin = pos().begin;
     RootedPropertyName label(context, tokenStream.currentName());
 
-    auto hasSameLabel = [&](ParseContext::LabelStatement* stmt) {
+    auto hasSameLabel = [&label](ParseContext::LabelStatement* stmt) {
         return stmt->label() == label;
     };
 
