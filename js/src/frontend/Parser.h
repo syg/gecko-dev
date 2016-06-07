@@ -1134,7 +1134,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     void reportRedeclaration(HandlePropertyName name, DeclarationKind kind);
     bool noteSimpleFormalParameter(Node fn, HandlePropertyName name,
                                    bool disallowDuplicateParams = false,
-                                   bool* duplicatedArg = nullptr);
+                                   bool* duplicatedParam = nullptr);
     bool noteDeclaredName(HandlePropertyName name, DeclarationKind kind, Node node = null());
     bool noteUsedName(HandlePropertyName name);
 

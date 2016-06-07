@@ -748,7 +748,7 @@ Parser<ParseHandler>::reportRedeclaration(HandlePropertyName name, DeclarationKi
            DeclarationKindString(kind), bytes.ptr());
 }
 
-// noteFormalParameter is called for both the arguments of a regular
+// noteSimpleFormalParameter is called for both the arguments of a regular
 // function definition and the arguments specified by the Function
 // constructor.
 //
@@ -853,7 +853,7 @@ Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind 
         break;
 
       case DeclarationKind::FormalParameter: {
-        // It is an early error if any non-simple formal parameter name (i.e.,
+        // It is an early error if any non-simple formal parameter name (e.g.,
         // destructuring formal parameter) is duplicated.
 
         AddDeclaredNamePtr p = pc->varScope().lookupDeclaredNameForAdd(name);
@@ -1974,15 +1974,15 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
     if (hasArguments) {
         bool hasRest = false;
         bool hasDefaults = false;
-        bool duplicatedArg = false;
-        bool disallowDuplicateArgs = kind == Arrow || kind == Method || kind == ClassConstructor;
+        bool duplicatedParam = false;
+        bool disallowDuplicateParams = kind == Arrow || kind == Method || kind == ClassConstructor;
 
         if (IsGetterKind(kind)) {
             report(ParseError, false, null(), JSMSG_ACCESSOR_WRONG_ARGS, "getter", "no", "s");
             return false;
         }
 
-        uint32_t numSimpleFormals = 0;
+        uint32_t numPositionalFormals = 0;
         while (true) {
             if (hasRest) {
                 report(ParseError, false, null(), JSMSG_PARAMETER_AFTER_REST);
@@ -1995,11 +1995,10 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
             MOZ_ASSERT_IF(parenFreeArrow, tt == TOK_NAME);
             switch (tt) {
               case TOK_LB:
-              case TOK_LC:
-              {
+              case TOK_LC: {
                 /* See comment below in the TOK_NAME case. */
-                disallowDuplicateArgs = true;
-                if (duplicatedArg) {
+                disallowDuplicateParams = true;
+                if (duplicatedParam) {
                     report(ParseError, false, null(), JSMSG_BAD_DUP_ARGS);
                     return false;
                 }
@@ -2023,8 +2022,7 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
                 MOZ_ASSERT(yieldHandling == YieldIsName);
                 goto TOK_NAME;
 
-              case TOK_TRIPLEDOT:
-              {
+              case TOK_TRIPLEDOT: {
                 if (IsSetterKind(kind)) {
                     report(ParseError, false, null(),
                            JSMSG_ACCESSOR_WRONG_ARGS, "setter", "one", "");
@@ -2046,8 +2044,8 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
                     report(ParseError, false, null(), JSMSG_NO_REST_NAME);
                     return false;
                 }
-                disallowDuplicateArgs = true;
-                if (duplicatedArg) {
+                disallowDuplicateParams = true;
+                if (duplicatedParam) {
                     // Has duplicated args before the rest parameter.
                     report(ParseError, false, null(), JSMSG_BAD_DUP_ARGS);
                     return false;
@@ -2056,19 +2054,20 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
               }
 
               TOK_NAME:
-              case TOK_NAME:
-              {
+              case TOK_NAME: {
                 if (parenFreeArrow)
                     funbox->setStart(tokenStream);
 
                 RootedPropertyName name(context, tokenStream.currentName());
-                if (!noteSimpleFormalParameter(funcpn, name, disallowDuplicateArgs, &duplicatedArg))
-                    return false;
-
-                numSimpleFormals++;
-                if (numSimpleFormals > ARGNO_LIMIT) {
-                    report(ParseError, false, null(), JSMSG_TOO_MANY_FUN_ARGS);
-                    return false;
+                if (hasDefaults || hasRest) {
+                    if (!noteDeclaredName(name, DeclarationKind::FormalParameter))
+                        return false;
+                } else {
+                    if (!noteSimpleFormalParameter(funcpn, name, disallowDuplicateParams,
+                                                   &duplicatedParam))
+                    {
+                        return false;
+                    }
                 }
 
                 break;
@@ -2076,6 +2075,12 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
 
               default:
                 report(ParseError, false, null(), JSMSG_MISSING_FORMAL);
+                return false;
+            }
+
+            numPositionalFormals++;
+            if (numPositionalFormals > ARGNO_LIMIT) {
+                report(ParseError, false, null(), JSMSG_TOO_MANY_FUN_ARGS);
                 return false;
             }
 
@@ -2102,17 +2107,21 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
                     report(ParseError, false, null(), JSMSG_REST_WITH_DEFAULT);
                     return false;
                 }
-                disallowDuplicateArgs = true;
-                if (duplicatedArg) {
+                disallowDuplicateParams = true;
+                if (duplicatedParam) {
                     report(ParseError, false, null(), JSMSG_BAD_DUP_ARGS);
                     return false;
                 }
                 if (!hasDefaults) {
                     hasDefaults = true;
 
+                    // Pop the last simple formal parameter, it's not simple
+                    // anymore.
+                    pc->simpleFormalParameterNames.popBack();
+
                     // The Function.length property is the number of formals
                     // before the first default argument.
-                    funbox->length = numSimpleFormals - 1;
+                    funbox->length = pc->simpleFormalParameterNames.length();
                 }
                 Node def_expr = assignExprWithoutYield(yieldHandling, JSMSG_YIELD_IN_DEFAULT);
                 if (!def_expr)
@@ -2162,10 +2171,10 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
                 }
             }
         } else {
-            funbox->length = numSimpleFormals - hasRest;
+            funbox->length = numPositionalFormals - hasRest;
         }
 
-        funbox->function()->setArgCount(numSimpleFormals);
+        funbox->function()->setArgCount(numPositionalFormals);
     } else if (IsSetterKind(kind)) {
         report(ParseError, false, null(), JSMSG_ACCESSOR_WRONG_ARGS, "setter", "one", "");
         return false;
