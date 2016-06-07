@@ -773,6 +773,7 @@ BytecodeEmitter::EmitterScope::enterParameterDefaults(BytecodeEmitter* bce, Func
         // so no need to check for duplicates.
         MOZ_ASSERT(bi.kind() == BindingKind::FormalParameter);
         NameLocation loc = NameLocation::fromBinding(bi.kind(), bi.location());
+        loc.setFormalsHaveTDZ();
         if (!putNameInCache(bce, bi.name(), loc))
             return false;
     }
@@ -2569,14 +2570,14 @@ EmitGetNameAtLocation(BytecodeEmitter* bce, JSAtom* name, const NameLocation& lo
         break;
 
       case NameLocation::Kind::FrameSlot:
-        if (loc.isLexical() && !bce->emitTDZCheckIfNeeded(name, loc))
+        if (loc.hasTDZ() && !bce->emitTDZCheckIfNeeded(name, loc))
             return false;
         if (!bce->emitLocalOp(JSOP_GETLOCAL, loc.frameSlot()))
             return false;
         break;
 
       case NameLocation::Kind::EnvironmentCoordinate:
-        if (loc.isLexical() && !bce->emitTDZCheckIfNeeded(name, loc))
+        if (loc.hasTDZ() && !bce->emitTDZCheckIfNeeded(name, loc))
             return false;
         if (!bce->emitScopeCoordOp(JSOP_GETALIASEDVAR, loc.scopeCoordinate()))
             return false;
@@ -2641,7 +2642,7 @@ BytecodeEmitter::emitSetOrInitializeName(JSAtom* name, RHSEmitter emitRhs, bool 
         uint32_t atomIndex;
         if (!makeAtomIndex(name, &atomIndex))
             return false;
-        if (loc.isLexical() && initialize) {
+        if (loc.hasTDZ() && initialize) {
             // INITGLEXICAL always gets the global lexical scope. It doesn't
             // need a BINDGNAME.
             MOZ_ASSERT(innermostScope()->kind() == ScopeKind::Global);
@@ -2694,7 +2695,7 @@ BytecodeEmitter::emitSetOrInitializeName(JSAtom* name, RHSEmitter emitRhs, bool 
 
       case NameLocation::Kind::FrameSlot: {
         JSOp op = JSOP_SETLOCAL;
-        if (loc.isLexical()) {
+        if (loc.hasTDZ()) {
             if (initialize) {
                 op = JSOP_INITLEXICAL;
 
@@ -2717,7 +2718,7 @@ BytecodeEmitter::emitSetOrInitializeName(JSAtom* name, RHSEmitter emitRhs, bool 
 
       case NameLocation::Kind::EnvironmentCoordinate: {
         JSOp op = JSOP_SETALIASEDVAR;
-        if (loc.isLexical()) {
+        if (loc.hasTDZ()) {
             if (initialize) {
                 MOZ_ASSERT(loc.scopeCoordinate().hops() == 0);
                 op = JSOP_INITALIASEDLEXICAL;
@@ -2748,7 +2749,7 @@ BytecodeEmitter::emitTDZCheckIfNeeded(JSAtom* name, const NameLocation& loc)
 {
     // Dynamic accesses have TDZ checks built into their VM code and should
     // never emit explicit TDZ checks.
-    MOZ_ASSERT(loc.isLexical() && loc.hasKnownSlot());
+    MOZ_ASSERT(loc.hasTDZ() && loc.hasKnownSlot());
 
     Maybe<MaybeCheckTDZ> check = innermostTDZCheckCache->needsTDZCheck(name);
     if (!check)

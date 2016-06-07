@@ -139,6 +139,9 @@ class NameLocation
     // If the name is not a dynamic lookup, the kind of the binding.
     BindingKind bindingKind_;
 
+    // In the argument defaults expression scope, formal arguments have TDZ.
+    bool formalsHaveTDZ_;
+
     // If the name is closed over and accessed via EnvironmentCoordinate, the
     // number of dynamic environments to skip.
     //
@@ -157,6 +160,7 @@ class NameLocation
                  uint8_t hops = UINT8_MAX, uint32_t slot = SCOPECOORD_SLOT_LIMIT)
       : kind_(kind),
         bindingKind_(bindingKind),
+        formalsHaveTDZ_(false),
         hops_(hops),
         slot_(slot)
     { }
@@ -240,6 +244,18 @@ class NameLocation
     BindingKind bindingKind() const {
         MOZ_ASSERT(kind_ != Kind::Dynamic);
         return bindingKind_;
+    }
+
+    void setFormalsHaveTDZ() {
+        formalsHaveTDZ_ = true;
+    }
+
+    bool hasTDZ() const {
+        if (isLexical())
+            return true;
+        if (formalsHaveTDZ_)
+            return bindingKind() == BindingKind::FormalParameter;
+        return false;
     }
 
     bool isLexical() const {
