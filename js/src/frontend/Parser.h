@@ -1142,7 +1142,8 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
                                                           uint32_t* functionBindingEnd);
     mozilla::Maybe<EvalScope::Data*> newEvalScopeData(ParseContext::Scope& scope,
                                                       uint32_t* functionBindingEnd);
-    mozilla::Maybe<FunctionScope::Data*> newFunctionScopeData(ParseContext::Scope& scope);
+    mozilla::Maybe<FunctionScope::Data*> newFunctionScopeData(ParseContext::Scope& scope,
+                                                              bool hasDefaults);
     mozilla::Maybe<ParameterDefaultsScope::Data*> newDefaultsScopeData(ParseContext::Scope& scope);
     mozilla::Maybe<LexicalScope::Data*> newLexicalScopeData(ParseContext::Scope& scope);
     Node makeLexicalScope(ParseContext::Scope& scope, Node body);

@@ -370,12 +370,6 @@ BytecodeCompiler::maybeCompleteCompressSource()
     return !maybeSourceCompressor || maybeSourceCompressor->complete();
 }
 
-static long
-elapsed_ns(struct timespec *start, struct timespec *end)
-{
-    return ((end->tv_sec - start->tv_sec) * 1000000000 + (end->tv_nsec - start->tv_nsec));
-}
-
 JSScript*
 BytecodeCompiler::compileScript(HandleObject environment, SharedContext* sc)
 {
@@ -626,6 +620,28 @@ class MOZ_STACK_CLASS AutoInitializeSourceObject
     }
 };
 
+struct AutoTimer
+{
+    const char* name;
+    timespec start;
+
+    static long elapsedNs(timespec* start, struct timespec* end) {
+        return (end->tv_sec - start->tv_sec) * 1000000000 + (end->tv_nsec - start->tv_nsec);
+    }
+
+    AutoTimer(const char* name)
+      : name(name)
+    {
+        clock_gettime(CLOCK_MONOTONIC, &start);
+    }
+
+    ~AutoTimer() {
+        timespec end;
+        clock_gettime(CLOCK_MONOTONIC, &end);
+        fprintf(stdout, "%s took %ld ns\n", name, elapsedNs(&start, &end));
+    }
+};
+
 JSScript*
 frontend::CompileGlobalScript(ExclusiveContext* cx, LifoAlloc* alloc, ScopeKind scopeKind,
                               const ReadOnlyCompileOptions& options,
@@ -633,26 +649,14 @@ frontend::CompileGlobalScript(ExclusiveContext* cx, LifoAlloc* alloc, ScopeKind 
                               SourceCompressionTask* extraSct,
                               ScriptSourceObject** sourceObjectOut)
 {
-    timespec start, end;
-    clock_gettime(CLOCK_MONOTONIC, &start);
+    AutoTimer timer("CompileGlobalScript");
 
-    JSScript* script;
-    for (uint32_t i = 0; i < 100; i++) {
-        MOZ_ASSERT(scopeKind == ScopeKind::Global || scopeKind == ScopeKind::NonSyntactic);
-        BytecodeCompiler compiler(cx, alloc, options, srcBuf, /* enclosingScope = */ nullptr,
-                                  TraceLogger_ParserCompileScript);
-        AutoInitializeSourceObject autoSSO(compiler, sourceObjectOut);
-        compiler.maybeSetSourceCompressor(extraSct);
-        script = compiler.compileGlobalScript(scopeKind);
-        if (!script)
-            return nullptr;
-    }
-
-    clock_gettime(CLOCK_MONOTONIC, &end);
-
-    fprintf(stdout, "%ld ns avg\n", elapsed_ns(&start, &end) / 100);
-
-    return script;
+    MOZ_ASSERT(scopeKind == ScopeKind::Global || scopeKind == ScopeKind::NonSyntactic);
+    BytecodeCompiler compiler(cx, alloc, options, srcBuf, /* enclosingScope = */ nullptr,
+                              TraceLogger_ParserCompileScript);
+    AutoInitializeSourceObject autoSSO(compiler, sourceObjectOut);
+    compiler.maybeSetSourceCompressor(extraSct);
+    return compiler.compileGlobalScript(scopeKind);
 }
 
 JSScript*

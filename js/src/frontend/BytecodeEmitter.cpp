@@ -8043,7 +8043,7 @@ BytecodeEmitter::emitDefaultsAndDestructuring(ParseNode* pn)
                 return false;
             if (!emit1(JSOP_STRICTEQ))
                 return false;
-            // Emit source note to enable ion compilation.
+            // Emit source note to enable Ion compilation.
             if (!newSrcNote(SRC_IF))
                 return false;
             JumpList jump;

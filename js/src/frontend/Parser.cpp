@@ -1134,8 +1134,8 @@ static bool
 CollectSimpleFormalParameters(ParseContext* pc, ParseContext::Scope& scope,
                               Vector<BindingName>& simpleFormals)
 {
-    // Simple parameter names must be added in order of appearance as, if not
-    // closed over, they may be referenced using argument slots.
+    // Simple parameter names must be added in order of appearance as they are
+    // referenced using argument slots.
     bool closeOverAllBindings = pc->sc()->closeOverAllBindings();
     for (size_t i = 0; i < pc->simpleFormalParameterNames.length(); i++) {
         JSAtom* name = pc->simpleFormalParameterNames[i];
@@ -1150,13 +1150,17 @@ CollectSimpleFormalParameters(ParseContext* pc, ParseContext::Scope& scope,
 
 template <>
 Maybe<FunctionScope::Data*>
-Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope)
+Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope, bool hasDefaults)
 {
     Vector<BindingName> simpleFormals(context);
     Vector<BindingName> formals(context);
     Vector<BindingName> vars(context);
 
-    if (!CollectSimpleFormalParameters(pc, scope, simpleFormals))
+    // If there are default expressions, no formal parameters may be
+    // considered "simple" (i.e. accessed via argument slots), as after
+    // defaults initialization the values of the arguments are copied into to
+    // the body scope.
+    if (!hasDefaults, !CollectSimpleFormalParameters(pc, scope, simpleFormals))
         return Nothing();
 
     bool closeOverAllBindings = pc->sc()->closeOverAllBindings();
@@ -1164,8 +1168,9 @@ Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope)
         BindingName binding(bi.name(), closeOverAllBindings || bi.closedOver());
         switch (bi.kind()) {
           case BindingKind::FormalParameter:
-            // Simple parameter names are already handled above.
-            if (bi.declarationKind() != DeclarationKind::SimpleFormalParameter) {
+            // Simple parameter names are already handled above when there are
+            // no default expressions.
+            if (hasDefaults || bi.declarationKind() != DeclarationKind::SimpleFormalParameter) {
                 if (!formals.append(binding))
                     return Nothing();
             }
@@ -1481,15 +1486,16 @@ Parser<FullParseHandler>::finishFunction()
         return null();
 
     FunctionBox* funbox = pc->functionBox();
+    bool hasDefaults = funbox->hasDefaults();
 
     {
-        Maybe<FunctionScope::Data*> bindings = newFunctionScopeData(pc->varScope());
+        Maybe<FunctionScope::Data*> bindings = newFunctionScopeData(pc->varScope(), hasDefaults);
         if (!bindings)
             return false;
         funbox->funScopeBindings = *bindings;
     }
 
-    if (funbox->hasDefaults()) {
+    if (hasDefaults) {
         Maybe<ParameterDefaultsScope::Data*> bindings = newDefaultsScopeData(pc->defaultsScope());
         if (!bindings)
             return false;
@@ -1501,10 +1507,6 @@ Parser<FullParseHandler>::finishFunction()
         if (!bindings)
             return false;
         funbox->declEnvBindings = *bindings;
-
-        // We don't care about the free names of the named lambda scope; it's
-        // the same as the set of free names in the defaults scope or the var
-        // scope, depending on whether the function has defaults.
     }
 
     return true;
@@ -2163,9 +2165,9 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
             }
         }
 
-        // If we had default expressions, declare all formal parameters in the
-        // defaults scope.
         if (hasDefaults) {
+            // If we had default expressions, declare all formal parameters in
+            // the defaults scope.
             ParseContext::Scope& defaultsScope = pc->defaultsScope();
             for (BindingIter bi = pc->varScope().bindings(pc); bi; bi++) {
                 DeclarationKind declKind = bi.declarationKind();
