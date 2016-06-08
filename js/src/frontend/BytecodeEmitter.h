@@ -575,15 +575,17 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     MOZ_NEVER_INLINE MOZ_MUST_USE bool emitSwitch(ParseNode* pn);
     MOZ_NEVER_INLINE MOZ_MUST_USE bool emitTry(ParseNode* pn);
 
+    enum DestructuringFlavor { DestructuringDeclaration, DestructuringAssignment };
+
     // EmitDestructuringLHS assumes the to-be-destructured value has been pushed on
     // the stack and emits code to destructure a single lhs expression (either a
     // name or a compound []/{} expression).
-    MOZ_MUST_USE bool emitDestructuringLHS(ParseNode* target);
+    MOZ_MUST_USE bool emitDestructuringLHS(ParseNode* target, DestructuringFlavor flav);
 
-    MOZ_MUST_USE bool emitDestructuringOps(ParseNode* pattern);
-    MOZ_MUST_USE bool emitDestructuringOpsHelper(ParseNode* pattern);
-    MOZ_MUST_USE bool emitDestructuringOpsArrayHelper(ParseNode* pattern);
-    MOZ_MUST_USE bool emitDestructuringOpsObjectHelper(ParseNode* pattern);
+    MOZ_MUST_USE bool emitDestructuringOps(ParseNode* pattern, DestructuringFlavor flav);
+    MOZ_MUST_USE bool emitDestructuringOpsHelper(ParseNode* pattern, DestructuringFlavor flav);
+    MOZ_MUST_USE bool emitDestructuringOpsArrayHelper(ParseNode* pattern, DestructuringFlavor flav);
+    MOZ_MUST_USE bool emitDestructuringOpsObjectHelper(ParseNode* pattern, DestructuringFlavor flav);
 
     typedef bool
     (*DestructuringDeclEmitter)(BytecodeEmitter* bce, ParseNode* pn);

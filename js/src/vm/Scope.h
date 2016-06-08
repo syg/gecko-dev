@@ -280,7 +280,9 @@ template <>
 inline bool
 Scope::is<LexicalScope>() const
 {
-    return kind_ == ScopeKind::Lexical || kind_ == ScopeKind::Catch;
+    return kind_ == ScopeKind::Lexical ||
+           kind_ == ScopeKind::Catch ||
+           kind_ == ScopeKind::ParameterDefaults;
 }
 
 class FunctionScope : public Scope
@@ -359,55 +361,6 @@ class FunctionScope : public Scope
 
     uint32_t numSimpleFormalParameters() const {
         return data().nonSimpleFormalStart;
-    }
-};
-
-class ParameterDefaultsScope : public Scope
-{
-    friend class BindingIter;
-    friend class Scope;
-    static const ScopeKind classScopeKind_ = ScopeKind::ParameterDefaults;
-
-  public:
-    // Data is public because it is created by the frontend. See
-    // Parser<FullParseHandler>::newDefaultsScopeData.
-    struct Data
-    {
-        // If there are defaults expressions, formal parameters are TDZ'd and
-        // thus cannot be accessed via argument slots. All slots are
-        // FormalParameters.
-        //
-        // formals - [0, length)
-        uint16_t length;
-
-        // If there are any aliased bindings, the shape for the
-        // ParameterDefaultsEnvironment. Otherwise nullptr.
-        GCPtrShape environmentShape;
-
-        // The array of tagged JSAtom* names, allocated beyond the end of the
-        // struct.
-        BindingName names[1];
-    };
-
-    static size_t sizeOfData(uint32_t length) {
-        MOZ_ASSERT(length > 0);
-        return sizeof(Data) + (length - 1) * sizeof(BindingName);
-    }
-
-    static ParameterDefaultsScope* create(ExclusiveContext* cx, Data* data, Scope* enclosing);
-
-  private:
-    Data& data() {
-        return *reinterpret_cast<Data*>(data_);
-    }
-
-    const Data& data() const {
-        return *reinterpret_cast<Data*>(data_);
-    }
-
-  public:
-    Shape* environmentShape() const {
-        return data().environmentShape;
     }
 };
 
@@ -604,32 +557,34 @@ class BindingIter
 
     void init(LexicalScope::Data& data, uint32_t firstFrameSlot);
     void init(FunctionScope::Data& data);
-    void init(ParameterDefaultsScope::Data& data);
     void init(GlobalScope::Data& data);
     void init(EvalScope::Data& data, bool strict);
 
   public:
     explicit BindingIter(Scope* scope) {
         switch (scope->kind()) {
+          case ScopeKind::ParameterDefaults:
           case ScopeKind::Lexical:
           case ScopeKind::Catch:
             init(scope->as<LexicalScope>().data(),
                  scope->as<LexicalScope>().computeFirstFrameSlot());
             break;
+          case ScopeKind::With:
+            MOZ_CRASH("With scopes do not have bindings");
+            break;
           case ScopeKind::Function:
             init(scope->as<FunctionScope>().data());
             break;
-          case ScopeKind::ParameterDefaults:
-            init(scope->as<ParameterDefaultsScope>().data());
-            break;
           case ScopeKind::Eval:
+          case ScopeKind::StrictEval:
             init(scope->as<EvalScope>().data(), scope->kind() == ScopeKind::StrictEval);
             break;
           case ScopeKind::Global:
+          case ScopeKind::NonSyntactic:
             init(scope->as<GlobalScope>().data());
             break;
-          default:
-            MOZ_CRASH("Scope cannot have bindings");
+          case ScopeKind::Module:
+            MOZ_CRASH("NYI");
         }
     }
 
@@ -638,10 +593,6 @@ class BindingIter
     }
 
     explicit BindingIter(FunctionScope::Data& data) {
-        init(data);
-    }
-
-    explicit BindingIter(ParameterDefaultsScope::Data& data) {
         init(data);
     }
 

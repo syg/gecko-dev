@@ -1220,9 +1220,6 @@ Scope::traceChildren(JSTracer* trc)
       case ScopeKind::Function:
         TraceFunctionScopeData(trc, reinterpret_cast<FunctionScope::Data*>(data_));
         break;
-      case ScopeKind::ParameterDefaults:
-        TraceScopeDataWithEnvironment(trc, reinterpret_cast<ParameterDefaultsScope::Data*>(data_));
-        break;
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
         TraceScopeDataWithEnvironment(trc, reinterpret_cast<LexicalScope::Data*>(data_));
@@ -1250,15 +1247,6 @@ js::GCMarker::eagerlyMarkChildren(Scope* scope)
       case ScopeKind::Function: {
         FunctionScope::Data* data = reinterpret_cast<FunctionScope::Data*>(scope->data_);
         traverseEdge(scope, static_cast<JSObject*>(data->canonicalFunction));
-        if (data->environmentShape)
-            traverseEdge(scope, static_cast<Shape*>(data->environmentShape));
-        names = data->names;
-        length = data->length;
-        break;
-      }
-      case ScopeKind::ParameterDefaults: {
-        ParameterDefaultsScope::Data* data =
-            reinterpret_cast<ParameterDefaultsScope::Data*>(scope->data_);
         if (data->environmentShape)
             traverseEdge(scope, static_cast<Shape*>(data->environmentShape));
         names = data->names;

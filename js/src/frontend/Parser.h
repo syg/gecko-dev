@@ -198,10 +198,10 @@ class ParseContext : public Nestable<ParseContext>
                     DeclaredNameMap::Ptr p = scope_.declared().lookup(usedRange_.front());
                     if (!p)
                         break;
-                    // A use of a 'var' declared in a lexical scope is
-                    // considered free, as it's not binding in that lexical
+                    // A use of a var-scoped name declared in a lexical scope
+                    // is considered free, as it's not binding in that lexical
                     // scope.
-                    if (!isVarScope_ && p->value()->kind() == DeclarationKind::Var)
+                    if (!isVarScope_ && !DeclarationKindIsLexical(p->value()->kind()))
                         break;
                     usedRange_.popFront();
                 }
@@ -261,7 +261,7 @@ class ParseContext : public Nestable<ParseContext>
                 if (isVarScope_)
                     return;
                 while (!declaredRange_.empty()) {
-                    if (DeclarationKindIsLexical(declaredRange_.front().value()->kind()))
+                    if (BindingKindIsLexical(kind()))
                         break;
                     declaredRange_.popFront();
                 }
@@ -1132,9 +1132,9 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     bool checkStrictBinding(PropertyName* name, Node pn);
 
     void reportRedeclaration(HandlePropertyName name, DeclarationKind kind);
-    bool noteSimpleFormalParameter(Node fn, HandlePropertyName name,
-                                   bool disallowDuplicateParams = false,
-                                   bool* duplicatedParam = nullptr);
+    bool notePositionalFormalParameter(Node fn, HandlePropertyName name,
+                                       bool disallowDuplicateParams = false,
+                                       bool* duplicatedParam = nullptr);
     bool noteDeclaredName(HandlePropertyName name, DeclarationKind kind, Node node = null());
     bool noteUsedName(HandlePropertyName name);
 
@@ -1144,8 +1144,6 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
                                                       uint32_t* functionBindingEnd);
     mozilla::Maybe<FunctionScope::Data*> newFunctionScopeData(ParseContext::Scope& scope,
                                                               bool hasDefaults);
-    mozilla::Maybe<ParameterDefaultsScope::Data*> newParameterDefaultsScopeData(
-        ParseContext::Scope& scope);
     mozilla::Maybe<LexicalScope::Data*> newLexicalScopeData(ParseContext::Scope& scope);
     Node makeLexicalScope(ParseContext::Scope& scope, Node body);
     Node finishLexicalScope(ParseContext::Scope& scope, Node body);

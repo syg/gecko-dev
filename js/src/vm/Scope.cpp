@@ -42,8 +42,9 @@ js::ScopeKindString(ScopeKind kind)
       case ScopeKind::ParameterDefaults:
         return "parameter defaults";
       case ScopeKind::Lexical:
-      case ScopeKind::Catch:
         return "lexical";
+      case ScopeKind::Catch:
+        return "catch";
       case ScopeKind::With:
         return "with";
       case ScopeKind::Eval:
@@ -188,7 +189,6 @@ LexicalScope::computeNextFrameSlot(Scope* start)
 LexicalScope::create(ExclusiveContext* cx, ScopeKind kind, Data* data,
                      uint32_t firstFrameSlot, Scope* enclosing)
 {
-    MOZ_ASSERT(kind == ScopeKind::Lexical || kind == ScopeKind::Catch);
     MOZ_ASSERT(data, "LexicalScopes should not be created if there are no bindings.");
 
     // The data that's passed in is from the frontend and is LifoAlloc'd. Copy
@@ -205,6 +205,7 @@ LexicalScope::create(ExclusiveContext* cx, ScopeKind kind, Data* data,
     Scope* scope = Scope::create(cx, kind, enclosing, reinterpret_cast<uintptr_t>(copy));
     if (!scope)
         js_free(copy);
+    MOZ_ASSERT(static_cast<LexicalScope*>(scope)->is<LexicalScope>());
     return static_cast<LexicalScope*>(scope);
 }
 
@@ -242,37 +243,9 @@ FunctionScope::script() const
     return canonicalFunction()->nonLazyScript();
 }
 
-/* static */ ParameterDefaultsScope*
-ParameterDefaultsScope::create(ExclusiveContext* cx, Data* data, Scope* enclosing)
-{
-    // The data that's passed in is from the frontend and is LifoAlloc'd. Copy
-    // it now that we're creating a permanent VM scope.
-    Data* copy;
-    if (data) {
-        BindingIter bi(*data);
-        copy = CopyScopeData(cx, bi,
-                             &ClonedBlockObject::class_,
-                             BaseShape::NOT_EXTENSIBLE | BaseShape::DELEGATE,
-                             data, sizeOfData(data->length));
-    } else {
-        copy = NewEmptyScopeData<Data>(cx, sizeOfData(1));
-    }
-
-    if (!copy)
-        return nullptr;
-
-    Scope* scope = Scope::create(cx, ScopeKind::ParameterDefaults, enclosing,
-                                 reinterpret_cast<uintptr_t>(copy));
-    if (!scope)
-        js_free(copy);
-    return static_cast<ParameterDefaultsScope*>(scope);
-}
-
 /* static */ GlobalScope*
 GlobalScope::create(ExclusiveContext* cx, ScopeKind kind, Data* data)
 {
-    MOZ_ASSERT(kind == ScopeKind::Global || kind == ScopeKind::NonSyntactic);
-
     // The data that's passed in is from the frontend and is LifoAlloc'd. Copy
     // it now that we're creating a permanent VM scope.
     Data* copy;
@@ -292,6 +265,7 @@ GlobalScope::create(ExclusiveContext* cx, ScopeKind kind, Data* data)
     Scope* scope = Scope::create(cx, kind, nullptr, reinterpret_cast<uintptr_t>(copy));
     if (!scope)
         js_free(copy);
+    MOZ_ASSERT(static_cast<GlobalScope*>(scope)->is<GlobalScope>());
     return static_cast<GlobalScope*>(scope);
 }
 
@@ -341,8 +315,6 @@ ScopeIter::hasSyntacticEnvironment() const
         return !!scope()->as<FunctionScope>().environmentShape();
 
       case ScopeKind::ParameterDefaults:
-        return !!scope()->as<ParameterDefaultsScope>().environmentShape();
-
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
         return !!scope()->as<LexicalScope>().environmentShape();
@@ -371,9 +343,6 @@ ScopeIter::environmentShape() const
     switch (scope()->kind()) {
       case ScopeKind::Function:
         return scope()->as<FunctionScope>().environmentShape();
-
-      case ScopeKind::ParameterDefaults:
-        return scope()->as<ParameterDefaultsScope>().environmentShape();
 
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
@@ -415,15 +384,6 @@ BindingIter::init(FunctionScope::Data& data)
     init(data.nonSimpleFormalStart, data.varStart, data.length, 0,
          CanHaveArgumentSlots | CanHaveFrameSlots | CanHaveEnvironmentSlots,
          0, JSSLOT_FREE(&CallObject::class_),
-         data.names, data.length);
-}
-
-void
-BindingIter::init(ParameterDefaultsScope::Data& data)
-{
-    init(0, data.length, 0, 0,
-         CanHaveFrameSlots | CanHaveEnvironmentSlots,
-         0, JSSLOT_FREE(&ClonedBlockObject::class_),
          data.names, data.length);
 }
 

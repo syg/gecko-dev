@@ -748,9 +748,8 @@ Parser<ParseHandler>::reportRedeclaration(HandlePropertyName name, DeclarationKi
            DeclarationKindString(kind), bytes.ptr());
 }
 
-// noteSimpleFormalParameter is called for both the arguments of a regular
-// function definition and the arguments specified by the Function
-// constructor.
+// notePositionalFormalParameter is called for both the arguments of a regular function
+// definition and the arguments specified by the Function constructor.
 //
 // The 'disallowDuplicateParams' bool indicates whether the use of another
 // feature (destructuring or default arguments) disables duplicate arguments.
@@ -759,10 +758,19 @@ Parser<ParseHandler>::reportRedeclaration(HandlePropertyName name, DeclarationKi
 // forbid duplicates.)
 template <typename ParseHandler>
 bool
-Parser<ParseHandler>::noteSimpleFormalParameter(Node fn, HandlePropertyName name,
-                                                bool disallowDuplicateParams,
-                                                bool *duplicatedParam)
+Parser<ParseHandler>::notePositionalFormalParameter(Node fn, HandlePropertyName name,
+                                                    bool disallowDuplicateParams,
+                                                    bool *duplicatedParam)
 {
+    // The contexts where we disallow duplicate parameters (destructuring,
+    // defaults, rest) are exactly those where we cannot access a
+    // parameter name by its argument slot.
+    DeclarationKind paramKind;
+    if (disallowDuplicateParams)
+        paramKind = DeclarationKind::FormalParameter;
+    else
+        paramKind = DeclarationKind::SimpleFormalParameter;
+
     AddDeclaredNamePtr p = pc->varScope().lookupDeclaredNameForAdd(name);
     if (p) {
         // Strict-mode disallows duplicate args. We may not know whether we are
@@ -788,12 +796,15 @@ Parser<ParseHandler>::noteSimpleFormalParameter(Node fn, HandlePropertyName name
         if (duplicatedParam)
             *duplicatedParam = true;
     } else {
-        if (!pc->varScope().addDeclaredName(pc, p, name, DeclarationKind::SimpleFormalParameter))
+        if (!pc->varScope().addDeclaredName(pc, p, name, paramKind))
             return false;
     }
 
-    if (!pc->simpleFormalParameterNames.append(name))
+    if (paramKind == DeclarationKind::SimpleFormalParameter &&
+        !pc->simpleFormalParameterNames.append(name))
+    {
         return false;
+    }
 
     Node paramNode = newName(name);
     if (!paramNode)
@@ -1208,36 +1219,6 @@ Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope, bool 
 }
 
 template <>
-Maybe<ParameterDefaultsScope::Data*>
-Parser<FullParseHandler>::newParameterDefaultsScopeData(ParseContext::Scope& scope)
-{
-    Vector<BindingName> formals(context);
-
-    bool closeOverAllBindings = pc->sc()->closeOverAllBindings();
-    for (BindingIter bi = scope.bindings(pc); bi; bi++) {
-        MOZ_ASSERT(bi.kind() == BindingKind::FormalParameter);
-        BindingName binding(bi.name(), closeOverAllBindings || bi.closedOver());
-        // Simple parameter names are already handled above.
-        if (!formals.append(binding))
-            return Nothing();
-    }
-
-    ParameterDefaultsScope::Data* bindings = nullptr;
-    uint32_t numBindings = formals.length();
-
-    if (numBindings > 0) {
-        bindings = AllocScopeData<ParameterDefaultsScope>(context, alloc, numBindings);
-        if (!bindings)
-            return Nothing();
-
-        PodCopy(bindings->names, formals.begin(), formals.length());
-        bindings->length = numBindings;
-    }
-
-    return Some(bindings);
-}
-
-template <>
 Maybe<LexicalScope::Data*>
 Parser<FullParseHandler>::newLexicalScopeData(ParseContext::Scope& scope)
 {
@@ -1476,8 +1457,7 @@ Parser<FullParseHandler>::finishFunction()
     }
 
     if (hasDefaults) {
-        Maybe<ParameterDefaultsScope::Data*> bindings =
-            newParameterDefaultsScopeData(pc->defaultsScope());
+        Maybe<LexicalScope::Data*> bindings = newLexicalScopeData(pc->defaultsScope());
         if (!bindings)
             return false;
         funbox->defaultsScopeBindings = *bindings;
@@ -1579,7 +1559,7 @@ Parser<FullParseHandler>::standaloneFunctionBody(HandleFunction fun,
     }
 
     for (uint32_t i = 0; i < formals.length(); i++) {
-        if (!noteSimpleFormalParameter(fn, formals[i]))
+        if (!notePositionalFormalParameter(fn, formals[i]))
             return null();
     }
 
@@ -2059,11 +2039,8 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
                     funbox->setStart(tokenStream);
 
                 RootedPropertyName name(context, tokenStream.currentName());
-                if (hasDefaults || hasRest) {
-                    if (!noteDeclaredName(name, DeclarationKind::FormalParameter))
-                        return false;
-                } else if (!noteSimpleFormalParameter(funcpn, name, disallowDuplicateParams,
-                                                      &duplicatedParam))
+                if (!notePositionalFormalParameter(funcpn, name, disallowDuplicateParams,
+                                                   &duplicatedParam))
                 {
                     return false;
                 }
@@ -2113,8 +2090,14 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
                 if (!hasDefaults) {
                     hasDefaults = true;
 
-                    // Pop the last simple formal parameter, it's not simple
-                    // anymore.
+                    // Pop the last simple formal parameter, as it's not
+                    // simple anymore.
+                    //
+                    // For maximum consistency we should mutate the last
+                    // formal parameter's DeclarationKind from
+                    // SimpleFormalParameter to FormalParameter, but this kind
+                    // is ignored in newFunctionScopeData when default
+                    // expressions are present anyways.
                     pc->simpleFormalParameterNames.popBack();
 
                     // The Function.length property is the number of formals
@@ -2155,7 +2138,8 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
 
         if (hasDefaults) {
             // If we had default expressions, declare all formal parameters in
-            // the defaults scope.
+            // the defaults scope as 'let' bindings, as the defaults scope has
+            // TDZ.
             ParseContext::Scope& defaultsScope = pc->defaultsScope();
             for (BindingIter bi = pc->varScope().bindings(pc); bi; bi++) {
                 DeclarationKind declKind = bi.declarationKind();
@@ -2164,7 +2148,7 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
                 {
                     AddDeclaredNamePtr p = defaultsScope.lookupDeclaredNameForAdd(bi.name());
                     MOZ_ASSERT(!p);
-                    if (!defaultsScope.addDeclaredName(pc, p, bi.name(), declKind))
+                    if (!defaultsScope.addDeclaredName(pc, p, bi.name(), DeclarationKind::Let))
                         return false;
                 }
             }

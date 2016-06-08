@@ -478,7 +478,7 @@ class FunctionBox : public ObjectBox, public SharedContext
     LexicalScope::Data* declEnvBindings;
 
     // Names from the scope for parameter default expressions, if any.
-    ParameterDefaultsScope::Data* defaultsScopeBindings;
+    LexicalScope::Data* defaultsScopeBindings;
 
     // Names from the 'var' scope of the function.
     FunctionScope::Data* funScopeBindings;
