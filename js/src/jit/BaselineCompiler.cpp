@@ -1029,6 +1029,12 @@ BaselineCompiler::emit_JSOP_NOP_DESTRUCTURING()
 }
 
 bool
+BaselineCompiler::emit_JSOP_NOP_PARAMSEND()
+{
+    return true;
+}
+
+bool
 BaselineCompiler::emit_JSOP_LABEL()
 {
     return true;

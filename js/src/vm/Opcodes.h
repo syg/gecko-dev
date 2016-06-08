@@ -2129,7 +2129,14 @@
      */ \
     macro(JSOP_HOLE,          218, "hole",         NULL,  1,  0,  1,  JOF_BYTE) \
     \
-    macro(JSOP_UNUSED219,     219,"unused219",     NULL,  1,  0,  0,  JOF_BYTE) \
+    /*
+     * No-op used by eval to determine if a direct eval occurred while
+     * evaluating a formal parameter list.
+     *   Category: Other
+     *   Operands:
+     *   Stack: =>
+     */ \
+    macro(JSOP_NOP_PARAMSEND, 219, "nop-params-end", NULL, 1, 0, 0, JOF_BYTE) \
     macro(JSOP_UNUSED220,     220,"unused220",     NULL,  1,  0,  0,  JOF_BYTE) \
     macro(JSOP_UNUSED221,     221,"unused221",     NULL,  1,  0,  0,  JOF_BYTE) \
     macro(JSOP_UNUSED222,     222,"unused222",     NULL,  1,  0,  0,  JOF_BYTE) \

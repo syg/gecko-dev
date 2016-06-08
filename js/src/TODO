@@ -4,7 +4,6 @@ Parser:
 BCE:
   - remove dead StaticScope stuff from SharedContext
   - for loops
-  - params
   - TDZ
   - Annex B
 
@@ -14,6 +13,9 @@ VM:
     - LexicalEnvironmentObject
     - WithObject
   - hook new scopes in
+  - use JSOP_PARAMSEND when direct evaling
+  - rm nfixed
+    - copyRawFrameSlots need to fixed wrt new nfixed() world
 
 XDR
 Debugger scopes

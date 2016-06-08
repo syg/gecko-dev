@@ -8065,6 +8065,14 @@ BytecodeEmitter::emitFunctionFormalParametersAndBody(ParseNode *pn)
         }
     }
 
+    // Emit a nop to mark we're done processing parameters. This is so any
+    // direct eval that happens while processing the parameter list always get
+    // their own var scopes regardless of strictness.
+    //
+    // See ES 14.1.19.
+    if (!emit1(JSOP_NOP_PARAMSEND))
+        return false;
+
     return emitTree(funBody);
 }
 
