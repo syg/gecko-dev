@@ -2640,9 +2640,14 @@ JSScript::fullyInitFromEmitter(ExclusiveContext* cx, HandleScript script, Byteco
     if (bce->yieldOffsetList.length() != 0)
         bce->yieldOffsetList.finish(script->yieldOffsets(), prologueLength);
 
-    MOZ_ASSERT(bce->maxFixedSlots <= bce->maxSlots);
+    uint64_t nslots = bce->maxFixedSlots + bce->maxStackDepth;
+    if (nslots > UINT32_MAX) {
+        bce->reportError(nullptr, JSMSG_NEED_DIET, js_script_str);
+        return false;
+    }
+
     script->nfixed_ = bce->maxFixedSlots;
-    script->nslots_ = bce->maxSlots;
+    script->nslots_ = nslots;
 
     ClosedOverArgumentSlotIter fi(script);
     script->funHasAnyAliasedFormal_ = !!fi;

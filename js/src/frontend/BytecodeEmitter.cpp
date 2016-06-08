@@ -384,9 +384,8 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
 
     void updateFrameFixedSlots(BytecodeEmitter* bce, const BindingIter& bi) {
         nextFrameSlot_ = bi.nextFrameSlot();
-        bce->fixedSlots = nextFrameSlot_;
-        if (bce->fixedSlots > bce->maxFixedSlots)
-            bce->maxFixedSlots = bce->fixedSlots;
+        if (nextFrameSlot_ > bce->maxFixedSlots)
+            bce->maxFixedSlots = nextFrameSlot_;
     }
 
     MOZ_MUST_USE bool putNameInCache(BytecodeEmitter* bce, JSAtom* name, NameLocation loc) {
@@ -866,7 +865,7 @@ BytecodeEmitter::EmitterScope::enterFunctionBody(BytecodeEmitter* bce, FunctionB
 
         updateFrameFixedSlots(bce, bi);
     } else {
-        bce->fixedSlots = nextFrameSlot_ = firstFrameSlot;
+        nextFrameSlot_ = firstFrameSlot;
     }
 
     // If the function's scope may be extended at runtime due to non-strict
@@ -1098,9 +1097,6 @@ BytecodeEmitter::EmitterScope::leave(BytecodeEmitter* bce, bool nonLocal)
         if (ScopeKindIsInBody(kind))
             bce->scopeNoteList.recordEnd(noteIndex_, bce->offset(), bce->inPrologue());
 
-        // Adjust fixed slots on the frame.
-        bce->fixedSlots = frameSlotStart();
-
         // Release the name cache.
         bce->cx->frontendTablePools().releaseMap(&nameCache_);
     }
@@ -1169,8 +1165,7 @@ BytecodeEmitter::BytecodeEmitter(BytecodeEmitter* parent,
     atomIndices(nullptr),
     firstLine(lineNum),
     maxFixedSlots(0),
-    maxSlots(0),
-    fixedSlots(0),
+    maxStackDepth(0),
     stackDepth(0),
     arrayCompDepth(0),
     emitLevel(0),
@@ -1266,7 +1261,7 @@ BytecodeEmitter::emitCheck(ptrdiff_t delta, ptrdiff_t* offset)
     return true;
 }
 
-bool
+void
 BytecodeEmitter::updateDepth(ptrdiff_t target)
 {
     jsbytecode* pc = code(target);
@@ -1278,16 +1273,8 @@ BytecodeEmitter::updateDepth(ptrdiff_t target)
     MOZ_ASSERT(stackDepth >= 0);
     stackDepth += ndefs;
 
-    uint64_t slots = (uint32_t)stackDepth + fixedSlots;
-    if (slots > maxSlots) {
-        if (slots > UINT32_MAX) {
-            reportError(nullptr, JSMSG_NEED_DIET, js_script_str);
-            return false;
-        }
-        maxSlots = mozilla::AssertedCast<uint32_t>(slots);
-    }
-
-    return true;
+    if ((uint32_t)stackDepth > maxStackDepth)
+        maxStackDepth = stackDepth;
 }
 
 #ifdef DEBUG
@@ -1313,7 +1300,8 @@ BytecodeEmitter::emit1(JSOp op)
 
     jsbytecode* code = this->code(offset);
     code[0] = jsbytecode(op);
-    return updateDepth(offset);
+    updateDepth(offset);
+    return true;
 }
 
 bool
@@ -1328,7 +1316,8 @@ BytecodeEmitter::emit2(JSOp op, uint8_t op1)
     jsbytecode* code = this->code(offset);
     code[0] = jsbytecode(op);
     code[1] = jsbytecode(op1);
-    return updateDepth(offset);
+    updateDepth(offset);
+    return true;
 }
 
 bool
@@ -1348,7 +1337,8 @@ BytecodeEmitter::emit3(JSOp op, jsbytecode op1, jsbytecode op2)
     code[0] = jsbytecode(op);
     code[1] = op1;
     code[2] = op2;
-    return updateDepth(offset);
+    updateDepth(offset);
+    return true;
 }
 
 bool
@@ -1369,10 +1359,8 @@ BytecodeEmitter::emitN(JSOp op, size_t extra, ptrdiff_t* offset)
      * Don't updateDepth if op's use-count comes from the immediate
      * operand yet to be stored in the extra bytes after op.
      */
-    if (CodeSpec[op].nuses >= 0) {
-        if (!updateDepth(off))
-            return false;
-    }
+    if (CodeSpec[op].nuses >= 0)
+        updateDepth(off);
 
     if (offset)
         *offset = off;
@@ -1420,7 +1408,8 @@ BytecodeEmitter::emitJumpNoFallthrough(JSOp op, JumpList* jump)
     code[0] = jsbytecode(op);
     MOZ_ASSERT(-1 <= jump->offset && jump->offset < offset);
     jump->push(this->code(0), offset);
-    return updateDepth(offset);
+    updateDepth(offset);
+    return true;
 }
 
 bool
@@ -1803,7 +1792,8 @@ BytecodeEmitter::emitIndex32(JSOp op, uint32_t index)
     code[0] = jsbytecode(op);
     SET_UINT32_INDEX(code, index);
     checkTypeSet(op);
-    return updateDepth(offset);
+    updateDepth(offset);
+    return true;
 }
 
 bool
@@ -1822,7 +1812,8 @@ BytecodeEmitter::emitIndexOp(JSOp op, uint32_t index)
     code[0] = jsbytecode(op);
     SET_UINT32_INDEX(code, index);
     checkTypeSet(op);
-    return updateDepth(offset);
+    updateDepth(offset);
+    return true;
 }
 
 bool
@@ -2521,7 +2512,8 @@ BytecodeEmitter::emitNewInit(JSProtoKey key)
     code[3] = 0;
     code[4] = 0;
     checkTypeSet(JSOP_NEWINIT);
-    return updateDepth(offset);
+    updateDepth(offset);
+    return true;
 }
 
 bool

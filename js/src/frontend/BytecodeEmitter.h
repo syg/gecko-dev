@@ -208,9 +208,8 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     unsigned        firstLine;      /* first line, for JSScript::initFromEmitter */
 
     uint32_t        maxFixedSlots;  /* maximum number of fixed frame slots so far */
-    uint32_t        maxSlots;       /* maximum number of frame slots so far */
+    uint32_t        maxStackDepth;  /* maximum number of expression stack slots so far */
 
-    uint32_t        fixedSlots;  /* current number of fixed slots in script frame */
     int32_t         stackDepth;     /* current stack depth in script frame */
 
     uint32_t        arrayCompDepth; /* stack depth of array in comprehension */
@@ -418,7 +417,7 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     // reserve a type set to store its result.
     void checkTypeSet(JSOp op);
 
-    MOZ_MUST_USE bool updateDepth(ptrdiff_t target);
+    void updateDepth(ptrdiff_t target);
     MOZ_MUST_USE bool updateLineNumberNotes(uint32_t offset);
     MOZ_MUST_USE bool updateSourceCoordNotes(uint32_t offset);
 
