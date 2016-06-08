@@ -711,6 +711,8 @@ class JSScript : public js::gc::TenuredCell
     uint32_t        nfixed_;    /* fixed frame slots */
     uint32_t        nslots_;    /* slots plus maximum stack depth */
 
+    uint32_t        bodyScopeIndex_; /* index into the scopes array of the body scope */
+
     /* Range of characters in scriptSource which contains this script's source. */
     uint32_t        sourceStart_;
     uint32_t        sourceEnd_;
@@ -1385,7 +1387,7 @@ class JSScript : public js::gc::TenuredCell
     js::GlobalObject& uninlinedGlobal() const;
 
     js::Scope* bodyScope() const {
-        return getScope(0);
+        return getScope(bodyScopeIndex_);
     }
 
     js::Scope* enclosingScope() const {

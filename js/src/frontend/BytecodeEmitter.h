@@ -216,6 +216,8 @@ struct MOZ_STACK_CLASS BytecodeEmitter
 
     unsigned        emitLevel;      /* emitTree recursion level */
 
+    uint32_t        bodyScopeIndex; /* index into scopeList of the body scope */
+
     NestableControl* innermostNestableControl;
     EmitterScope*    innermostEmitterScope;
     TDZCheckCache*   innermostTDZCheckCache;
@@ -306,7 +308,7 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     // target scope.
     NameLocation locationOfNameBoundInScope(JSAtom* name, EmitterScope* target);
 
-    HandleScope bodyScope() const { return scopeList.vector[0]; }
+    HandleScope bodyScope() const { return scopeList.vector[bodyScopeIndex]; }
     Scope* innermostScope() const;
 
     MOZ_ALWAYS_INLINE

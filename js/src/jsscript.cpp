@@ -2647,6 +2647,8 @@ JSScript::fullyInitFromEmitter(ExclusiveContext* cx, HandleScript script, Byteco
     script->nfixed_ = bce->maxFixedSlots;
     script->nslots_ = nslots;
 
+    script->bodyScopeIndex_ = bce->bodyScopeIndex;
+
     ClosedOverArgumentSlotIter fi(script);
     script->funHasAnyAliasedFormal_ = !!fi;
 

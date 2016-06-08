@@ -449,8 +449,6 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
     MOZ_MUST_USE bool internBodyScope(BytecodeEmitter* bce, ScopeCreator createScope);
     MOZ_MUST_USE bool appendScopeNote(BytecodeEmitter* bce);
 
-    static MOZ_MUST_USE bool ensurePlaceholderBodyScope(BytecodeEmitter* bce);
-
   public:
     EmitterScope(BytecodeEmitter* bce)
       : Nestable<EmitterScope>(&bce->innermostEmitterScope),
@@ -573,7 +571,6 @@ BytecodeEmitter::EmitterScope::internScope(BytecodeEmitter* bce, ScopeCreator cr
     if (!scope)
         return false;
     scopeIndex_ = bce->scopeList.length();
-    MOZ_ASSERT(scopeIndex_ != 0, "Only the body scope should have scopeIndex == 0.");
     return bce->scopeList.append(scope);
 }
 
@@ -581,23 +578,10 @@ template <typename ScopeCreator>
 bool
 BytecodeEmitter::EmitterScope::internBodyScope(BytecodeEmitter* bce, ScopeCreator createScope)
 {
-    Scope* scope = createScope(bce->cx, enclosingScope(bce));
-    if (!scope)
-        return false;
-    if (!ensurePlaceholderBodyScope(bce))
-        return false;
-    scopeIndex_ = 0;
-    bce->scopeList.vector[0].set(scope);
-    return true;
-}
-
-/* static */ bool
-BytecodeEmitter::EmitterScope::ensurePlaceholderBodyScope(BytecodeEmitter* bce)
-{
-    if (bce->scopeList.length() == 0 && !bce->scopeList.append(nullptr))
-        return false;
-    MOZ_ASSERT(!bce->scopeList.vector[0]);
-    return true;
+    MOZ_ASSERT(bce->bodyScopeIndex == UINT32_MAX,
+               "There can be only one body scope");
+    bce->bodyScopeIndex = bce->scopeList.length();
+    return internScope(bce, createScope);
 }
 
 bool
@@ -795,12 +779,6 @@ BytecodeEmitter::EmitterScope::enterDeclEnv(BytecodeEmitter* bce, FunctionBox* f
     if (!ensureCache(bce))
         return false;
 
-    // The body scope must have index 0, but since the decl env scope encloses
-    // the function body scope, it is interned before the body scope is
-    // made. Ensure there's a placeholder at index 0.
-    if (!ensurePlaceholderBodyScope(bce))
-        return false;
-
     // The lambda name, if not closed over, emits JSOP_CALLEE and has
     // no frame slot, so set the first frame slot to LOCALNO_LIMIT.
     BindingIter bi(*funbox->declEnvBindings, LOCALNO_LIMIT);
@@ -834,13 +812,6 @@ BytecodeEmitter::EmitterScope::enterParameterDefaults(BytecodeEmitter* bce, Func
 {
     MOZ_ASSERT(this == bce->innermostEmitterScope);
     MOZ_ASSERT(funbox->hasDefaults() && funbox->defaultsScopeBindings);
-
-    // The body scope must have index 0, but since the parameter defaults
-    // scope encloses the function body scope, it is interned before the body
-    // scope is made. Ensure there's a placeholder at index 0.
-    if (!ensurePlaceholderBodyScope(bce))
-        return false;
-
     return enterLexical(bce, ScopeKind::ParameterDefaults, funbox->defaultsScopeBindings);
 }
 
@@ -1223,6 +1194,7 @@ BytecodeEmitter::BytecodeEmitter(BytecodeEmitter* parent,
     stackDepth(0),
     arrayCompDepth(0),
     emitLevel(0),
+    bodyScopeIndex(UINT32_MAX),
     innermostNestableControl(nullptr),
     innermostEmitterScope(nullptr),
     innermostTDZCheckCache(nullptr),
