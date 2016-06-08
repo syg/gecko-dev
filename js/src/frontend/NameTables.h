@@ -53,28 +53,20 @@ DeclarationKindToBindingKind(DeclarationKind kind)
     }
 }
 
-
 static inline bool
 DeclarationKindIsLexical(DeclarationKind kind)
 {
     return BindingKindIsLexical(DeclarationKindToBindingKind(kind));
 }
 
-namespace detail {
-
-using RecyclableAtomMapValueSize = uint64_t;
-
-} // namespace detail
-
 // Used in Parser to track declared names.
 class DeclaredNameInfo
 {
     DeclarationKind kind_;
 
-    // If the declared name is a binding, whether the binding is
-    // closed over. Its value is meaningless if the declared name is
-    // not a binding (i.e., a 'var' declared name in a non-'var'
-    // scope).
+    // If the declared name is a binding, whether the binding is closed
+    // over. Its value is meaningless if the declared name is not a binding
+    // (i.e., a 'var' declared name in a non-var scope).
     bool closedOver_;
 
   public:
@@ -277,11 +269,20 @@ struct RecyclableAtomMapValueWrapper
         uint64_t dummy;
     };
 
-    RecyclableAtomMapValueWrapper() = default;
+    static void assertInvariant() {
+        static_assert(sizeof(Wrapped) <= sizeof(uint64_t),
+                      "Can only recycle atom maps with values smaller than uint64");
+    }
+
+    RecyclableAtomMapValueWrapper() {
+        assertInvariant();
+    }
 
     MOZ_IMPLICIT RecyclableAtomMapValueWrapper(Wrapped w)
       : wrapped(w)
-    { }
+    {
+        assertInvariant();
+    }
 
     MOZ_IMPLICIT operator Wrapped&() {
         return wrapped;
@@ -333,7 +334,7 @@ class InlineTablePool
         static_assert(Table::SizeOfInlineEntries == RepresentativeTable::SizeOfInlineEntries,
                       "Only tables with the same size for inline entries are usable in the pool.");
         static_assert(mozilla::IsPod<typename Table::Table::Entry>::value,
-                      "Only tables with POD Entries are usable in the pool.");
+                      "Only tables with POD values are usable in the pool.");
     }
 
     static RepresentativeTable* asRepresentative(void* p) {

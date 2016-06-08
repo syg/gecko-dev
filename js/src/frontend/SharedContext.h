@@ -143,7 +143,7 @@ class AnyContextFlags
     friend class SharedContext;
 
     // True if "use strict"; appears in the body instead of being inherited.
-    bool            hasExplicitUseStrict:1;
+    bool hasExplicitUseStrict:1;
 
     // The (static) bindings of this script need to support dynamic name
     // read/write access. Here, 'dynamic' means dynamic dictionary lookup on
@@ -162,15 +162,15 @@ class AnyContextFlags
     // taken not to turn off the whole 'arguments' optimization). To answer the
     // more general "is this argument aliased" question, script->needsArgsObj
     // should be tested (see JSScript::argIsAliased).
-    bool            bindingsAccessedDynamically:1;
+    bool bindingsAccessedDynamically:1;
 
     // Whether this script, or any of its inner scripts contains a debugger
     // statement which could potentially read or write anywhere along the
     // scope chain.
-    bool            hasDebuggerStatement:1;
+    bool hasDebuggerStatement:1;
 
     // A direct eval occurs in the body of the script.
-    bool            hasDirectEval:1;
+    bool hasDirectEval:1;
 
   public:
     AnyContextFlags()
