@@ -288,7 +288,7 @@ struct MOZ_STACK_CLASS BytecodeEmitter
 
     ~BytecodeEmitter();
 
-    bool init();
+    MOZ_MUST_USE bool init();
 
     template <typename Predicate /* (NestableControl*) -> bool */>
     NestableControl* findInnermostNestableControl(Predicate predicate) const;

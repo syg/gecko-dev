@@ -362,14 +362,14 @@ class InlineTable
             MOZ_ASSERT(isInlineRange());
         }
 
-        bool checkInlineRangeInvariants() const {
+        bool assertInlineRangeInvariants() const {
             MOZ_ASSERT(uintptr_t(cur_) <= uintptr_t(end_));
             MOZ_ASSERT_IF(cur_ != end_, cur_->key != nullptr);
             return true;
         }
 
         bool isInlineRange() const {
-            MOZ_ASSERT_IF(isInline_, checkInlineRangeInvariants());
+            MOZ_ASSERT_IF(isInline_, assertInlineRangeInvariants());
             return isInline_;
         }
 

@@ -144,7 +144,7 @@ class ParseContext : public Nestable<ParseContext>
 
         void dump(ParseContext* pc);
 
-        bool init(ParseContext* pc) {
+        MOZ_MUST_USE bool init(ParseContext* pc) {
             MOZ_ASSERT(!declared_);
             MOZ_ASSERT(!used_);
             ExclusiveContext* cx = pc->sc()->context;
@@ -161,13 +161,13 @@ class ParseContext : public Nestable<ParseContext>
             return declared().lookupForAdd(name);
         }
 
-        bool addDeclaredName(ParseContext* pc, AddDeclaredNamePtr& p, JSAtom* name,
-                             DeclarationKind kind)
+        MOZ_MUST_USE bool addDeclaredName(ParseContext* pc, AddDeclaredNamePtr& p, JSAtom* name,
+                                          DeclarationKind kind)
         {
             return maybeReportOOM(pc, declared().add(p, name, DeclaredNameInfo(kind)));
         }
 
-        bool addUsedName(ParseContext* pc, JSAtom* name) {
+        MOZ_MUST_USE bool addUsedName(ParseContext* pc, JSAtom* name) {
             return maybeReportOOM(pc, used().put(name));
         }
 
@@ -232,13 +232,13 @@ class ParseContext : public Nestable<ParseContext>
 
         // Propagate all free names from the current scope to the enclosing
         // scope. Required on scope exit.
-        bool propagateFreeNames(ParseContext* pc);
+        MOZ_MUST_USE bool propagateFreeNames(ParseContext* pc);
 
         // Mark the free names from an inner function as closed over. For each
         // name in the range, mark the name as used in scopes where it is not
         // a binding, and closed over in scopes where it is a binding.
         template <typename NameRange>
-        bool addClosedOverNames(ParseContext* pc, NameRange r);
+        MOZ_MUST_USE bool addClosedOverNames(ParseContext* pc, NameRange r);
 
         // An iterator for the set of names a scope binds: the set of all
         // declared names for 'var' scopes, and the set of lexically declared
