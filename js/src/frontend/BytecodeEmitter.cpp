@@ -478,6 +478,10 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
         return bce->scopeList.vector[index()];
     }
 
+    bool hasEnvironment() const {
+        return hasEnvironment_;
+    }
+
     // The first frame slot used.
     uint32_t frameSlotStart() const {
         return enclosingInFrame() ? enclosingInFrame()->nextFrameSlot_ : 0;
@@ -712,9 +716,7 @@ BytecodeEmitter::EmitterScope::enterLexical(BytecodeEmitter* bce, ScopeKind kind
         // environment creation.
         if (!bce->emit1(JSOP_UNINITIALIZED))
             return false;
-        uint32_t slotStart = frameSlotStart();
-        uint32_t slotEnd = frameSlotEnd();
-        for (uint32_t slot = slotStart; slot < slotEnd; slot++) {
+        for (uint32_t slot = frameSlotStart(); slot < frameSlotEnd(); slot++) {
             if (!bce->emitLocalOp(JSOP_INITLEXICAL, slot))
                 return false;
         }
@@ -773,12 +775,44 @@ BytecodeEmitter::EmitterScope::enterDeclEnv(BytecodeEmitter* bce, FunctionBox* f
 }
 
 bool
+LexicalScope::optimizeParameterDefaultsFrameSlots(FunctionBox* funbox)
+{
+    MOZ_ASSERT(kind() == ScopeKind::ParameterDefaults);
+
+    // If there are parameter default expression, see if the frame slots for
+    // parameters line up exactly between the defaults scope and the body
+    // scope if both start at frame slot 0. If so, we can omit generating
+    // superfluous moves and wasting frame slots and start the body scope at
+    // frame slot 0.
+    BindingIter fbi(*funbox->funScopeBindings, 0);
+    for (BindingIter dbi(data(), 0); dbi; dbi++, fbi++) {
+        if (dbi.name() != fbi.name() ||
+            (dbi.location().kind() == BindingLocation::Kind::Frame &&
+             dbi.location() != fbi.location()))
+        {
+            return false;
+        }
+    }
+
+    data().nextFrameSlot = 0;
+    return true;
+}
+
+bool
 BytecodeEmitter::EmitterScope::enterFunctionBody(BytecodeEmitter* bce, FunctionBox* funbox)
 {
     MOZ_ASSERT(this == bce->innermostEmitterScope);
 
     if (!ensureCache(bce))
         return false;
+
+    if (funbox->defaultsScopeBindings) {
+        LexicalScope& defaultsScope = enclosingInFrame()->scope(bce)->as<LexicalScope>();
+        if (defaultsScope.optimizeParameterDefaultsFrameSlots(funbox)) {
+            MOZ_ASSERT(defaultsScope.nextFrameSlot() == 0);
+            enclosingInFrame()->nextFrameSlot_ = 0;
+        }
+    }
 
     // Resolve body-level bindings, if there are any.
     uint32_t firstFrameSlot = frameSlotStart();
@@ -3644,6 +3678,7 @@ BytecodeEmitter::emitFunctionScript(ParseNode* body)
 
     Maybe<EmitterScope> defaultsEmitterScope;
     if (funbox->defaultsScopeBindings) {
+        MOZ_ASSERT(funbox->hasDefaults());
         defaultsEmitterScope.emplace(this);
         if (!defaultsEmitterScope->enterLexical(this, ScopeKind::ParameterDefaults,
                                                 funbox->defaultsScopeBindings))
@@ -8053,11 +8088,25 @@ BytecodeEmitter::emitFunctionFormalParametersAndBody(ParseNode *pn)
         EmitterScope* defaultsScope = innermostEmitterScope->enclosingInFrame();
         for (BindingIter bi(*sc->asFunctionBox()->defaultsScopeBindings, 0); bi; bi++) {
             JSAtom* name = bi.name();
-            auto emitRhs = [name, defaultsScope](BytecodeEmitter* bce,
-                                                 const NameLocation&, bool)
-            {
-                NameLocation loc = defaultsScope->lookup(bce, name);
-                return EmitGetNameAtLocation(bce, name, loc);
+            NameLocation defaultLoc = defaultsScope->lookup(this, name);
+
+            // If all formal parameter that live on the frame have their slots
+            // match perfectly, the nextFrameSlot on defaults scope is set to
+            // 0. In this case we don't need to emit superfluous moves.
+            //
+            // See EmitterScope::enterFunctionBody for this optimization.
+            if (defaultLoc.kind() == NameLocation::Kind::FrameSlot) {
+                if (defaultsScope->frameSlotEnd() == 0)
+                    continue;
+            } else {
+                MOZ_ASSERT(defaultLoc.kind() == NameLocation::Kind::EnvironmentCoordinate);
+                if (innermostEmitterScope->hasEnvironment())
+                    // TODOshu here
+                    ;
+            }
+
+            auto emitRhs = [name, defaultLoc](BytecodeEmitter* bce, const NameLocation&, bool) {
+                return EmitGetNameAtLocation(bce, name, defaultLoc);
             };
 
             if (!emitInitializeName(name, emitRhs))

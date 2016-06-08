@@ -18,6 +18,10 @@
 
 namespace js {
 
+namespace frontend {
+class FunctionBox;
+};
+
 enum class BindingKind : uint8_t
 {
     FormalParameter,
@@ -110,6 +114,14 @@ class BindingLocation
 
     static BindingLocation Environment(uint32_t slot) {
         return BindingLocation(Kind::Environment, slot);
+    }
+
+    bool operator==(const BindingLocation& other) const {
+        return kind_ == other.kind_ && slot_ == other.slot_;
+    }
+
+    bool operator!=(const BindingLocation& other) const {
+        return !operator==(other);
     }
 
     Kind kind() const {
@@ -274,6 +286,13 @@ class LexicalScope : public Scope
     Shape* environmentShape() const {
         return data().environmentShape;
     }
+
+    // For frontend use. Implemented in BytecodeEmitter.cpp
+    //
+    // See if the frame slots for parameters line up exactly between the
+    // defaults scope and the body scope. If so, we can omit wasting frame
+    // slots and start the body scope at frame slot 0.
+    bool optimizeParameterDefaultsFrameSlots(frontend::FunctionBox* funbox);
 };
 
 template <>

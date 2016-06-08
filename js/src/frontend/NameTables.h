@@ -207,6 +207,15 @@ class NameLocation
         }
     }
 
+    bool operator==(const NameLocation& other) const {
+        return kind_ == other.kind_ && bindingKind_ == other.bindingKind_ &&
+               hops_ == other.hops_ && slot_ == other.slot_;
+    }
+
+    bool operator!=(const NameLocation& other) const {
+        return !operator==(other);
+    }
+
     Kind kind() const {
         return kind_;
     }
