@@ -2,9 +2,7 @@ Parser:
   - remove uses of op on ParseNode
 
 BCE:
-  - remove dead StaticScope stuff from SharedContext
   - for loops
-  - TDZ
   - Annex B
 
 VM:

@@ -529,8 +529,6 @@ class NodeBuilder
 
     bool debuggerStatement(TokenPos* pos, MutableHandleValue dst);
 
-    bool letStatement(NodeVector& head, HandleValue stmt, TokenPos* pos, MutableHandleValue dst);
-
     bool importDeclaration(NodeVector& elts, HandleValue moduleSpec, TokenPos* pos, MutableHandleValue dst);
 
     bool importSpecifier(HandleValue importName, HandleValue bindingName, TokenPos* pos, MutableHandleValue dst);
@@ -1404,23 +1402,6 @@ NodeBuilder::generatorExpression(HandleValue body, NodeVector& blocks, HandleVal
 }
 
 bool
-NodeBuilder::letStatement(NodeVector& head, HandleValue stmt, TokenPos* pos, MutableHandleValue dst)
-{
-    RootedValue array(cx);
-    if (!newArray(head, &array))
-        return false;
-
-    RootedValue cb(cx, callbacks[AST_LET_STMT]);
-    if (!cb.isNull())
-        return callback(cb, array, stmt, pos, dst);
-
-    return newNode(AST_LET_STMT, pos,
-                   "head", array,
-                   "body", stmt,
-                   dst);
-}
-
-bool
 NodeBuilder::importDeclaration(NodeVector& elts, HandleValue moduleSpec, TokenPos* pos,
                                MutableHandleValue dst)
 {
@@ -1808,7 +1789,6 @@ class ASTSerializer
 
     bool identifier(HandleAtom atom, TokenPos* pos, MutableHandleValue dst);
     bool identifier(ParseNode* pn, MutableHandleValue dst);
-    bool objectPropertyName(ParseNode* pn, MutableHandleValue dst);
     bool literal(ParseNode* pn, MutableHandleValue dst);
 
     bool pattern(ParseNode* pn, MutableHandleValue dst);
@@ -3402,17 +3382,6 @@ bool
 ASTSerializer::identifier(ParseNode* pn, MutableHandleValue dst)
 {
     LOCAL_ASSERT(pn->isArity(PN_NAME) || pn->isArity(PN_NULLARY));
-    LOCAL_ASSERT(pn->pn_atom);
-
-    RootedAtom pnAtom(cx, pn->pn_atom);
-    return identifier(pnAtom, &pn->pn_pos, dst);
-}
-
-bool
-ASTSerializer::objectPropertyName(ParseNode* pn, MutableHandleValue dst)
-{
-    LOCAL_ASSERT(pn->isKind(PNK_OBJECT_PROPERTY_NAME));
-    LOCAL_ASSERT(pn->isArity(PN_NULLARY));
     LOCAL_ASSERT(pn->pn_atom);
 
     RootedAtom pnAtom(cx, pn->pn_atom);

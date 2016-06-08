@@ -502,8 +502,6 @@ class NameResolver
           case PNK_YIELD_STAR:
             MOZ_ASSERT(cur->isArity(PN_BINARY));
             MOZ_ASSERT(cur->pn_right->isKind(PNK_NAME));
-            // TODOshu
-            // MOZ_ASSERT(!cur->pn_right->isAssigned());
             if (!resolve(cur->pn_left, prefix))
                 return false;
             break;
@@ -514,12 +512,10 @@ class NameResolver
                 if (!resolve(cur->pn_left, prefix))
                     return false;
             }
-            /* TODOshu
-            MOZ_ASSERT((cur->pn_right->isKind(PNK_NAME) && !cur->pn_right->isAssigned()) ||
+            MOZ_ASSERT(cur->pn_right->isKind(PNK_NAME) ||
                        (cur->pn_right->isKind(PNK_ASSIGN) &&
                         cur->pn_right->pn_left->isKind(PNK_NAME) &&
                         cur->pn_right->pn_right->isKind(PNK_GENERATOR)));
-            */
             break;
 
           case PNK_RETURN:
