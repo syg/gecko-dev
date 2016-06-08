@@ -2104,6 +2104,7 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
                     // before the first default argument.
                     funbox->length = pc->simpleFormalParameterNames.length();
                 }
+
                 Node def_expr = assignExprWithoutYield(yieldHandling, JSMSG_YIELD_IN_DEFAULT);
                 if (!def_expr)
                     return false;

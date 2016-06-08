@@ -326,7 +326,7 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
 
     // If this scope's cache does not include free names, such as the
     // global scope, the NameLocation to return.
-    Maybe<NameLocation> shortCircuitFreeNameLocation_;
+    Maybe<NameLocation> fallbackFreeNameLocation_;
 
     // Whether there are any closed over bindings.
     bool hasEnvironment_;
@@ -382,6 +382,13 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
         return true;
     }
 
+    void updateFrameFixedSlots(BytecodeEmitter* bce, const BindingIter& bi) {
+        nextFrameSlot_ = bi.nextFrameSlot();
+        bce->fixedSlots = nextFrameSlot_;
+        if (bce->fixedSlots > bce->maxFixedSlots)
+            bce->maxFixedSlots = bce->fixedSlots;
+    }
+
     MOZ_MUST_USE bool putNameInCache(BytecodeEmitter* bce, JSAtom* name, NameLocation loc) {
         NameLocationMap& cache = nameCache();
         NameLocationMap::AddPtr p = cache.lookupForAdd(name);
@@ -394,10 +401,10 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
     }
 
     Maybe<NameLocation> lookupInCache(JSAtom* name) {
-        if (shortCircuitFreeNameLocation_)
-            return shortCircuitFreeNameLocation_;
         if (NameLocationMap::Ptr p = nameCache().lookup(name))
             return Some(p->value().wrapped);
+        if (fallbackFreeNameLocation_)
+            return fallbackFreeNameLocation_;
         return Nothing();
     }
 
@@ -677,7 +684,7 @@ BytecodeEmitter::EmitterScope::enterLexical(BytecodeEmitter* bce, ScopeKind kind
         return false;
 
     // Resolve bindings.
-    uint32_t firstFrameSlot = enclosingInFrame() ? enclosingInFrame()->nextFrameSlot_ : 0;
+    uint32_t firstFrameSlot = frameSlotStart();
     BindingIter bi(*bindings, firstFrameSlot);
     for (; bi; bi++) {
         if (!checkSlotLimits(bce, bi))
@@ -690,7 +697,8 @@ BytecodeEmitter::EmitterScope::enterLexical(BytecodeEmitter* bce, ScopeKind kind
         if (!putNameInCache(bce, bi.name(), loc))
             return false;
     }
-    nextFrameSlot_ = bi.nextFrameSlot();
+
+    updateFrameFixedSlots(bce, bi);
 
     // Create and intern the VM scope.
     auto createScope = [kind, bindings, firstFrameSlot](ExclusiveContext* cx, Scope* enclosing) {
@@ -700,19 +708,18 @@ BytecodeEmitter::EmitterScope::enterLexical(BytecodeEmitter* bce, ScopeKind kind
         return false;
 
     if (ScopeKindIsInBody(kind)) {
-        // If we're nested under a loop statement, we need to re-uninitialize the
-        // unaliased lexical slots per iteration.
-        if (bce->isInLoop()) {
-            if (!bce->pushInitialConstants(JSOP_UNINITIALIZED, numFrameSlots()))
+        // Initialized frame slots to TDZ poison. Environment slots are set by
+        // environment creation.
+        if (!bce->emit1(JSOP_UNINITIALIZED))
+            return false;
+        uint32_t slotStart = frameSlotStart();
+        uint32_t slotEnd = frameSlotEnd();
+        for (uint32_t slot = slotStart; slot < slotEnd; slot++) {
+            if (!bce->emitLocalOp(JSOP_INITLEXICAL, slot))
                 return false;
-
-            uint32_t slotStart = frameSlotStart();
-            uint32_t slotEnd = frameSlotEnd();
-            for (uint32_t slot = slotStart; slot < slotEnd; slot++) {
-                if (!bce->emitLocalOp(JSOP_INITLEXICAL, slot))
-                    return false;
-            }
         }
+        if (!bce->emit1(JSOP_POP))
+            return false;
 
         // After interning the VM scope we can get the scope index.
         if (hasEnvironment_) {
@@ -774,9 +781,10 @@ BytecodeEmitter::EmitterScope::enterFunctionBody(BytecodeEmitter* bce, FunctionB
         return false;
 
     // Resolve body-level bindings, if there are any.
+    uint32_t firstFrameSlot = frameSlotStart();
     if (FunctionScope::Data* bindings = funbox->funScopeBindings) {
         NameLocationMap& cache = nameCache();
-        BindingIter bi(*bindings);
+        BindingIter bi(*bindings, firstFrameSlot);
         for (; bi; bi++) {
             if (!checkSlotLimits(bce, bi))
                 return false;
@@ -801,9 +809,10 @@ BytecodeEmitter::EmitterScope::enterFunctionBody(BytecodeEmitter* bce, FunctionB
                 return false;
             }
         }
-        nextFrameSlot_ = bi.nextFrameSlot();
+
+        updateFrameFixedSlots(bce, bi);
     } else {
-        nextFrameSlot_ = 0;
+        bce->fixedSlots = nextFrameSlot_ = firstFrameSlot;
     }
 
     // If the function's scope may be extended at runtime due to non-strict
@@ -811,11 +820,12 @@ BytecodeEmitter::EmitterScope::enterFunctionBody(BytecodeEmitter* bce, FunctionB
     // dynamically as we don't know if the name will become a 'var' binding
     // due to direct eval.
     if (funbox->hasExtensibleScope())
-        shortCircuitFreeNameLocation_ = Some(NameLocation::Dynamic());
+        fallbackFreeNameLocation_ = Some(NameLocation::Dynamic());
 
     // Create and intern the VM scope.
-    auto createScope = [funbox](ExclusiveContext* cx, Scope* enclosing) {
-        return FunctionScope::create(cx, funbox->funScopeBindings, funbox->function(), enclosing);
+    auto createScope = [funbox, firstFrameSlot](ExclusiveContext* cx, Scope* enclosing) {
+        return FunctionScope::create(cx, funbox->funScopeBindings, firstFrameSlot,
+                                     funbox->function(), enclosing);
     };
     if (!internScope(bce, createScope))
         return false;
@@ -884,7 +894,7 @@ BytecodeEmitter::EmitterScope::enterGlobal(BytecodeEmitter* bce, GlobalSharedCon
         // Intrinsic lookups are redirected to the special intrinsics holder
         // in the global object, into which any missing values are cloned
         // lazily upon first access.
-        shortCircuitFreeNameLocation_ = Some(NameLocation::Intrinsic());
+        fallbackFreeNameLocation_ = Some(NameLocation::Intrinsic());
 
         auto createScope = [](ExclusiveContext* cx, Scope* enclosing) {
             MOZ_ASSERT(!enclosing);
@@ -920,9 +930,9 @@ BytecodeEmitter::EmitterScope::enterGlobal(BytecodeEmitter* bce, GlobalSharedCon
     // global scopes. They are assumed to be global vars in the syntactic
     // global scope, dynamic accesses under non-syntactic global scope.
     if (globalsc->scopeKind() == ScopeKind::Global)
-        shortCircuitFreeNameLocation_ = Some(NameLocation::Global(BindingKind::Var));
+        fallbackFreeNameLocation_ = Some(NameLocation::Global(BindingKind::Var));
     else
-        shortCircuitFreeNameLocation_ = Some(NameLocation::Dynamic());
+        fallbackFreeNameLocation_ = Some(NameLocation::Dynamic());
 
     auto createScope = [globalsc](ExclusiveContext* cx, Scope* enclosing) {
         MOZ_ASSERT(!enclosing);
@@ -968,7 +978,7 @@ BytecodeEmitter::EmitterScope::enterEval(BytecodeEmitter* bce, EvalSharedContext
     }
 
     // For simplicity, treat all free name lookups in eval scripts as dynamic.
-    shortCircuitFreeNameLocation_ = Some(NameLocation::Dynamic());
+    fallbackFreeNameLocation_ = Some(NameLocation::Dynamic());
 
     auto createScope = [evalsc](ExclusiveContext* cx, Scope* enclosing) {
         ScopeKind scopeKind = evalsc->strict() ? ScopeKind::StrictEval : ScopeKind::Eval;
@@ -986,7 +996,7 @@ BytecodeEmitter::EmitterScope::enterWith(BytecodeEmitter* bce)
         return false;
 
     // 'with' make all accesses dynamic and unanalyzable.
-    shortCircuitFreeNameLocation_ = Some(NameLocation::Dynamic());
+    fallbackFreeNameLocation_ = Some(NameLocation::Dynamic());
 
     auto createScope = [](ExclusiveContext* cx, Scope* enclosing) {
         return WithScope::create(cx, enclosing);
@@ -1034,9 +1044,8 @@ BytecodeEmitter::EmitterScope::leave(BytecodeEmitter* bce, bool nonLocal)
         if (ScopeKindIsInBody(kind))
             bce->scopeNoteList.recordEnd(noteIndex_, bce->offset(), bce->inPrologue());
 
-        // Record the maximum frame size.
-        if (nextFrameSlot_ > bce->maxFixedSlots)
-            bce->maxFixedSlots = nextFrameSlot_;
+        // Adjust fixed slots on the frame.
+        bce->fixedSlots = frameSlotStart();
 
         // Release the name cache.
         bce->cx->frontendTablePools().releaseMap(&nameCache_);
@@ -1106,7 +1115,9 @@ BytecodeEmitter::BytecodeEmitter(BytecodeEmitter* parent,
     atomIndices(nullptr),
     firstLine(lineNum),
     maxFixedSlots(0),
-    stackDepth(0), maxStackDepth(0),
+    maxSlots(0),
+    fixedSlots(0),
+    stackDepth(0),
     arrayCompDepth(0),
     emitLevel(0),
     innermostNestableControl(nullptr),
@@ -1195,7 +1206,7 @@ BytecodeEmitter::emitCheck(ptrdiff_t delta, ptrdiff_t* offset)
     return true;
 }
 
-void
+bool
 BytecodeEmitter::updateDepth(ptrdiff_t target)
 {
     jsbytecode* pc = code(target);
@@ -1206,8 +1217,17 @@ BytecodeEmitter::updateDepth(ptrdiff_t target)
     stackDepth -= nuses;
     MOZ_ASSERT(stackDepth >= 0);
     stackDepth += ndefs;
-    if ((uint32_t)stackDepth > maxStackDepth)
-        maxStackDepth = stackDepth;
+
+    uint64_t slots = (uint32_t)stackDepth + fixedSlots;
+    if (slots > maxSlots) {
+        if (slots > UINT32_MAX) {
+            reportError(nullptr, JSMSG_NEED_DIET, js_script_str);
+            return false;
+        }
+        maxSlots = mozilla::AssertedCast<uint32_t>(slots);
+    }
+
+    return true;
 }
 
 #ifdef DEBUG
@@ -1233,8 +1253,7 @@ BytecodeEmitter::emit1(JSOp op)
 
     jsbytecode* code = this->code(offset);
     code[0] = jsbytecode(op);
-    updateDepth(offset);
-    return true;
+    return updateDepth(offset);
 }
 
 bool
@@ -1249,8 +1268,7 @@ BytecodeEmitter::emit2(JSOp op, uint8_t op1)
     jsbytecode* code = this->code(offset);
     code[0] = jsbytecode(op);
     code[1] = jsbytecode(op1);
-    updateDepth(offset);
-    return true;
+    return updateDepth(offset);
 }
 
 bool
@@ -1270,8 +1288,7 @@ BytecodeEmitter::emit3(JSOp op, jsbytecode op1, jsbytecode op2)
     code[0] = jsbytecode(op);
     code[1] = op1;
     code[2] = op2;
-    updateDepth(offset);
-    return true;
+    return updateDepth(offset);
 }
 
 bool
@@ -1292,8 +1309,10 @@ BytecodeEmitter::emitN(JSOp op, size_t extra, ptrdiff_t* offset)
      * Don't updateDepth if op's use-count comes from the immediate
      * operand yet to be stored in the extra bytes after op.
      */
-    if (CodeSpec[op].nuses >= 0)
-        updateDepth(off);
+    if (CodeSpec[op].nuses >= 0) {
+        if (!updateDepth(off))
+            return false;
+    }
 
     if (offset)
         *offset = off;
@@ -1341,8 +1360,7 @@ BytecodeEmitter::emitJumpNoFallthrough(JSOp op, JumpList* jump)
     code[0] = jsbytecode(op);
     MOZ_ASSERT(-1 <= jump->offset && jump->offset < offset);
     jump->push(this->code(0), offset);
-    updateDepth(offset);
-    return true;
+    return updateDepth(offset);
 }
 
 bool
@@ -1724,9 +1742,8 @@ BytecodeEmitter::emitIndex32(JSOp op, uint32_t index)
     jsbytecode* code = this->code(offset);
     code[0] = jsbytecode(op);
     SET_UINT32_INDEX(code, index);
-    updateDepth(offset);
     checkTypeSet(op);
-    return true;
+    return updateDepth(offset);
 }
 
 bool
@@ -1744,9 +1761,8 @@ BytecodeEmitter::emitIndexOp(JSOp op, uint32_t index)
     jsbytecode* code = this->code(offset);
     code[0] = jsbytecode(op);
     SET_UINT32_INDEX(code, index);
-    updateDepth(offset);
     checkTypeSet(op);
-    return true;
+    return updateDepth(offset);
 }
 
 bool
@@ -2444,9 +2460,8 @@ BytecodeEmitter::emitNewInit(JSProtoKey key)
     code[2] = 0;
     code[3] = 0;
     code[4] = 0;
-    updateDepth(offset);
     checkTypeSet(JSOP_NEWINIT);
-    return true;
+    return updateDepth(offset);
 }
 
 bool
@@ -3151,19 +3166,6 @@ BytecodeEmitter::emitNumberOp(double dval)
         return false;
 
     return emitIndex32(JSOP_DOUBLE, constList.length() - 1);
-}
-
-bool
-BytecodeEmitter::pushInitialConstants(JSOp op, unsigned n)
-{
-    MOZ_ASSERT(op == JSOP_UNDEFINED || op == JSOP_UNINITIALIZED);
-
-    for (unsigned i = 0; i < n; ++i) {
-        if (!emit1(op))
-            return false;
-    }
-
-    return true;
 }
 
 /*
@@ -7940,74 +7942,28 @@ BytecodeEmitter::emitTypeof(ParseNode* node, JSOp op)
 bool
 BytecodeEmitter::emitFunctionFormalParametersAndBody(ParseNode *pn)
 {
-    FunctionBox* funbox = sc->asFunctionBox();
-    RootedFunction fun(cx, funbox->function());
-    ParseNode* pnlast = pn->last();
-
-    bool hasDefaults = funbox->hasDefaults();
-    ParseNode* rest = nullptr;
-    if (fun->hasRest() && hasDefaults) {
-        // Defaults with a rest parameter need special handling. The
-        // rest parameter needs to be undefined while defaults are being
-        // processed. To do this, we create the rest argument and let it
-        // sit on the stack while processing defaults. The rest
-        // parameter's slot is set to undefined for the course of
-        // default processing.
-        rest = pn->pn_head;
-        while (rest->pn_next != pnlast)
-            rest = rest->pn_next;
-        if (!emit1(JSOP_REST))
-            return false;
-        checkTypeSet(JSOP_REST);
-
-        // Only set the rest parameter if it's not aliased by a nested
-        // function in the body.
-        // TODOshu
-        /*
-        if (restIsDefn) {
-            if (!emit1(JSOP_UNDEFINED))
-                return false;
-            if (!bindNameToSlot(rest))
-                return false;
-            if (!emitVarOp(rest, JSOP_SETARG))
-                return false;
-            if (!emit1(JSOP_POP))
-                return false;
-        }
-        */
-    }
-    if (hasDefaults || funbox->hasDestructuringArgs) {
-        if (!emitDefaultsAndDestructuring(pn))
-            return false;
-    }
-    if (fun->hasRest() && hasDefaults) {
-        /* TODOshu
-        if (restIsDefn && !emitVarOp(rest, JSOP_SETARG))
-            return false;
-        if (!emit1(JSOP_POP))
-            return false;
-        */
-    }
-
-    return emitTree(pnlast);
-}
-
-bool
-BytecodeEmitter::emitDefaultsAndDestructuring(ParseNode* pn)
-{
     MOZ_ASSERT(pn->isKind(PNK_PARAMSBODY));
+
+    ParseNode* funBody = pn->last();
+    FunctionBox* funbox = sc->asFunctionBox();
+
+    bool hasDestructuringArgs = funbox->hasDestructuringArgs;
+    bool hasDefaults = funbox->hasDefaults();
+    bool hasRest = funbox->function()->hasRest();
+
+    // No work needs be done for a simple parameter list.
+    if (!hasDestructuringArgs && !hasDefaults && !hasRest)
+        return emitTree(funBody);
 
     // When parameter default expressions are present, formal parameters have
     // TDZ and are in their own scope which encloses the function body
     // scope. Pop the body scope while emitting defaults and destructuring.
     Maybe<TemporarilyPopEmitterScope> popBodyScope;
-    bool hasDefaults = sc->asFunctionBox()->hasDefaults();
     if (hasDefaults)
         popBodyScope.emplace(this);
 
-    ParseNode* pnlast = pn->last();
     uint16_t argSlot = 0;
-    for (ParseNode* arg = pn->pn_head; arg != pnlast; arg = arg->pn_next, argSlot++) {
+    for (ParseNode* arg = pn->pn_head; arg != funBody; arg = arg->pn_next, argSlot++) {
         ParseNode* bindingElement = arg;
         ParseNode* initializer = nullptr;
         if (arg->isKind(PNK_ASSIGN)) {
@@ -8022,9 +7978,16 @@ BytecodeEmitter::emitDefaultsAndDestructuring(ParseNode* pn)
                    bindingElement->isKind(PNK_ARRAYCOMP) ||
                    bindingElement->isKind(PNK_OBJECT));
 
-        // If we have an initializer, emit the initializer and assign it to
-        // the argument slot regardless. TDZ is taken care of afterwards.
+        // The rest parameter doesn't have an initializer.
+        bool isRest = hasRest && arg->pn_next == funBody;
+        MOZ_ASSERT_IF(isRest, !initializer);
+
+        bool isDestructuring = !bindingElement->isKind(PNK_NAME);
+
         if (initializer) {
+            // If we have an initializer, emit the initializer and assign it
+            // to the argument slot. TDZ is taken care of afterwards.
+            MOZ_ASSERT(hasDefaults);
             if (!emitArgOp(JSOP_GETARG, argSlot))
                 return false;
             if (!emit1(JSOP_UNDEFINED))
@@ -8039,49 +8002,70 @@ BytecodeEmitter::emitDefaultsAndDestructuring(ParseNode* pn)
                 return false;
             if (!emitTree(initializer))
                 return false;
-            if (!emitArgOp(JSOP_SETARG, argSlot))
+            if (!emitJumpTargetAndPatch(jump))
+                return false;
+        } else if (isRest) {
+            if (!emit1(JSOP_REST))
+                return false;
+            checkTypeSet(JSOP_REST);
+
+            // If there are defaults or if the rest parameter is destructured,
+            // leave the value on the stack as we'll need it below.
+            if (!hasDefaults && isDestructuring) {
+                if (!emitArgOp(JSOP_SETARG, argSlot))
+                    return false;
+                if (!emit1(JSOP_POP))
+                    return false;
+            }
+        }
+
+        if (isDestructuring) {
+            // If we had an initializer or the rest parameter, the value is
+            // already on the stack.
+            if (!initializer && !isRest && !emitArgOp(JSOP_GETARG, argSlot))
+                return false;
+            if (!emitDestructuringOps(bindingElement, DestructuringDeclaration))
                 return false;
             if (!emit1(JSOP_POP))
                 return false;
-            if (!emitJumpTargetAndPatch(jump))
-                return false;
-        }
-
-        if (bindingElement->isKind(PNK_NAME)) {
-            auto emitRhs = [argSlot](BytecodeEmitter* bce, const NameLocation&, bool) {
-                return bce->emitArgOp(JSOP_GETARG, argSlot);
+        } else if (hasDefaults) {
+            auto emitRhs = [argSlot, initializer, isRest](BytecodeEmitter* bce,
+                                                          const NameLocation&, bool)
+            {
+                // If we had an initializer the rest parameter, the value is
+                // already on the stack.
+                if (!initializer && !isRest)
+                    return bce->emitArgOp(JSOP_GETARG, argSlot);
+                return true;
             };
+
             if (!emitInitializeName(bindingElement, emitRhs))
                 return false;
-        } else {
-            if (!emitArgOp(JSOP_GETARG, argSlot))
+            if (!emit1(JSOP_POP))
                 return false;
-            if (!emitDestructuringOps(bindingElement, DestructuringDeclaration))
-                 return false;
         }
-
-        if (!emit1(JSOP_POP))
-            return false;
     }
 
     // After emitting default expressions for all parameters, copy them into
     // the body scope.
     if (hasDefaults) {
         popBodyScope.reset();
-
         EmitterScope* defaultsScope = innermostEmitterScope->enclosingInFrame();
         for (BindingIter bi(*sc->asFunctionBox()->defaultsScopeBindings, 0); bi; bi++) {
             JSAtom* name = bi.name();
-            auto emitRhs = [name, defaultsScope](BytecodeEmitter* bce, const NameLocation&, bool) {
+            auto emitRhs = [name, defaultsScope](BytecodeEmitter* bce,
+                                                 const NameLocation&, bool)
+            {
                 NameLocation loc = defaultsScope->lookup(bce, name);
                 return EmitGetNameAtLocation(bce, name, loc);
             };
+
             if (!emitInitializeName(name, emitRhs))
                 return false;
         }
     }
 
-    return true;
+    return emitTree(funBody);
 }
 
 bool

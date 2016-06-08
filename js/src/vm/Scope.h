@@ -332,8 +332,8 @@ class FunctionScope : public Scope
         return sizeof(Data) + (length - 1) * sizeof(BindingName);
     }
 
-    static FunctionScope* create(ExclusiveContext* cx, Data* data, JSFunction* fun,
-                                 Scope* enclosing);
+    static FunctionScope* create(ExclusiveContext* cx, Data* data, uint32_t firstFrameSlot,
+                                 JSFunction* fun, Scope* enclosing);
 
   private:
     Data& data() {
@@ -344,7 +344,21 @@ class FunctionScope : public Scope
         return *reinterpret_cast<Data*>(data_);
     }
 
+    static uint32_t computeNextFrameSlot(Scope* start) {
+        // A function scope's first frame slot may be non-0 when a formal
+        // parameter default expression scope is present. In that case, if the
+        // defaults scope has any non-closed over bindings, the first function
+        // scope frame slot would be non-0.
+        if (start->kind() == ScopeKind::ParameterDefaults)
+            return start->as<LexicalScope>().nextFrameSlot();
+        return 0;
+    }
+
   public:
+    uint32_t computeFirstFrameSlot() const {
+        return computeNextFrameSlot(enclosing());
+    }
+
     uint32_t nextFrameSlot() const {
         return data().nextFrameSlot;
     }
@@ -556,7 +570,7 @@ class BindingIter
     }
 
     void init(LexicalScope::Data& data, uint32_t firstFrameSlot);
-    void init(FunctionScope::Data& data);
+    void init(FunctionScope::Data& data, uint32_t firstFrameSlot);
     void init(GlobalScope::Data& data);
     void init(EvalScope::Data& data, bool strict);
 
@@ -573,7 +587,8 @@ class BindingIter
             MOZ_CRASH("With scopes do not have bindings");
             break;
           case ScopeKind::Function:
-            init(scope->as<FunctionScope>().data());
+            init(scope->as<FunctionScope>().data(),
+                 scope->as<FunctionScope>().computeFirstFrameSlot());
             break;
           case ScopeKind::Eval:
           case ScopeKind::StrictEval:
@@ -592,8 +607,8 @@ class BindingIter
         init(data, firstFrameSlot);
     }
 
-    explicit BindingIter(FunctionScope::Data& data) {
-        init(data);
+    explicit BindingIter(FunctionScope::Data& data, uint32_t firstFrameSlot) {
+        init(data, firstFrameSlot);
     }
 
     explicit BindingIter(GlobalScope::Data& data) {

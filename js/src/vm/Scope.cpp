@@ -190,6 +190,7 @@ LexicalScope::create(ExclusiveContext* cx, ScopeKind kind, Data* data,
                      uint32_t firstFrameSlot, Scope* enclosing)
 {
     MOZ_ASSERT(data, "LexicalScopes should not be created if there are no bindings.");
+    MOZ_ASSERT(firstFrameSlot == computeNextFrameSlot(enclosing));
 
     // The data that's passed in is from the frontend and is LifoAlloc'd. Copy
     // it now that we're creating a permanent VM scope.
@@ -210,13 +211,16 @@ LexicalScope::create(ExclusiveContext* cx, ScopeKind kind, Data* data,
 }
 
 /* static */ FunctionScope*
-FunctionScope::create(ExclusiveContext* cx, Data* data, JSFunction* fun, Scope* enclosing)
+FunctionScope::create(ExclusiveContext* cx, Data* data, uint32_t firstFrameSlot,
+                      JSFunction* fun, Scope* enclosing)
 {
+    MOZ_ASSERT(firstFrameSlot == computeNextFrameSlot(enclosing));
+
     // The data that's passed in is from the frontend and is LifoAlloc'd. Copy
     // it now that we're creating a permanent VM scope.
     Data* copy;
     if (data) {
-        BindingIter bi(*data);
+        BindingIter bi(*data, firstFrameSlot);
         copy = CopyFrameScopeData(cx, bi,
                                   &CallObject::class_,
                                   BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE,
@@ -379,11 +383,11 @@ BindingIter::init(LexicalScope::Data& data, uint32_t firstFrameSlot)
 }
 
 void
-BindingIter::init(FunctionScope::Data& data)
+BindingIter::init(FunctionScope::Data& data, uint32_t firstFrameSlot)
 {
     init(data.nonSimpleFormalStart, data.varStart, data.length, 0,
          CanHaveArgumentSlots | CanHaveFrameSlots | CanHaveEnvironmentSlots,
-         0, JSSLOT_FREE(&CallObject::class_),
+         firstFrameSlot, JSSLOT_FREE(&CallObject::class_),
          data.names, data.length);
 }
 
