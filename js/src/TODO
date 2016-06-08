@@ -12,8 +12,6 @@ VM:
     - WithObject
   - hook new scopes in
   - use JSOP_PARAMSEND when direct evaling
-  - rm nfixed
-    - copyRawFrameSlots need to fixed wrt new nfixed() world
 
 XDR
 Debugger scopes
