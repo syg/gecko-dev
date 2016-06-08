@@ -115,15 +115,19 @@ namespace js {
 // last block scope, the index will be NoScopeIndex.
 //
 struct ScopeNote {
+    // Sentinel index for no Scope.
     static const uint32_t NoScopeIndex = UINT32_MAX;
 
-    uint32_t        index;      // Index of NestedStaticScope in the object
-                                // array, or NoScopeIndex if there is no
-                                // block scope in this range.
+    // Sentinel index for no ScopeNote.
+    static const uint32_t NoScopeNoteIndex = UINT32_MAX;
+
+    uint32_t        index;      // Index of Scope in the scopes array, or
+                                // NoScopeIndex if there is no block scope in
+                                // this range.
     uint32_t        start;      // Bytecode offset at which this scope starts,
                                 // from script->main().
     uint32_t        length;     // Bytecode length of scope.
-    uint32_t        parent;     // Index of parent block scope in notes, or UINT32_MAX.
+    uint32_t        parent;     // Index of parent block scope in notes, or NoScopeNote.
 };
 
 struct ConstArray {
@@ -670,10 +674,6 @@ class JSScript : public js::gc::TenuredCell
 
     js::GCPtrFunction function_;
     js::GCPtrModuleObject module_;
-
-    // The body scope of the script. GlobalScope, FunctionScope, EvalScope, or
-    // ModuleScope.
-    js::GCPtrScope bodyScope_;
 
     /*
      * Information attached by Ion. Nexto a valid IonScript this could be
@@ -1385,13 +1385,11 @@ class JSScript : public js::gc::TenuredCell
     js::GlobalObject& uninlinedGlobal() const;
 
     js::Scope* bodyScope() const {
-        return bodyScope_;
+        return getScope(0);
     }
 
-    /* See StaticScopeIter comment. */
-    JSObject* enclosingStaticScope() const {
-        // TODOshu remove
-        return nullptr;
+    js::Scope* enclosingScope() const {
+        return bodyScope()->enclosing();
     }
 
     // Switch the script over from the off-thread compartment's static
@@ -1479,7 +1477,7 @@ class JSScript : public js::gc::TenuredCell
         return reinterpret_cast<js::ObjectArray*>(data + objectsOffset());
     }
 
-    js::ScopeArray* scopes() {
+    js::ScopeArray* scopes() const {
         MOZ_ASSERT(hasScopes());
         return reinterpret_cast<js::ScopeArray*>(data + scopesOffset());
     }
@@ -1534,7 +1532,7 @@ class JSScript : public js::gc::TenuredCell
         return getObject(GET_UINT32_INDEX(pc));
     }
 
-    js::Scope* getScope(size_t index) {
+    js::Scope* getScope(size_t index) const {
         js::ScopeArray* array = scopes();
         MOZ_ASSERT(index < array->length);
         return array->vector[index];

@@ -4875,9 +4875,8 @@ ReflectTrackedOptimizations(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
-#ifdef DEBUG
 static bool
-DumpStaticScopeChain(JSContext* cx, unsigned argc, Value* vp)
+DumpScopeChain(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
     RootedObject callee(cx, &args.callee());
@@ -4908,12 +4907,11 @@ DumpStaticScopeChain(JSContext* cx, unsigned argc, Value* vp)
         script = obj->as<ModuleObject>().script();
     }
 
-    js::DumpStaticScopeChain(script);
+    js::DumpScopeChain(script);
 
     args.rval().setUndefined();
     return true;
 }
-#endif
 
 namespace js {
 namespace shell {
@@ -5677,11 +5675,9 @@ TestAssertRecoveredOnBailout,
 "  any. If |fun| is not a scripted function or has not been compiled by\n"
 "  Ion, null is returned."),
 
-#ifdef DEBUG
-    JS_FN_HELP("dumpStaticScopeChain", DumpStaticScopeChain, 1, 0,
-"dumpStaticScopeChain(obj)",
-"  Prints the static scope chain of an interpreted function or a module."),
-#endif
+    JS_FN_HELP("dumpScopeChain", DumpScopeChain, 1, 0,
+"dumpScopeChain(obj)",
+"  Prints the scope chain of an interpreted function or a module."),
 
     JS_FN_HELP("crash", Crash, 0, 0,
 "crash([message])",

@@ -449,6 +449,22 @@ js::HasNonSyntacticScopeChain(Scope* scope)
     return false;
 }
 
+void
+js::DumpScopeChain(JSScript* script)
+{
+    DumpScopeChain(script->bodyScope());
+}
+
+void
+js::DumpScopeChain(Scope* scope)
+{
+    for (ScopeIter si(scope); si; si++) {
+        fprintf(stdout, "%s [%p]", ScopeKindString(si.scope()->kind()), si.scope());
+        if (si.scope()->enclosing())
+            fprintf(stdout, " -> ");
+    }
+}
+
 JS::ubi::Node::Size
 JS::ubi::Concrete<Scope>::size(mozilla::MallocSizeOf mallocSizeOf) const
 {

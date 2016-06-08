@@ -315,6 +315,14 @@ class TryFinallyControl : public BytecodeEmitter::NestableControl
     }
 };
 
+static inline bool
+ScopeKindIsInBody(ScopeKind kind)
+{
+    return kind == ScopeKind::Lexical ||
+           kind == ScopeKind::Catch ||
+           kind == ScopeKind::With;
+}
+
 // A scope that that introduces bindings.
 class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterScope>
 {
@@ -342,11 +350,12 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
     // the initial frame slot is 0.
     uint32_t nextFrameSlot_;
 
-    // The index in the BytecodeEmitter's interned scope vector.
+    // The index in the BytecodeEmitter's interned scope vector, otherwise
+    // ScopeNote::NoScopeIndex.
     uint32_t scopeIndex_;
 
     // If kind is Lexical, Catch, or With, the index in the BytecodeEmitter's
-    // block scope note list. Otherwise ScopeNote::NoScopeIndex.
+    // block scope note list. Otherwise ScopeNote::NoScopeNote.
     uint32_t noteIndex_;
 
     bool ensureCache(BytecodeEmitter* bce) {
@@ -434,11 +443,13 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
     NameLocation searchInEnclosingScope(JSAtom* name, Scope* scope, uint8_t hops);
     NameLocation searchAndCache(BytecodeEmitter* bce, JSAtom* name);
 
-    // Insert a VM Scope into the BCE scope vector and return the scope *note*
-    // index.
     template <typename ScopeCreator>
     MOZ_MUST_USE bool internScope(BytecodeEmitter* bce, ScopeCreator createScope);
+    template <typename ScopeCreator>
+    MOZ_MUST_USE bool internBodyScope(BytecodeEmitter* bce, ScopeCreator createScope);
     MOZ_MUST_USE bool appendScopeNote(BytecodeEmitter* bce);
+
+    static MOZ_MUST_USE bool ensurePlaceholderBodyScope(BytecodeEmitter* bce);
 
   public:
     EmitterScope(BytecodeEmitter* bce)
@@ -447,8 +458,8 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
         hasEnvironment_(false),
         environmentDepth_(0),
         nextFrameSlot_(0),
-        scopeIndex_(UINT32_MAX),
-        noteIndex_(ScopeNote::NoScopeIndex)
+        scopeIndex_(ScopeNote::NoScopeIndex),
+        noteIndex_(ScopeNote::NoScopeNoteIndex)
     { }
 
     void dump(BytecodeEmitter* bce);
@@ -465,7 +476,7 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
     MOZ_MUST_USE bool leave(BytecodeEmitter* bce, bool nonLocal = false);
 
     uint32_t index() const {
-        MOZ_ASSERT(scopeIndex_ != UINT32_MAX, "Did you forget to intern a Scope?");
+        MOZ_ASSERT(scopeIndex_ != ScopeNote::NoScopeIndex, "Did you forget to intern a Scope?");
         return scopeIndex_;
     }
 
@@ -562,16 +573,43 @@ BytecodeEmitter::EmitterScope::internScope(BytecodeEmitter* bce, ScopeCreator cr
     if (!scope)
         return false;
     scopeIndex_ = bce->scopeList.length();
+    MOZ_ASSERT(scopeIndex_ != 0, "Only the body scope should have scopeIndex == 0.");
     return bce->scopeList.append(scope);
+}
+
+template <typename ScopeCreator>
+bool
+BytecodeEmitter::EmitterScope::internBodyScope(BytecodeEmitter* bce, ScopeCreator createScope)
+{
+    Scope* scope = createScope(bce->cx, enclosingScope(bce));
+    if (!scope)
+        return false;
+    if (!ensurePlaceholderBodyScope(bce))
+        return false;
+    scopeIndex_ = 0;
+    bce->scopeList.vector[0].set(scope);
+    return true;
+}
+
+/* static */ bool
+BytecodeEmitter::EmitterScope::ensurePlaceholderBodyScope(BytecodeEmitter* bce)
+{
+    if (bce->scopeList.length() == 0 && !bce->scopeList.append(nullptr))
+        return false;
+    MOZ_ASSERT(!bce->scopeList.vector[0]);
+    return true;
 }
 
 bool
 BytecodeEmitter::EmitterScope::appendScopeNote(BytecodeEmitter* bce)
 {
-    MOZ_ASSERT(enclosingInFrame(), "Scope notes are not needed for body-level scopes.");
+    MOZ_ASSERT((ScopeKindIsInBody(scope(bce)->kind()) && enclosingInFrame()) ||
+               scope(bce)->kind() == ScopeKind::ParameterDefaults,
+               "Scope notes are not needed for body-level scopes.");
     noteIndex_ = bce->scopeNoteList.length();
     return bce->scopeNoteList.append(index(), bce->offset(), bce->inPrologue(),
-                                     enclosingInFrame()->noteIndex());
+                                     enclosingInFrame() ? enclosingInFrame()->noteIndex()
+                                                        : ScopeNote::NoScopeNoteIndex);
 }
 
 NameLocation
@@ -689,14 +727,6 @@ BytecodeEmitter::EmitterScope::locationBoundInScope(BytecodeEmitter* bce, JSAtom
     return loc;
 }
 
-static inline bool
-ScopeKindIsInBody(ScopeKind kind)
-{
-    return kind == ScopeKind::Lexical ||
-           kind == ScopeKind::Catch ||
-           kind == ScopeKind::With;
-}
-
 bool
 BytecodeEmitter::EmitterScope::enterLexical(BytecodeEmitter* bce, ScopeKind kind,
                                             LexicalScope::Data* bindings)
@@ -731,8 +761,8 @@ BytecodeEmitter::EmitterScope::enterLexical(BytecodeEmitter* bce, ScopeKind kind
         return false;
 
     if (ScopeKindIsInBody(kind)) {
-        // Initialized frame slots to TDZ poison. Environment slots are set by
-        // environment creation.
+        // Initialized frame slots to TDZ poison. Environment slots are
+        // poisoned by environment creation.
         if (!bce->emit1(JSOP_UNINITIALIZED))
             return false;
         for (uint32_t slot = frameSlotStart(); slot < frameSlotEnd(); slot++) {
@@ -747,11 +777,11 @@ BytecodeEmitter::EmitterScope::enterLexical(BytecodeEmitter* bce, ScopeKind kind
             if (!bce->emitInternedScopeOp(index(), JSOP_PUSHBLOCKSCOPE))
                 return false;
         }
-
-        // Lexical scopes need notes to be mapped from a pc.
-        if (!appendScopeNote(bce))
-            return false;
     }
+
+    // Lexical scopes need notes to be mapped from a pc.
+    if (!appendScopeNote(bce))
+        return false;
 
     return checkEnvironmentDepth(bce);
 }
@@ -763,6 +793,12 @@ BytecodeEmitter::EmitterScope::enterDeclEnv(BytecodeEmitter* bce, FunctionBox* f
     MOZ_ASSERT(funbox->declEnvBindings);
 
     if (!ensureCache(bce))
+        return false;
+
+    // The body scope must have index 0, but since the decl env scope encloses
+    // the function body scope, it is interned before the body scope is
+    // made. Ensure there's a placeholder at index 0.
+    if (!ensurePlaceholderBodyScope(bce))
         return false;
 
     // The lambda name, if not closed over, emits JSOP_CALLEE and has
@@ -791,6 +827,21 @@ BytecodeEmitter::EmitterScope::enterDeclEnv(BytecodeEmitter* bce, FunctionBox* f
         return false;
 
     return checkEnvironmentDepth(bce);
+}
+
+bool
+BytecodeEmitter::EmitterScope::enterParameterDefaults(BytecodeEmitter* bce, FunctionBox* funbox)
+{
+    MOZ_ASSERT(this == bce->innermostEmitterScope);
+    MOZ_ASSERT(funbox->hasDefaults() && funbox->defaultsScopeBindings);
+
+    // The body scope must have index 0, but since the parameter defaults
+    // scope encloses the function body scope, it is interned before the body
+    // scope is made. Ensure there's a placeholder at index 0.
+    if (!ensurePlaceholderBodyScope(bce))
+        return false;
+
+    return enterLexical(bce, ScopeKind::ParameterDefaults, funbox->defaultsScopeBindings);
 }
 
 bool
@@ -880,7 +931,7 @@ BytecodeEmitter::EmitterScope::enterFunctionBody(BytecodeEmitter* bce, FunctionB
         return FunctionScope::create(cx, funbox->funScopeBindings, firstFrameSlot,
                                      funbox->function(), enclosing);
     };
-    if (!internScope(bce, createScope))
+    if (!internBodyScope(bce, createScope))
         return false;
 
     return checkEnvironmentDepth(bce);
@@ -953,7 +1004,7 @@ BytecodeEmitter::EmitterScope::enterGlobal(BytecodeEmitter* bce, GlobalSharedCon
             MOZ_ASSERT(!enclosing);
             return cx->emptyGlobalScope();
         };
-        return internScope(bce, createScope);
+        return internBodyScope(bce, createScope);
     }
 
     // Resolve binding names and emit DEF{VAR,LET,CONST} prologue ops.
@@ -991,7 +1042,7 @@ BytecodeEmitter::EmitterScope::enterGlobal(BytecodeEmitter* bce, GlobalSharedCon
         MOZ_ASSERT(!enclosing);
         return GlobalScope::create(cx, globalsc->scopeKind(), globalsc->bindings);
     };
-    return internScope(bce, createScope);
+    return internBodyScope(bce, createScope);
 }
 
 bool
@@ -1037,7 +1088,7 @@ BytecodeEmitter::EmitterScope::enterEval(BytecodeEmitter* bce, EvalSharedContext
         ScopeKind scopeKind = evalsc->strict() ? ScopeKind::StrictEval : ScopeKind::Eval;
         return EvalScope::create(cx, scopeKind, evalsc->bindings, enclosing);
     };
-    return internScope(bce, createScope);
+    return internBodyScope(bce, createScope);
 }
 
 bool
@@ -1094,6 +1145,9 @@ BytecodeEmitter::EmitterScope::leave(BytecodeEmitter* bce, bool nonLocal)
     if (!nonLocal) {
         // Popping scopes due to non-local jumps generate additional scope
         // notes. See NonLocalExitControl::prepareForNonLocalJump.
+        //
+        // Also note that ParameterDefaults scopes are an exception. Their
+        // notes are not finished here but in emitFunctionFormalParametersAndBody.
         if (ScopeKindIsInBody(kind))
             bce->scopeNoteList.recordEnd(noteIndex_, bce->offset(), bce->inPrologue());
 
@@ -1740,10 +1794,10 @@ NonLocalExitControl::prepareForNonLocalJump(BytecodeEmitter::NestableControl* ta
         // As we pop each scope due to the non-local jump, emit notes that
         // record the extent of the enclosing scope. These notes will have
         // their ends recorded in ~NonLocalExitContrl().
-        uint32_t enclosingNoteIndex = ScopeNote::NoScopeIndex;
+        uint32_t enclosingScopeIndex = ScopeNote::NoScopeIndex;
         if (es->enclosingInFrame())
-            enclosingNoteIndex = es->enclosingInFrame()->noteIndex();
-        if (!bce_->scopeNoteList.append(enclosingNoteIndex, bce_->offset(), bce_->inPrologue(),
+            enclosingScopeIndex = es->enclosingInFrame()->index();
+        if (!bce_->scopeNoteList.append(enclosingScopeIndex, bce_->offset(), bce_->inPrologue(),
                                         openScopeNoteIndex_))
             return false;
         openScopeNoteIndex_ = bce_->scopeNoteList.length() - 1;
@@ -3696,13 +3750,9 @@ BytecodeEmitter::emitFunctionScript(ParseNode* body)
 
     Maybe<EmitterScope> defaultsEmitterScope;
     if (funbox->defaultsScopeBindings) {
-        MOZ_ASSERT(funbox->hasDefaults());
         defaultsEmitterScope.emplace(this);
-        if (!defaultsEmitterScope->enterLexical(this, ScopeKind::ParameterDefaults,
-                                                funbox->defaultsScopeBindings))
-        {
+        if (!defaultsEmitterScope->enterParameterDefaults(this, funbox))
             return false;
-        }
     }
 
     {
@@ -7338,7 +7388,7 @@ BytecodeEmitter::emitCallOrNew(ParseNode* pn)
     }
 
     bool isNewOp = pn->getOp() == JSOP_NEW || pn->getOp() == JSOP_SPREADNEW ||
-                   pn->getOp() == JSOP_SUPERCALL || pn->getOp() == JSOP_SPREADSUPERCALL;;
+                   pn->getOp() == JSOP_SUPERCALL || pn->getOp() == JSOP_SPREADSUPERCALL;
 
     /*
      * Emit code for each argument in order, then emit the JSOP_*CALL or
@@ -8106,6 +8156,7 @@ BytecodeEmitter::emitFunctionFormalParametersAndBody(ParseNode *pn)
     // the body scope.
     if (hasDefaults) {
         popBodyScope.reset();
+
         EmitterScope* defaultsScope = innermostEmitterScope->enclosingInFrame();
         for (BindingIter bi(*sc->asFunctionBox()->defaultsScopeBindings, 0); bi; bi++) {
             JSAtom* name = bi.name();
@@ -8129,15 +8180,12 @@ BytecodeEmitter::emitFunctionFormalParametersAndBody(ParseNode *pn)
             if (!emitInitializeName(name, emitRhs))
                 return false;
         }
-    }
 
-    // Emit a nop to mark we're done processing parameters. This is so any
-    // direct eval that happens while processing the parameter list always get
-    // their own var scopes regardless of strictness.
-    //
-    // See ES 14.1.19.
-    if (!emit1(JSOP_NOP_PARAMSEND))
-        return false;
+        // Manually mark that we're done processing parameters. This is so any
+        // direct eval that happens while processing the parameter list always get
+        // their own var scopes regardless of strictness.
+        scopeNoteList.recordEnd(defaultsScope->noteIndex(), offset(), inPrologue());
+    }
 
     return emitTree(funBody);
 }

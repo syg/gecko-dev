@@ -11,7 +11,7 @@ VM:
     - LexicalEnvironmentObject
     - WithObject
   - hook new scopes in
-  - use JSOP_PARAMSEND when direct evaling
+  - use scope notes to find param defaults scope when direct evaling
 
 XDR
 Debugger scopes

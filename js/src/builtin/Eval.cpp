@@ -446,6 +446,7 @@ JS_FRIEND_API(bool)
 js::ExecuteInGlobalAndReturnScope(JSContext* cx, HandleObject global, HandleScript scriptArg,
                                   MutableHandleObject scopeArg)
 {
+    //TODOshu
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, global);
     MOZ_ASSERT(global->is<GlobalObject>());
@@ -472,7 +473,7 @@ js::ExecuteInGlobalAndReturnScope(JSContext* cx, HandleObject global, HandleScri
 
     // Unlike the non-syntactic scope chain API used by the subscript loader,
     // this API creates a fresh block scope each time.
-    RootedObject enclosingStaticScope(cx, script->enclosingStaticScope());
+    RootedObject enclosingStaticScope(cx);
     scope = ClonedBlockObject::createNonSyntactic(cx, enclosingStaticScope, scope);
     if (!scope)
         return false;

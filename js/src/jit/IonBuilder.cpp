@@ -1640,7 +1640,6 @@ IonBuilder::inspectOpcode(JSOp op)
     switch (op) {
       case JSOP_NOP:
       case JSOP_NOP_DESTRUCTURING:
-      case JSOP_NOP_PARAMSEND:
       case JSOP_LINENO:
       case JSOP_LOOPENTRY:
       case JSOP_JUMPTARGET:

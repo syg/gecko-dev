@@ -1485,11 +1485,6 @@ Parser<SyntaxParseHandler>::finishFunction()
     if (!pc->finishExtraFunctionScopes())
         return null();
 
-    /* TODOshu why is this required?
-    if (funbox->inWith())
-        return abortIfSyntaxParser();
-    */
-
     Rooted<GCVector<JSAtom*>> freeVariables(context, GCVector<JSAtom*>(context));
     for (FreeNameIter fni = pc->outermostScope().freeNames(pc); fni; fni++) {
         if (!freeVariables.append(fni.name()))
@@ -2090,19 +2085,20 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
                 if (!hasDefaults) {
                     hasDefaults = true;
 
-                    // Pop the last simple formal parameter, as it's not
-                    // simple anymore.
+                    // Clear the simple formal parameter list. With defaults,
+                    // no formal parameter names should be accessed directly
+                    // with argument slots.
                     //
                     // For maximum consistency we should mutate the last
                     // formal parameter's DeclarationKind from
                     // SimpleFormalParameter to FormalParameter, but this kind
                     // is ignored in newFunctionScopeData when default
                     // expressions are present anyways.
-                    pc->simpleFormalParameterNames.popBack();
+                    pc->simpleFormalParameterNames.clear();
 
                     // The Function.length property is the number of formals
                     // before the first default argument.
-                    funbox->length = pc->simpleFormalParameterNames.length();
+                    funbox->length = numPositionalFormals - 1;
                 }
 
                 Node def_expr = assignExprWithoutYield(yieldHandling, JSMSG_YIELD_IN_DEFAULT);
@@ -3242,9 +3238,6 @@ Parser<FullParseHandler>::checkDestructuringName(ParseNode* expr, Maybe<Declarat
             report(ParseError, false, expr, JSMSG_NO_VARIABLE_NAME);
             return false;
         }
-
-        // TODOshu: See if we can stop caring about the op of the ParseNode.
-        expr->setOp(JSOP_SETNAME);
 
         RootedPropertyName name(context, expr->name());
         return noteDeclaredName(name, *maybeDecl, expr);

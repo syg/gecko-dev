@@ -66,7 +66,7 @@ struct MOZ_STACK_CLASS CGScopeList {
 
     bool append(Scope* scope) { return vector.append(scope); }
     uint32_t length() const { return vector.length(); }
-    void finish(ScopeArray * array);
+    void finish(ScopeArray* array);
 };
 
 struct CGTryNoteList {

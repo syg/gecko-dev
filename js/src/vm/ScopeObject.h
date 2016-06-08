@@ -1531,8 +1531,6 @@ bool CheckEvalDeclarationConflicts(JSContext* cx, HandleScript script,
                                    HandleObject scopeChain, HandleObject varObj);
 
 #ifdef DEBUG
-void DumpStaticScopeChain(JSScript* script);
-void DumpStaticScopeChain(JSObject* staticScope);
 bool
 AnalyzeEntrainedVariables(JSContext* cx, HandleScript script);
 #endif

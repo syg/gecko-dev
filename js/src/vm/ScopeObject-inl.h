@@ -79,8 +79,8 @@ StaticScopeIter<allowGC>::operator++(int)
         // TODOshu obj = obj->template as<ModuleObject>().enclosingStaticScope();
     } else if (onNamedLambda || !obj->template as<JSFunction>().isNamedLambda()) {
         onNamedLambda = false;
-        JSFunction& fun = obj->template as<JSFunction>();
-        obj = fun.nonLazyScript()->enclosingStaticScope();
+        obj = nullptr;
+        MOZ_CRASH("TODOshu");
     } else {
         onNamedLambda = true;
     }

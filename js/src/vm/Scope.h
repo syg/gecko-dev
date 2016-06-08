@@ -476,8 +476,6 @@ class WithScope : public Scope
 class EvalScope : public Scope
 {
     friend class BindingIter;
-    friend class Scope;
-    static const ScopeKind classScopeKind_ = ScopeKind::Eval;
 
   public:
     // Data is public because it is created by the frontend. See
@@ -535,7 +533,20 @@ class EvalScope : public Scope
     bool hasBindings() const {
         return data().length > 0;
     }
+
+    bool isNonGlobal() const {
+        if (strict())
+            return true;
+        return !enclosing()->is<GlobalScope>();
+    }
 };
+
+template <>
+inline bool
+Scope::is<EvalScope>() const
+{
+    return kind_ == ScopeKind::Eval || kind_ == ScopeKind::StrictEval;
+}
 
 class BindingIter
 {
@@ -832,6 +843,10 @@ uint32_t EnvironmentChainLength(Scope* scope);
 
 // Starting at scope, is there a scope of kind ScopeKind::NonSyntactic?
 bool HasNonSyntacticScopeChain(Scope* scope);
+
+// Starting at a scope or the body scope of a script, dump the chain.
+void DumpScopeChain(JSScript* script);
+void DumpScopeChain(Scope* scope);
 
 } // namespace js
 

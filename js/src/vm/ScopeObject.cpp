@@ -1454,14 +1454,14 @@ EnvironmentIter::settle()
         if (ssi_.type() == StaticScopeIter<CanGC>::Block)
             incrementStaticScopeIter();
         MOZ_ASSERT(ssi_.type() == StaticScopeIter<CanGC>::Eval);
-        MOZ_ASSERT(maybeStaticScope() == frame_.script()->enclosingStaticScope());
+        //MOZ_ASSERT(maybeStaticScope() == frame_.script()->enclosingStaticScope());
         incrementStaticScopeIter();
         frame_ = NullFramePtr();
     }
 
     // Check if we have left the extent of the initial frame after we've
     // settled on a static scope.
-    if (frame_ && (ssi_.done() || maybeStaticScope() == frame_.script()->enclosingStaticScope()))
+    if (frame_ && (ssi_.done() /* || maybeStaticScope() == frame_.script()->enclosingStaticScope() */))
         frame_ = NullFramePtr();
 
 #ifdef DEBUG
@@ -3104,7 +3104,7 @@ js::GetDebugScopeForFunction(JSContext* cx, HandleFunction fun)
     JSScript* script = fun->getOrCreateScript(cx);
     if (!script)
         return nullptr;
-    EnvironmentIter ei(cx, fun->environment(), script->enclosingStaticScope());
+    EnvironmentIter ei(cx, fun->environment(), /* script->enclosingStaticScope() */ nullptr);
     return GetDebugScope(cx, ei);
 }
 
@@ -3205,7 +3205,7 @@ js::StaticScopeChainLength(JSObject* staticScope)
 ModuleEnvironmentObject*
 js::GetModuleEnvironmentForScript(JSScript* script)
 {
-    StaticScopeIter<NoGC> ssi(script->enclosingStaticScope());
+    StaticScopeIter<NoGC> ssi(nullptr /* script->enclosingStaticScope() */);
     while (!ssi.done() && ssi.type() != StaticScopeIter<NoGC>::Module)
         ssi++;
     if (ssi.done())
@@ -3416,44 +3416,6 @@ js::CheckEvalDeclarationConflicts(JSContext* cx, HandleScript script,
 }
 
 #ifdef DEBUG
-
-void
-js::DumpStaticScopeChain(JSScript* script)
-{
-    DumpStaticScopeChain(script->enclosingStaticScope());
-}
-
-void
-js::DumpStaticScopeChain(JSObject* staticScope)
-{
-    for (StaticScopeIter<NoGC> ssi(staticScope); !ssi.done(); ssi++) {
-        switch (ssi.type()) {
-          case StaticScopeIter<NoGC>::Module:
-            fprintf(stdout, "module [%p]", &ssi.module());
-            break;
-          case StaticScopeIter<NoGC>::Function:
-            fprintf(stdout, "function [%p]", &ssi.fun());
-            break;
-          case StaticScopeIter<NoGC>::Block:
-            fprintf(stdout, "block [%p]", &ssi.block());
-            break;
-          case StaticScopeIter<NoGC>::With:
-            fprintf(stdout, "with [%p]", &ssi.staticWith());
-            break;
-          case StaticScopeIter<NoGC>::NamedLambda:
-            fprintf(stdout, "named lambda");
-            break;
-          case StaticScopeIter<NoGC>::Eval:
-            fprintf(stdout, "eval [%p]", &ssi.eval());
-            break;
-          case StaticScopeIter<NoGC>::NonSyntactic:
-            fprintf(stdout, "non-syntactic [%p]", &ssi.nonSyntactic());
-            break;
-        }
-        fprintf(stdout, " -> ");
-    }
-    fprintf(stdout, "global\n");
-}
 
 typedef HashSet<PropertyName*> PropertyNameSet;
 

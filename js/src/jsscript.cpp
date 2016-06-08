@@ -2614,8 +2614,6 @@ JSScript::fullyInitFromEmitter(ExclusiveContext* cx, HandleScript script, Byteco
     if (!SaveSharedScriptData(cx, script, ssd, nsrcnotes))
         return false;
 
-    script->bodyScope_ = bce->bodyScope();
-
     // Compute whether this script is under a non-syntactic scope. We don't
     // need to walk the entire static scope chain if the script is nested in a
     // function. In that case, we can propagate the cached value from the
@@ -3203,7 +3201,8 @@ js::detail::CopyScript(JSContext* cx, HandleObject scriptStaticScope, HandleScri
                         if (!innerFun->getOrCreateScript(cx))
                             return false;
                     }
-                    RootedObject staticScope(cx, innerFun->nonLazyScript()->enclosingStaticScope());
+                    // TODOshu
+                    RootedObject staticScope(cx, /* innerFun->nonLazyScript()->enclosingStaticScope() */ nullptr);
                     StaticScopeIter<CanGC> ssi(cx, staticScope);
                     RootedObject enclosingScope(cx);
                     if (ssi.done() || ssi.type() == StaticScopeIter<CanGC>::NonSyntactic) {
@@ -3622,13 +3621,16 @@ JSScript::traceChildren(JSTracer* trc)
         TraceRange(trc, constarray->length, constarray->vector, "consts");
     }
 
+    if (hasScopes()) {
+        ScopeArray* scopearray = scopes();
+        TraceRange(trc, scopearray->length, scopearray->vector, "scopes");
+    }
+
     MOZ_ASSERT_IF(sourceObject(), MaybeForwarded(sourceObject())->compartment() == compartment());
     TraceNullableEdge(trc, &sourceObject_, "sourceObject");
 
     TraceNullableEdge(trc, &function_, "function");
     TraceNullableEdge(trc, &module_, "module");
-
-    TraceNullableEdge(trc, &bodyScope_, "body scope");
 
     if (maybeLazyScript())
         TraceManuallyBarrieredEdge(trc, &lazyScript, "lazyScript");
@@ -3732,7 +3734,7 @@ JSScript::innermostScope(jsbytecode* pc)
 {
     if (Scope* scope = getScope(pc))
         return scope;
-    return bodyScope_;
+    return bodyScope();
 }
 
 void
