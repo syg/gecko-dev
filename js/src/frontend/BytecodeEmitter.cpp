@@ -506,6 +506,8 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
             return *loc;
         return searchAndCache(bce, name);
     }
+
+    NameLocation locationBoundInScope(BytecodeEmitter* bce, JSAtom* name, EmitterScope* target);
 };
 
 void
@@ -668,6 +670,24 @@ BytecodeEmitter::EmitterScope::searchAndCache(BytecodeEmitter* bce, JSAtom* name
         bce->cx->recoverFromOutOfMemory();
 
     return *loc;
+}
+
+NameLocation
+BytecodeEmitter::EmitterScope::locationBoundInScope(BytecodeEmitter* bce, JSAtom* name,
+                                                    EmitterScope* target)
+{
+    // The target scope must be an intra-frame enclosing scope of this
+    // one. Count the number of extra hops to reach it.
+    uint8_t extraHops = 0;
+    for (EmitterScope* es = this; es != target; es = es->enclosingInFrame()) {
+        if (es->hasEnvironment_)
+            extraHops++;
+    }
+
+    NameLocation loc = target->lookup(bce, name);
+    if (loc.kind() == NameLocation::Kind::EnvironmentCoordinate)
+        return loc.addHops(extraHops);
+    return loc;
 }
 
 static inline bool
@@ -1221,6 +1241,12 @@ NameLocation
 BytecodeEmitter::lookupName(JSAtom* name)
 {
     return innermostEmitterScope->lookup(this, name);
+}
+
+NameLocation
+BytecodeEmitter::locationOfNameBoundInScope(JSAtom* name, EmitterScope* target)
+{
+    return innermostEmitterScope->locationBoundInScope(this, name, target);
 }
 
 bool
@@ -3700,10 +3726,6 @@ BytecodeEmitter::emitFunctionScript(ParseNode* body)
          * has no semantic effect.
          */
 
-        // Link the function and the script to each other, so that StaticScopeIter
-        // may walk the scope chain of currently compiling scripts.
-        JSScript::linkToFunctionFromEmitter(cx, script, funbox);
-
         if (funbox->argumentsHasLocalBinding()) {
             MOZ_ASSERT(offset() == 0);  /* See JSScript::argumentsBytecode. */
             if (!emitInitializeFunctionSpecialName(cx->names().arguments, JSOP_ARGUMENTS))
@@ -3805,6 +3827,11 @@ BytecodeEmitter::emitFunctionScript(ParseNode* body)
             return false;
         declEnvEmitterScope.reset();
     }
+
+    // Link the function and the script to each other, so that StaticScopeIter
+    // may walk the scope chain of currently compiling scripts.
+    // TODOshu remove this
+    JSScript::linkToFunctionFromEmitter(cx, script, funbox);
 
     if (!JSScript::fullyInitFromEmitter(cx, script, this))
         return false;
@@ -6233,8 +6260,10 @@ BytecodeEmitter::emitFunction(ParseNode* pn, bool needsProto)
             if (funbox->isLikelyConstructorWrapper())
                 script->setLikelyConstructorWrapper();
         }
+        /* TODOshu
         if (outersc->isFunctionBox())
             outersc->asFunctionBox()->function()->nonLazyScript()->setHasInnerFunctions(true);
+        */
     } else {
         MOZ_ASSERT(IsAsmJSModule(fun));
     }
@@ -8088,21 +8117,17 @@ BytecodeEmitter::emitFunctionFormalParametersAndBody(ParseNode *pn)
         EmitterScope* defaultsScope = innermostEmitterScope->enclosingInFrame();
         for (BindingIter bi(*sc->asFunctionBox()->defaultsScopeBindings, 0); bi; bi++) {
             JSAtom* name = bi.name();
-            NameLocation defaultLoc = defaultsScope->lookup(this, name);
+            NameLocation defaultLoc = locationOfNameBoundInScope(name, defaultsScope);
 
             // If all formal parameter that live on the frame have their slots
-            // match perfectly, the nextFrameSlot on defaults scope is set to
-            // 0. In this case we don't need to emit superfluous moves.
+            // match perfectly, the defaults scope is given no frame slots.
+            // In this case we don't need to emit superfluous moves.
             //
             // See EmitterScope::enterFunctionBody for this optimization.
-            if (defaultLoc.kind() == NameLocation::Kind::FrameSlot) {
-                if (defaultsScope->frameSlotEnd() == 0)
-                    continue;
-            } else {
-                MOZ_ASSERT(defaultLoc.kind() == NameLocation::Kind::EnvironmentCoordinate);
-                if (innermostEmitterScope->hasEnvironment())
-                    // TODOshu here
-                    ;
+            if (defaultLoc.kind() == NameLocation::Kind::FrameSlot &&
+                defaultsScope->numFrameSlots() == 0)
+            {
+                continue;
             }
 
             auto emitRhs = [name, defaultLoc](BytecodeEmitter* bce, const NameLocation&, bool) {

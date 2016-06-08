@@ -301,6 +301,12 @@ struct MOZ_STACK_CLASS BytecodeEmitter
 
     NameLocation lookupName(JSAtom* name);
 
+    // To implement Annex B and the formal parameter defaults scope semantics
+    // requires accessing names that would otherwise be shadowed. This method
+    // returns the access location of a name that is known to be bound in a
+    // target scope.
+    NameLocation locationOfNameBoundInScope(JSAtom* name, EmitterScope* target);
+
     HandleScope bodyScope() const { return scopeList.vector[0]; }
     Scope* innermostScope() const;
 
