@@ -190,7 +190,7 @@ class Scope : public js::gc::TenuredCell
     GCPtrScope enclosing_;
 
     // If there are any aliased bindings, the shape for the
-    // Environment. Otherwise nullptr.
+    // EnvironmentObject. Otherwise nullptr.
     GCPtrShape environmentShape_;
 
   protected:
@@ -219,6 +219,8 @@ class Scope : public js::gc::TenuredCell
 
     static Scope* create(ExclusiveContext* cx, ScopeKind kind, Scope* enclosing,
                          Shape* environmentShape, uintptr_t data);
+
+    Shape* maybeCloneEnvironmentShape(JSContext* cx);
 
   public:
     static const JS::TraceKind TraceKind = JS::TraceKind::Scope;

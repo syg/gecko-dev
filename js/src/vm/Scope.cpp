@@ -180,25 +180,38 @@ Scope::environmentChainLength() const
     return length;
 }
 
+Shape*
+Scope::maybeCloneEnvironmentShape(JSContext* cx)
+{
+    // Clone the environment shape if cloning into a different compartment.
+    if (environmentShape_ && environmentShape_->compartment() != cx->compartment()) {
+        BindingIter bi(this);
+        return CreateEnvironmentShape(cx, bi,
+                                      environmentShape_->getObjectClass(),
+                                      environmentShape_->slot() + 1,
+                                      environmentShape_->getObjectFlags());
+    }
+    return environmentShape_;
+}
+
 Scope*
 Scope::clone(JSContext* cx, Scope* enclosing)
 {
     MOZ_ASSERT(!is<FunctionScope>() && !is<GlobalScope>(),
                "FunctionScopes and GlobalScopes should use the class-specific clone.");
+    MOZ_ASSERT_IF(is<LexicalScope>(), as<LexicalScope>().computeFirstFrameSlot() ==
+                                      LexicalScope::computeNextFrameSlot(enclosing));
 
-    if (is<LexicalScope>()) {
-        LexicalScope& self = as<LexicalScope>();
-        return LexicalScope::create(cx, self.kind(), &self.data(), self.computeFirstFrameSlot(),
-                                    enclosing);
-    }
+    Shape* envShape = maybeCloneEnvironmentShape(cx);
+    if (!envShape)
+        return nullptr;
 
-    if (is<EvalScope>()) {
-        EvalScope& self = as<EvalScope>();
-        return EvalScope::create(cx, self.kind(), &self.data(), enclosing);
-    }
+    Scope* clone = create(cx, kind_, enclosing, envShape, data_);
+    if (!clone)
+        return nullptr;
 
-    MOZ_ASSERT(is<WithScope>());
-    return WithScope::create(cx, enclosing);
+    reinterpret_cast<RefCountedData*>(data_)->addRef();
+    return clone;
 }
 
 void
@@ -266,12 +279,11 @@ LexicalScope::create(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
     if (!copy)
         return nullptr;
 
-    copy->addRef();
     Scope* scope = Scope::create(cx, kind, enclosing, envShape, reinterpret_cast<uintptr_t>(copy));
     if (!scope)
         js_free(copy);
-    MOZ_ASSERT(static_cast<LexicalScope*>(scope)->is<LexicalScope>());
-    return static_cast<LexicalScope*>(scope);
+    copy->addRef();
+    return &scope->as<LexicalScope>();
 }
 
 /* static */ FunctionScope*
@@ -303,19 +315,38 @@ FunctionScope::create(ExclusiveContext* cx, BindingData* bindings, uint32_t firs
     if (!data->bindings)
         return nullptr;
 
-    data->bindings->addRef();
     Scope* scope = Scope::create(cx, ScopeKind::Function, enclosing, envShape,
                                  reinterpret_cast<uintptr_t>(data));
     if (!scope)
         js_free(data);
-    return static_cast<FunctionScope*>(scope);
+    data->bindings->addRef();
+    return &scope->as<FunctionScope>();
 }
 
 FunctionScope*
 FunctionScope::clone(JSContext* cx, JSFunction* fun, Scope* enclosing)
 {
+    MOZ_ASSERT_IF(enclosing, computeFirstFrameSlot() == computeNextFrameSlot(enclosing));
     MOZ_ASSERT(fun != canonicalFunction());
-    return create(cx, data().bindings, computeFirstFrameSlot(), fun, enclosing);
+
+    Data* dataClone = NewEmptyScopeData<Data>(cx, sizeof(Data));
+    if (!dataClone)
+        return nullptr;
+
+    dataClone->canonicalFunction.init(fun);
+    dataClone->bindings = data().bindings;
+
+    Shape* envShape = maybeCloneEnvironmentShape(cx);
+    if (!envShape)
+        return nullptr;
+
+    Scope* clone = Scope::create(cx, kind(), enclosing, envShape,
+                                 reinterpret_cast<uintptr_t>(dataClone));
+    if (!clone)
+        return nullptr;
+
+    dataClone->bindings->addRef();
+    return &clone->as<FunctionScope>();
 }
 
 JSScript*
@@ -343,18 +374,22 @@ GlobalScope::create(ExclusiveContext* cx, ScopeKind kind, BindingData* data)
     if (!copy)
         return nullptr;
 
-    copy->addRef();
     Scope* scope = Scope::create(cx, kind, nullptr, nullptr, reinterpret_cast<uintptr_t>(copy));
     if (!scope)
         js_free(copy);
-    MOZ_ASSERT(static_cast<GlobalScope*>(scope)->is<GlobalScope>());
-    return static_cast<GlobalScope*>(scope);
+    copy->addRef();
+    return &scope->as<GlobalScope>();
 }
 
 GlobalScope*
 GlobalScope::clone(JSContext* cx, ScopeKind kind)
 {
-    return create(cx, kind, &data());
+    Scope* clone = Scope::create(cx, kind, nullptr, nullptr, data_);
+    if (!clone)
+        return nullptr;
+
+    data().addRef();
+    return &clone->as<GlobalScope>();
 }
 
 /* static */ WithScope*
@@ -367,8 +402,6 @@ WithScope::create(ExclusiveContext* cx, Scope* enclosing)
 /* static */ EvalScope*
 EvalScope::create(ExclusiveContext* cx, ScopeKind scopeKind, BindingData* data, Scope* enclosing)
 {
-    MOZ_ASSERT(scopeKind == ScopeKind::Eval || scopeKind == ScopeKind::StrictEval);
-
     // The data that's passed in is from the frontend and is LifoAlloc'd or is
     // from Scope::copy. Copy it now that we're creating a permanent VM scope.
     Shape* envShape = nullptr;
@@ -390,12 +423,12 @@ EvalScope::create(ExclusiveContext* cx, ScopeKind scopeKind, BindingData* data, 
     if (!copy)
         return nullptr;
 
-    copy->addRef();
     Scope* scope = Scope::create(cx, scopeKind, enclosing, envShape,
                                  reinterpret_cast<uintptr_t>(copy));
     if (!scope)
         js_free(copy);
-    return static_cast<EvalScope*>(scope);
+    copy->addRef();
+    return &scope->as<EvalScope>();
 }
 
 /* static */ Scope*
