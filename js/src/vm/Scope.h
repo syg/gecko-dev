@@ -189,17 +189,22 @@ class Scope : public js::gc::TenuredCell
     // The enclosing scope or nullptr.
     GCPtrScope enclosing_;
 
+    // If there are any aliased bindings, the shape for the
+    // Environment. Otherwise nullptr.
+    GCPtrShape environmentShape_;
+
   protected:
     uintptr_t data_;
 
-    Scope(ScopeKind kind, Scope* enclosing, uintptr_t data)
+    Scope(ScopeKind kind, Scope* enclosing, Shape* environmentShape, uintptr_t data)
       : kind_(kind),
         enclosing_(enclosing),
+        environmentShape_(environmentShape),
         data_(data)
     { }
 
     static Scope* create(ExclusiveContext* cx, ScopeKind kind, Scope* enclosing,
-                         uintptr_t data);
+                         Shape* environmentShape, uintptr_t data);
 
   public:
     static const JS::TraceKind TraceKind = JS::TraceKind::Scope;
@@ -221,6 +226,10 @@ class Scope : public js::gc::TenuredCell
 
     Scope* enclosing() const {
         return enclosing_;
+    }
+
+    Shape* environmentShape() const {
+        return environmentShape_;
     }
 
     uint32_t chainLength() const;
@@ -274,10 +283,6 @@ class LexicalScope : public Scope
         // scope.
         uint32_t nextFrameSlot;
 
-        // If there are any aliased bindings, the shape for the
-        // LexicalEnvironment to create. Otherwise nullptr.
-        GCPtrShape environmentShape;
-
         // The array of tagged JSAtom* names, allocated beyond the end of the
         // struct.
         BindingName names[1];
@@ -309,10 +314,6 @@ class LexicalScope : public Scope
 
     uint32_t nextFrameSlot() const {
         return data().nextFrameSlot;
-    }
-
-    Shape* environmentShape() const {
-        return data().environmentShape;
     }
 
     // For frontend use. Implemented in BytecodeEmitter.cpp
@@ -365,10 +366,6 @@ class FunctionScope : public Scope
         // arrow).
         GCPtrFunction canonicalFunction;
 
-        // If there are any aliased bindings, the shape for the
-        // CallEnvironment. Otherwise nullptr.
-        GCPtrShape environmentShape;
-
         // The array of tagged JSAtom* names, allocated beyond the end of the
         // struct.
         BindingName names[1];
@@ -417,10 +414,6 @@ class FunctionScope : public Scope
     }
 
     JSScript* script() const;
-
-    Shape* environmentShape() const {
-        return data().environmentShape;
-    }
 
     uint32_t numSimpleFormalParameters() const {
         return data().nonSimpleFormalStart;
@@ -525,11 +518,6 @@ class EvalScope : public Scope
         // scope.
         uint32_t nextFrameSlot;
 
-        // Strict eval scopes have their own var scopes. If there are any
-        // aliased bindings, the shape for the CallEnvironment. Otherwise
-        // nullptr.
-        GCPtrShape environmentShape;
-
         // The array of tagged JSAtom* names, allocated beyond the end of the
         // struct.
         BindingName names[1];
@@ -558,10 +546,6 @@ class EvalScope : public Scope
 
     uint32_t nextFrameSlot() const {
         return data().nextFrameSlot;
-    }
-
-    Shape* environmentShape() const {
-        return data().environmentShape;
     }
 
     bool strict() const {
@@ -859,13 +843,16 @@ class ScopeIter
         return scope_->kind();
     }
 
+    // Returns the shape of the environment if it is known. It is possible to
+    // hasSyntacticEnvironment and to have no known shape, e.g., eval.
+    Shape* environmentShape() const {
+        return scope()->environmentShape();
+    }
+
     // Returns whether this scope has a syntactic environment (i.e., an
     // Environment that isn't a non-syntactic With or NonSyntacticVariables)
     // on the environment chain.
     bool hasSyntacticEnvironment() const;
-
-    // If hasSyntacticEnvironment(), returns the shape of the environment.
-    Shape* environmentShape() const;
 
     void trace(JSTracer* trc) {
         TraceEdge(trc, &scope_, "scope iter scope");

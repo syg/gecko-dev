@@ -123,24 +123,8 @@ CopyScopeData(ExclusiveContext* cx, ScopeData* data, size_t dataSize)
 
 template <typename ScopeData>
 static ScopeData*
-CopyScopeData(ExclusiveContext* cx, BindingIter& bi, const Class* cls,
-              uint32_t baseShapeFlags, ScopeData* data, size_t dataSize)
-{
-    Shape* envShape = CreateEnvironmentShape(cx, bi, cls, bi.nextEnvironmentSlot(),
-                                             baseShapeFlags);
-    if (!envShape)
-        return nullptr;
-
-    ScopeData* copy = CopyScopeData(cx, data, dataSize);
-    if (copy)
-        copy->environmentShape.init(envShape);
-    return copy;
-}
-
-template <typename ScopeData>
-static ScopeData*
-CopyFrameScopeData(ExclusiveContext* cx, BindingIter& bi, const Class* cls,
-                   uint32_t baseShapeFlags, ScopeData* data, size_t dataSize)
+CopyScopeData(ExclusiveContext* cx, BindingIter& bi, ScopeData* data, size_t dataSize,
+              const Class* cls, uint32_t baseShapeFlags, Shape** envShape)
 {
     // Copy a fresh BindingIter for use below.
     BindingIter freshBi(bi);
@@ -151,7 +135,11 @@ CopyFrameScopeData(ExclusiveContext* cx, BindingIter& bi, const Class* cls,
         bi++;
     data->nextFrameSlot = bi.nextFrameSlot();
 
-    return CopyScopeData(cx, freshBi, cls, baseShapeFlags, data, dataSize);
+    *envShape = CreateEnvironmentShape(cx, freshBi, cls, bi.nextEnvironmentSlot(), baseShapeFlags);
+    if (!*envShape)
+        return nullptr;
+
+    return CopyScopeData(cx, data, dataSize);
 }
 
 template <typename ScopeData>
@@ -163,11 +151,12 @@ NewEmptyScopeData(ExclusiveContext* cx, size_t dataSize)
 }
 
 /* static */ Scope*
-Scope::create(ExclusiveContext* cx, ScopeKind kind, Scope* enclosing, uintptr_t data)
+Scope::create(ExclusiveContext* cx, ScopeKind kind, Scope* enclosing, Shape* environmentShape,
+              uintptr_t data)
 {
     Scope* scope = Allocate<Scope>(cx);
     if (scope)
-        new (scope) Scope(kind, enclosing, data);
+        new (scope) Scope(kind, enclosing, environmentShape, data);
     return scope;
 }
 
@@ -245,16 +234,17 @@ LexicalScope::create(ExclusiveContext* cx, ScopeKind kind, Data* data,
 
     // The data that's passed in is from the frontend and is LifoAlloc'd or is
     // from Scope::copy. Copy it now that we're creating a permanent VM scope.
+    Shape* envShape = nullptr;
     Data* copy;
     BindingIter bi(*data, firstFrameSlot);
-    copy = CopyFrameScopeData(cx, bi,
-                              &ClonedBlockObject::class_,
-                              BaseShape::NOT_EXTENSIBLE | BaseShape::DELEGATE,
-                              data, sizeOfData(data->length));
+    copy = CopyScopeData(cx, bi, data, sizeOfData(data->length),
+                         &ClonedBlockObject::class_,
+                         BaseShape::NOT_EXTENSIBLE | BaseShape::DELEGATE,
+                         &envShape);
     if (!copy)
         return nullptr;
 
-    Scope* scope = Scope::create(cx, kind, enclosing, reinterpret_cast<uintptr_t>(copy));
+    Scope* scope = Scope::create(cx, kind, enclosing, envShape, reinterpret_cast<uintptr_t>(copy));
     if (!scope)
         js_free(copy);
     MOZ_ASSERT(static_cast<LexicalScope*>(scope)->is<LexicalScope>());
@@ -270,13 +260,14 @@ FunctionScope::create(ExclusiveContext* cx, Data* data, uint32_t firstFrameSlot,
 
     // The data that's passed in is from the frontend and is LifoAlloc'd or is
     // from Scope::copy. Copy it now that we're creating a permanent VM scope.
+    Shape* envShape = nullptr;
     Data* copy;
     if (data) {
         BindingIter bi(*data, firstFrameSlot);
-        copy = CopyFrameScopeData(cx, bi,
-                                  &CallObject::class_,
-                                  BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE,
-                                  data, sizeOfData(data->length));
+        copy = CopyScopeData(cx, bi, data, sizeOfData(data->length),
+                             &CallObject::class_,
+                             BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE,
+                             &envShape);
     } else {
         copy = NewEmptyScopeData<Data>(cx, sizeOfData(1));
     }
@@ -286,7 +277,7 @@ FunctionScope::create(ExclusiveContext* cx, Data* data, uint32_t firstFrameSlot,
 
     copy->canonicalFunction.init(fun);
 
-    Scope* scope = Scope::create(cx, ScopeKind::Function, enclosing,
+    Scope* scope = Scope::create(cx, ScopeKind::Function, enclosing, envShape,
                                  reinterpret_cast<uintptr_t>(copy));
     if (!scope)
         js_free(copy);
@@ -325,7 +316,7 @@ GlobalScope::create(ExclusiveContext* cx, ScopeKind kind, Data* data)
     if (!copy)
         return nullptr;
 
-    Scope* scope = Scope::create(cx, kind, nullptr, reinterpret_cast<uintptr_t>(copy));
+    Scope* scope = Scope::create(cx, kind, nullptr, nullptr, reinterpret_cast<uintptr_t>(copy));
     if (!scope)
         js_free(copy);
     MOZ_ASSERT(static_cast<GlobalScope*>(scope)->is<GlobalScope>());
@@ -341,7 +332,7 @@ GlobalScope::clone(JSContext* cx, ScopeKind kind)
 /* static */ WithScope*
 WithScope::create(ExclusiveContext* cx, Scope* enclosing)
 {
-    Scope* scope = Scope::create(cx, ScopeKind::With, enclosing, 0);
+    Scope* scope = Scope::create(cx, ScopeKind::With, enclosing, nullptr, 0);
     return static_cast<WithScope*>(scope);
 }
 
@@ -352,14 +343,15 @@ EvalScope::create(ExclusiveContext* cx, ScopeKind scopeKind, Data* data, Scope* 
 
     // The data that's passed in is from the frontend and is LifoAlloc'd or is
     // from Scope::copy. Copy it now that we're creating a permanent VM scope.
+    Shape* envShape = nullptr;
     Data* copy;
     if (data) {
         if (scopeKind == ScopeKind::StrictEval) {
             BindingIter bi(*data, true);
-            copy = CopyFrameScopeData(cx, bi,
-                                      &CallObject::class_,
-                                      BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE,
-                                      data, sizeOfData(data->length));
+            copy = CopyScopeData(cx, bi, data, sizeOfData(data->length),
+                                 &CallObject::class_,
+                                 BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE,
+                                 &envShape);
         } else {
             copy = CopyScopeData(cx, data, sizeOfData(data->length));
         }
@@ -370,7 +362,8 @@ EvalScope::create(ExclusiveContext* cx, ScopeKind scopeKind, Data* data, Scope* 
     if (!copy)
         return nullptr;
 
-    Scope* scope = Scope::create(cx, scopeKind, enclosing, reinterpret_cast<uintptr_t>(copy));
+    Scope* scope = Scope::create(cx, scopeKind, enclosing, envShape,
+                                 reinterpret_cast<uintptr_t>(copy));
     if (!scope)
         js_free(copy);
     return static_cast<EvalScope*>(scope);
@@ -402,15 +395,11 @@ ScopeIter::hasSyntacticEnvironment() const
 {
     switch (scope()->kind()) {
       case ScopeKind::Function:
-        return !!scope()->as<FunctionScope>().environmentShape();
-
       case ScopeKind::ParameterDefaults:
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
-        return !!scope()->as<LexicalScope>().environmentShape();
-
       case ScopeKind::StrictEval:
-        return !!scope()->as<EvalScope>().environmentShape();
+        return !!environmentShape();
 
       case ScopeKind::With:
       case ScopeKind::Global:
@@ -423,27 +412,6 @@ ScopeIter::hasSyntacticEnvironment() const
     }
 
     MOZ_CRASH("Bad ScopeKind");
-}
-
-Shape*
-ScopeIter::environmentShape() const
-{
-    MOZ_ASSERT(hasSyntacticEnvironment());
-
-    switch (scope()->kind()) {
-      case ScopeKind::Function:
-        return scope()->as<FunctionScope>().environmentShape();
-
-      case ScopeKind::Lexical:
-      case ScopeKind::Catch:
-        return scope()->as<LexicalScope>().environmentShape();
-
-      case ScopeKind::Eval:
-        return scope()->as<EvalScope>().environmentShape();
-
-      default:
-        MOZ_CRASH("Scope does not have a syntactic environment");
-    }
 }
 
 void

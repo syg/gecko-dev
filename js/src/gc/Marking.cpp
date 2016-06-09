@@ -1194,18 +1194,11 @@ TraceScopeData(JSTracer* trc, Data* data)
 {
     TraceBindingNames(trc, data->names, data->length);
 }
-template <typename Data>
-static inline void
-TraceScopeDataWithEnvironment(JSTracer* trc, Data* data)
-{
-    TraceNullableEdge(trc, &data->environmentShape, "scope env shape");
-    TraceScopeData(trc, data);
-}
 static inline void
 TraceFunctionScopeData(JSTracer* trc, FunctionScope::Data* data)
 {
     TraceEdge(trc, &data->canonicalFunction, "scope canonical function");
-    TraceScopeDataWithEnvironment(trc, data);
+    TraceScopeData(trc, data);
 }
 void
 BindingIter::trace(JSTracer* trc)
@@ -1216,13 +1209,14 @@ void
 Scope::traceChildren(JSTracer* trc)
 {
     TraceNullableEdge(trc, &enclosing_, "scope enclosing");
+    TraceNullableEdge(trc, &environmentShape_, "scope env shape");
     switch (kind_) {
       case ScopeKind::Function:
         TraceFunctionScopeData(trc, reinterpret_cast<FunctionScope::Data*>(data_));
         break;
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
-        TraceScopeDataWithEnvironment(trc, reinterpret_cast<LexicalScope::Data*>(data_));
+        TraceScopeData(trc, reinterpret_cast<LexicalScope::Data*>(data_));
         break;
       case ScopeKind::Global:
       case ScopeKind::NonSyntactic:
@@ -1230,7 +1224,7 @@ Scope::traceChildren(JSTracer* trc)
         break;
       case ScopeKind::Eval:
       case ScopeKind::StrictEval:
-        TraceScopeDataWithEnvironment(trc, reinterpret_cast<EvalScope::Data*>(data_));
+        TraceScopeData(trc, reinterpret_cast<EvalScope::Data*>(data_));
         break;
       default:
         break;
@@ -1241,14 +1235,14 @@ js::GCMarker::eagerlyMarkChildren(Scope* scope)
 {
     if (scope->enclosing_)
         traverseEdge(scope, static_cast<Scope*>(scope->enclosing_));
+    if (scope->environmentShape_)
+        traverseEdge(scope, static_cast<Shape*>(scope->environmentShape_));
     BindingName* names = nullptr;
     uint32_t length = 0;
     switch (scope->kind_) {
       case ScopeKind::Function: {
         FunctionScope::Data* data = reinterpret_cast<FunctionScope::Data*>(scope->data_);
         traverseEdge(scope, static_cast<JSObject*>(data->canonicalFunction));
-        if (data->environmentShape)
-            traverseEdge(scope, static_cast<Shape*>(data->environmentShape));
         names = data->names;
         length = data->length;
         break;
@@ -1256,8 +1250,6 @@ js::GCMarker::eagerlyMarkChildren(Scope* scope)
       case ScopeKind::Lexical:
       case ScopeKind::Catch: {
         LexicalScope::Data* data = reinterpret_cast<LexicalScope::Data*>(scope->data_);
-        if (data->environmentShape)
-            traverseEdge(scope, static_cast<Shape*>(data->environmentShape));
         names = data->names;
         length = data->length;
         break;
@@ -1273,8 +1265,6 @@ js::GCMarker::eagerlyMarkChildren(Scope* scope)
       case ScopeKind::Eval:
       case ScopeKind::StrictEval: {
         EvalScope::Data* data = reinterpret_cast<EvalScope::Data*>(scope->data_);
-        if (data->environmentShape)
-            traverseEdge(scope, static_cast<Shape*>(data->environmentShape));
         names = data->names;
         length = data->length;
         break;
