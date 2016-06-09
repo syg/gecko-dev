@@ -110,10 +110,12 @@ class BindingLocation
     }
 
     static BindingLocation Frame(uint32_t slot) {
+        MOZ_ASSERT(slot < LOCALNO_LIMIT);
         return BindingLocation(Kind::Frame, slot);
     }
 
     static BindingLocation Environment(uint32_t slot) {
+        MOZ_ASSERT(slot < SCOPECOORD_SLOT_LIMIT);
         return BindingLocation(Kind::Environment, slot);
     }
 

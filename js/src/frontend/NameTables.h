@@ -177,10 +177,12 @@ class NameLocation
     }
 
     static NameLocation FrameSlot(BindingKind bindKind, uint32_t slot) {
+        MOZ_ASSERT(slot < LOCALNO_LIMIT);
         return NameLocation(Kind::FrameSlot, bindKind, 0, slot);
     }
 
     static NameLocation EnvironmentCoordinate(BindingKind bindKind, uint8_t hops, uint32_t slot) {
+        MOZ_ASSERT(slot < SCOPECOORD_SLOT_LIMIT);
         return NameLocation(Kind::EnvironmentCoordinate, bindKind, hops, slot);
     }
 

@@ -483,8 +483,12 @@ BindingIter::BindingIter(JSScript* script)
 void
 BindingIter::init(LexicalScope::BindingData& data, uint32_t firstFrameSlot)
 {
+    // Named lambdas have a separate environment for their name that. This
+    // scope cannot have frame slots and sets its firstFrameSlot to
+    // LOCALNO_LIMIT. Asking for the location of a non-closed-over callee will
+    // assert.
     init(0, 0, 0, data.constStart,
-         CanHaveFrameSlots | CanHaveEnvironmentSlots,
+         (firstFrameSlot == LOCALNO_LIMIT ? 0 : CanHaveFrameSlots) | CanHaveEnvironmentSlots,
          firstFrameSlot, JSSLOT_FREE(&ClonedBlockObject::class_),
          data.names, data.length);
 }

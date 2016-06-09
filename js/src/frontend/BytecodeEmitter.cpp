@@ -798,8 +798,8 @@ BytecodeEmitter::EmitterScope::enterDeclEnv(BytecodeEmitter* bce, FunctionBox* f
     MOZ_ASSERT(!bi);
 
     auto createScope = [funbox](ExclusiveContext* cx, Scope* enclosing) {
-        // TODOshu maybe its own scope kind since decl envs have no frame?
-        return LexicalScope::create(cx, ScopeKind::Lexical, funbox->declEnvBindings, 0, enclosing);
+        return LexicalScope::create(cx, ScopeKind::Lexical, funbox->declEnvBindings,
+                                    LOCALNO_LIMIT, enclosing);
     };
     if (!internScope(bce, createScope))
         return false;

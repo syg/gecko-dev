@@ -649,6 +649,43 @@ class ScopeObject : public NativeObject
     }
 };
 
+class EnvironmentObject : public NativeObject
+{
+  protected:
+    void init(Scope* scope, JSObject* enclosing);
+
+  public:
+    // The enclosing environment. Either another EnvironmentObject, a
+    // GlobalObject, or a non-syntactic environment object.
+    static const uint32_t ENCLOSING_ENV_SLOT = 0;
+
+    // Since every scope chain terminates with a global object, whether
+    // GlobalObject or a non-syntactic one, and since those objects do not
+    // derive ScopeObject (they have completely different layouts), the
+    // enclosing environment of an EnvironmentObject is necessarily non-null.
+    JSObject& enclosingEnvironment() const {
+        return getFixedSlot(ENCLOSING_ENV_SLOT).toObject();
+    }
+
+    Scope& scope() const {
+        return *static_cast<Scope*>(getPrivate());
+    }
+
+    // Get or set an aliased variable contained in this scope. Unaliased
+    // variables should instead access the stack frame. Aliased variable access
+    // is primarily made through JOF_SCOPECOORD ops which is why these members
+    // take a ScopeCoordinate instead of just the slot index.
+    inline const Value& aliasedVar(ScopeCoordinate sc);
+
+    inline void setAliasedVar(JSContext* cx, ScopeCoordinate sc, PropertyName* name,
+                              const Value& v);
+
+    /* For jit access. */
+    static size_t offsetOfEnclosingEnvironment() {
+        return getFixedSlotOffset(ENCLOSING_ENV_SLOT);
+    }
+};
+
 class LexicalScopeBase : public ScopeObject
 {
   public:

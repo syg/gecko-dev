@@ -1211,6 +1211,7 @@ Scope::traceChildren(JSTracer* trc)
         TraceBindingData(trc, data->bindings);
         break;
       }
+      case ScopeKind::ParameterDefaults:
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
         TraceBindingData(trc, reinterpret_cast<LexicalScope::BindingData*>(data_));
@@ -1223,7 +1224,10 @@ Scope::traceChildren(JSTracer* trc)
       case ScopeKind::StrictEval:
         TraceBindingData(trc, reinterpret_cast<EvalScope::BindingData*>(data_));
         break;
-      default:
+      case ScopeKind::Module:
+        MOZ_CRASH("NYI");
+        break;
+      case ScopeKind::With:
         break;
     }
 }
@@ -1244,6 +1248,7 @@ js::GCMarker::eagerlyMarkChildren(Scope* scope)
         length = data->bindings->length;
         break;
       }
+      case ScopeKind::ParameterDefaults:
       case ScopeKind::Lexical:
       case ScopeKind::Catch: {
         LexicalScope::BindingData* data =
@@ -1269,7 +1274,10 @@ js::GCMarker::eagerlyMarkChildren(Scope* scope)
         length = data->length;
         break;
       }
-      default:
+      case ScopeKind::Module:
+        MOZ_CRASH("NYI");
+        break;
+      case ScopeKind::With:
         break;
     }
     for (uint32_t i = 0; i < length; i++)
