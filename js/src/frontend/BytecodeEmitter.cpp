@@ -3842,11 +3842,6 @@ BytecodeEmitter::emitFunctionScript(ParseNode* body)
         declEnvEmitterScope.reset();
     }
 
-    // Link the function and the script to each other, so that StaticScopeIter
-    // may walk the scope chain of currently compiling scripts.
-    // TODOshu remove this
-    JSScript::linkToFunctionFromEmitter(cx, script, funbox);
-
     if (!JSScript::fullyInitFromEmitter(cx, script, this))
         return false;
 
@@ -3858,19 +3853,7 @@ BytecodeEmitter::emitFunctionScript(ParseNode* body)
 bool
 BytecodeEmitter::emitModuleScript(ParseNode* body)
 {
-    /*
-     * IonBuilder has assumptions about what may occur immediately after
-     * script->main (e.g., in the case of destructuring params). Thus, put the
-     * following ops into the range [script->code, script->main). Note:
-     * execution starts from script->code, so this has no semantic effect.
-     */
-
-    ModuleBox* modulebox = sc->asModuleBox();
-    MOZ_ASSERT(modulebox);
-
-    // Link the module and the script to each other, so that StaticScopeIter
-    // may walk the scope chain of currently compiling scripts.
-    JSScript::linkToModuleFromEmitter(cx, script, modulebox);
+    MOZ_ASSERT(sc->asModuleBox());
 
     setFunctionBodyEndPos(body->pn_pos);
     if (!emitTree(body))
@@ -3883,13 +3866,6 @@ BytecodeEmitter::emitModuleScript(ParseNode* body)
 
     if (!JSScript::fullyInitFromEmitter(cx, script, this))
         return false;
-
-    /*
-     * Since modules are only run once. Mark the script so that initializers
-     * created within it may be given more precise types.
-     */
-    script->setTreatAsRunOnce();
-    MOZ_ASSERT(!script->hasRunOnce());
 
     tellDebuggerAboutCompiledScript(cx);
 

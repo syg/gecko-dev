@@ -813,6 +813,10 @@ CreateFunctionPrototype(JSContext* cx, JSProtoKey key)
         return nullptr;
 
     protoGroup->setInterpretedFunction(functionProto);
+
+    Scope* functionProtoScope = FunctionScope::create(cx, nullptr, 0, functionProto, nullptr);
+    if (!functionProtoScope)
+        return false;
     script->setFunction(functionProto);
 
     /*

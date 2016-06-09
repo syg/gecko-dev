@@ -88,28 +88,21 @@ LazyScript::functionDelazifying(JSContext* cx) const
 inline JSFunction*
 JSScript::functionDelazifying() const
 {
-    if (function_ && function_->isInterpretedLazy()) {
-        function_->setUnlazifiedScript(const_cast<JSScript*>(this));
+    JSFunction* fun = function();
+    if (fun && fun->isInterpretedLazy()) {
+        fun->setUnlazifiedScript(const_cast<JSScript*>(this));
         // If this script has a LazyScript, make sure the LazyScript has a
         // reference to the script when delazifying its canonical function.
         if (lazyScript && !lazyScript->maybeScript())
             lazyScript->initScript(const_cast<JSScript*>(this));
     }
-    return function_;
-}
-
-inline void
-JSScript::setFunction(JSFunction* fun)
-{
-    MOZ_ASSERT(!function_ && !module_);
-    MOZ_ASSERT(fun->isTenured());
-    function_ = fun;
+    return fun;
 }
 
 inline void
 JSScript::setModule(js::ModuleObject* module)
 {
-    MOZ_ASSERT(!function_ && !module_);
+    MOZ_ASSERT(!module_);
     module_ = module;
 }
 
@@ -117,7 +110,8 @@ inline void
 JSScript::ensureNonLazyCanonicalFunction(JSContext* cx)
 {
     // Infallibly delazify the canonical script.
-    if (function_ && function_->isInterpretedLazy())
+    JSFunction* fun = function();
+    if (fun && fun->isInterpretedLazy())
         functionDelazifying();
 }
 

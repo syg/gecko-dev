@@ -674,7 +674,6 @@ class JSScript : public js::gc::TenuredCell
     // source object. Instead, the clone refers to a wrapper.)
     js::GCPtrObject sourceObject_;
 
-    js::GCPtrFunction function_;
     js::GCPtrModuleObject module_;
 
     /*
@@ -793,7 +792,7 @@ class JSScript : public js::gc::TenuredCell
 
     // Script is a lambda to treat as running once or a global or eval script
     // that will only run once.  Which one it is can be disambiguated by
-    // checking whether function_ is null.
+    // checking whether function() is null.
     bool treatAsRunOnce_:1;
 
     // If treatAsRunOnce, whether script has executed.
@@ -898,19 +897,22 @@ class JSScript : public js::gc::TenuredCell
                               uint32_t nconsts, uint32_t nobjects, uint32_t nscopes,
                               uint32_t ntrynotes, uint32_t nscopenotes, uint32_t nyieldoffsets,
                               uint32_t nTypeSets);
-    static bool fullyInitFromEmitter(js::ExclusiveContext* cx, JS::Handle<JSScript*> script,
+
+  private:
+    static bool initFromFunctionBox(js::ExclusiveContext* cx, js::HandleScript script,
+                                    js::frontend::FunctionBox* funbox);
+    static bool initFromModuleBox(js::ExclusiveContext* cx, js::HandleScript script,
+                                  js::frontend::ModuleBox* modulebox);
+
+  public:
+    static bool fullyInitFromEmitter(js::ExclusiveContext* cx, js::HandleScript script,
                                      js::frontend::BytecodeEmitter* bce);
-    static void linkToFunctionFromEmitter(js::ExclusiveContext* cx, JS::Handle<JSScript*> script,
-                                          js::frontend::FunctionBox* funbox);
-    static void linkToModuleFromEmitter(js::ExclusiveContext* cx, JS::Handle<JSScript*> script,
-                                        js::frontend::ModuleBox* funbox);
+
     // Initialize a no-op script.
     static bool fullyInitTrivial(js::ExclusiveContext* cx, JS::Handle<JSScript*> script);
 
 #ifdef DEBUG
   private:
-    // Assert that the properties set by linkToFunctionFromEmitter are correct.
-    void assertLinkedProperties(js::frontend::BytecodeEmitter* bce) const;
     // Assert that jump targets are within the code array of the script.
     void assertValidJumpTargets() const;
 #endif
@@ -1318,9 +1320,11 @@ class JSScript : public js::gc::TenuredCell
      */
     inline JSFunction* functionDelazifying() const;
     JSFunction* functionNonDelazifying() const {
-        return function_;
+        js::Scope* scope = bodyScope();
+        if (scope->is<js::FunctionScope>())
+            return scope->as<js::FunctionScope>().canonicalFunction();
+        return nullptr;
     }
-    inline void setFunction(JSFunction* fun);
     /*
      * De-lazifies the canonical function. Must be called before entering code
      * that expects the function to be non-lazy.
@@ -1333,10 +1337,10 @@ class JSScript : public js::gc::TenuredCell
     inline void setModule(js::ModuleObject* module);
 
     bool isGlobalOrEvalCode() const {
-        return !function_ && !module_;
+        return bodyScope()->is<js::GlobalScope>() || bodyScope()->is<js::EvalScope>();
     }
     bool isGlobalCode() const {
-        return isGlobalOrEvalCode() && !isForEval();
+        return bodyScope()->is<js::GlobalScope>();
     }
 
     // Returns true if the script may read formal arguments on the stack
@@ -1560,7 +1564,7 @@ class JSScript : public js::gc::TenuredCell
     }
 
     inline JSFunction* getFunction(size_t index);
-    JSFunction* function() {
+    JSFunction* function() const {
         if (functionNonDelazifying())
             return functionNonDelazifying();
         return nullptr;

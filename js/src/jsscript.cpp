@@ -546,10 +546,8 @@ js::XDRScript(XDRState<mode>* xdr, HandleObject enclosingScopeArg, HandleScript 
 
         // Set the script in its function now so that inner scripts to be
         // decoded may iterate the static scope chain.
-        if (fun) {
+        if (fun)
             fun->initScript(script);
-            script->setFunction(fun);
-        }
     }
 
     if (mode == XDR_DECODE) {
@@ -2520,9 +2518,20 @@ JSScript::fullyInitTrivial(ExclusiveContext* cx, Handle<JSScript*> script)
     return SaveSharedScriptData(cx, script, ssd, 1);
 }
 
-/* static */ void
-JSScript::linkToFunctionFromEmitter(js::ExclusiveContext* cx, JS::Handle<JSScript*> script,
-                                    js::frontend::FunctionBox* funbox)
+static void
+InitAtomMap(frontend::AtomIndexMap* indices, GCPtrAtom* atoms)
+{
+    for (AtomIndexMap::Range r = indices->all(); !r.empty(); r.popFront()) {
+        JSAtom* atom = r.front().key();
+        uint32_t index = r.front().value();
+        MOZ_ASSERT(index < indices->count());
+        atoms[index].init(atom);
+    }
+}
+
+/* static */ bool
+JSScript::initFromFunctionBox(ExclusiveContext* cx, HandleScript script,
+                              frontend::FunctionBox* funbox)
 {
     script->funHasExtensibleScope_ = funbox->hasExtensibleScope();
     script->funNeedsDeclEnvObject_ = funbox->needsDeclEnvObject();
@@ -2545,22 +2554,19 @@ JSScript::linkToFunctionFromEmitter(js::ExclusiveContext* cx, JS::Handle<JSScrip
     script->isGeneratorExp_ = funbox->inGenexpLambda;
     script->setGeneratorKind(funbox->generatorKind());
 
-    // Link the function and the script to each other, so that StaticScopeIter
-    // may walk the scope chain of currently compiling scripts.
-    RootedFunction fun(cx, funbox->function());
-    MOZ_ASSERT(fun->isInterpreted());
+    ClosedOverArgumentSlotIter fi(script);
+    script->funHasAnyAliasedFormal_ = !!fi;
 
-    script->setFunction(fun);
-
+    JSFunction* fun = funbox->function();
     if (fun->isInterpretedLazy())
         fun->setUnlazifiedScript(script);
     else
         fun->setScript(script);
 }
 
-/* static */ void
-JSScript::linkToModuleFromEmitter(js::ExclusiveContext* cx, JS::Handle<JSScript*> script,
-                                    js::frontend::ModuleBox* modulebox)
+/* static */ bool
+JSScript::initFromModuleBox(ExclusiveContext* cx, HandleScript script,
+                            frontend::ModuleBox* modulebox)
 {
     script->funHasExtensibleScope_ = false;
     script->funNeedsDeclEnvObject_ = false;
@@ -2571,21 +2577,15 @@ JSScript::linkToModuleFromEmitter(js::ExclusiveContext* cx, JS::Handle<JSScript*
     script->isGeneratorExp_ = false;
     script->setGeneratorKind(NotGenerator);
 
+    // Since modules are only run once. Mark the script so that initializers
+    // created within it may be given more precise types.
+    script->setTreatAsRunOnce();
+    MOZ_ASSERT(!script->hasRunOnce());
+
     // Link the module and the script to each other, so that StaticScopeIter
     // may walk the scope chain of currently compiling scripts.
     RootedModuleObject module(cx, modulebox->module());
     script->setModule(module);
-}
-
-static void
-InitAtomMap(frontend::AtomIndexMap* indices, GCPtrAtom* atoms)
-{
-    for (AtomIndexMap::Range r = indices->all(); !r.empty(); r.popFront()) {
-        JSAtom* atom = r.front().key();
-        uint32_t index = r.front().value();
-        MOZ_ASSERT(index < indices->count());
-        atoms[index].init(atom);
-    }
 }
 
 /* static */ bool
@@ -2608,6 +2608,11 @@ JSScript::fullyInitFromEmitter(ExclusiveContext* cx, HandleScript script, Byteco
     {
         return false;
     }
+
+    if (bce->sc->isFunctionBox())
+        initFromFunctionBox(cx, script, bce->sc->asFunctionBox());
+    else if (bce->sc->isModuleBox())
+        initFromModuleBox(cx, script, bce->sc->asModuleBox());
 
     MOZ_ASSERT(script->mainOffset() == 0);
     script->mainOffset_ = prologueLength;
@@ -2664,11 +2669,7 @@ JSScript::fullyInitFromEmitter(ExclusiveContext* cx, HandleScript script, Byteco
 
     script->bodyScopeIndex_ = bce->bodyScopeIndex;
 
-    ClosedOverArgumentSlotIter fi(script);
-    script->funHasAnyAliasedFormal_ = !!fi;
-
 #ifdef DEBUG
-    script->assertLinkedProperties(bce);
     script->assertValidJumpTargets();
 #endif
 
@@ -2676,36 +2677,6 @@ JSScript::fullyInitFromEmitter(ExclusiveContext* cx, HandleScript script, Byteco
 }
 
 #ifdef DEBUG
-void
-JSScript::assertLinkedProperties(js::frontend::BytecodeEmitter* bce) const
-{
-    FunctionBox* funbox = bce->sc->isFunctionBox() ? bce->sc->asFunctionBox() : nullptr;
-
-    // Assert that the properties set by linkToFunctionFromEmitter are
-    // correct.
-    if (funbox) {
-        MOZ_ASSERT(funHasExtensibleScope_ == funbox->hasExtensibleScope());
-        MOZ_ASSERT(funNeedsDeclEnvObject_ == funbox->needsDeclEnvObject());
-        MOZ_ASSERT(needsHomeObject_ == funbox->needsHomeObject());
-        MOZ_ASSERT(isDerivedClassConstructor_ == funbox->isDerivedClassConstructor());
-        MOZ_ASSERT(argumentsHasVarBinding() == funbox->argumentsHasLocalBinding());
-        MOZ_ASSERT(hasMappedArgsObj() == funbox->hasMappedArgsObj());
-        MOZ_ASSERT(functionHasThisBinding() == funbox->hasThisBinding());
-        MOZ_ASSERT(functionNonDelazifying() == funbox->function());
-        MOZ_ASSERT(isGeneratorExp_ == funbox->inGenexpLambda);
-        MOZ_ASSERT(generatorKind() == funbox->generatorKind());
-    } else {
-        MOZ_ASSERT(!funHasExtensibleScope_);
-        MOZ_ASSERT(!funNeedsDeclEnvObject_);
-        MOZ_ASSERT(!needsHomeObject_);
-        MOZ_ASSERT(!isDerivedClassConstructor_);
-        MOZ_ASSERT(!argumentsHasVarBinding());
-        MOZ_ASSERT(!hasMappedArgsObj());
-        MOZ_ASSERT(!isGeneratorExp_);
-        MOZ_ASSERT(generatorKind() == NotGenerator);
-    }
-}
-
 void
 JSScript::assertValidJumpTargets() const
 {
@@ -3635,7 +3606,6 @@ JSScript::traceChildren(JSTracer* trc)
     MOZ_ASSERT_IF(sourceObject(), MaybeForwarded(sourceObject())->compartment() == compartment());
     TraceNullableEdge(trc, &sourceObject_, "sourceObject");
 
-    TraceNullableEdge(trc, &function_, "function");
     TraceNullableEdge(trc, &module_, "module");
 
     if (maybeLazyScript())
@@ -4112,7 +4082,7 @@ JSScript::hasLoops()
 bool
 JSScript::mayReadFrameArgsDirectly()
 {
-    return argumentsHasVarBinding() || (function_ && function_->hasRest());
+    return argumentsHasVarBinding() || (function() && function()->hasRest());
 }
 
 static inline void

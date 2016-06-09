@@ -298,6 +298,7 @@ FunctionScope::create(ExclusiveContext* cx, Data* data, uint32_t firstFrameSlot,
                       JSFunction* fun, Scope* enclosing)
 {
     MOZ_ASSERT(firstFrameSlot == computeNextFrameSlot(enclosing));
+    MOZ_ASSERT(fun->isTenured());
 
     // The data that's passed in is from the frontend and is LifoAlloc'd or is
     // from Scope::copy. Copy it now that we're creating a permanent VM scope.
