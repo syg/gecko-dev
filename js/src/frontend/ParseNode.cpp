@@ -1046,7 +1046,7 @@ LexicalScopeNode::dump(int indent)
     fprintf(stderr, "(%s [", name);
     int nameIndent = indent + strlen(name) + 3;
     if (!isEmptyScope()) {
-        LexicalScope::Data* bindings = scopeBindings();
+        LexicalScope::BindingData* bindings = scopeBindings();
         for (uint32_t i = 0; i < bindings->length; i++) {
             JSAtom* name = bindings->names[i].name();
             JS::AutoCheckCannotGC nogc;

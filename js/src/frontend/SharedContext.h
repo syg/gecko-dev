@@ -411,10 +411,10 @@ class MOZ_STACK_CLASS GlobalSharedContext : public SharedContext
     // EmitterScope::enterGlobal.
     //
     // This is only used in BytecodeEmitter, and is thus not kept in
-    // GlobalScope::Data.
+    // GlobalScope::BindingData.
     uint32_t functionBindingEnd;
 
-    GlobalScope::Data* bindings;
+    GlobalScope::BindingData* bindings;
 
     GlobalSharedContext(ExclusiveContext* cx, ScopeKind scopeKind, Directives directives,
                         bool extraWarnings)
@@ -447,10 +447,10 @@ class MOZ_STACK_CLASS EvalSharedContext : public SharedContext
     // EmitterScope::enterEval.
     //
     // This is only used in BytecodeEmitter, and is thus not kept in
-    // EvalScope::Data.
+    // EvalScope::BindingData.
     uint32_t functionBindingEnd;
 
-    EvalScope::Data* bindings;
+    EvalScope::BindingData* bindings;
 
     EvalSharedContext(ExclusiveContext* cx, Scope* enclosingScope, Directives directives,
                       bool extraWarnings)
@@ -475,13 +475,13 @@ class FunctionBox : public ObjectBox, public SharedContext
 
   public:
     // Names from the named lambda scope, if a named lambda.
-    LexicalScope::Data* declEnvBindings;
+    LexicalScope::BindingData* declEnvBindings;
 
     // Names from the scope for parameter default expressions, if any.
-    LexicalScope::Data* defaultsScopeBindings;
+    LexicalScope::BindingData* defaultsScopeBindings;
 
     // Names from the 'var' scope of the function.
-    FunctionScope::Data* funScopeBindings;
+    FunctionScope::BindingData* funScopeBindings;
 
     ParseNode*      functionNode;           /* back pointer used by asm.js for error messages */
     uint32_t        bufStart;

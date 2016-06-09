@@ -1190,15 +1190,9 @@ TraceBindingNames(JSTracer* trc, BindingName* names, uint32_t length)
 };
 template <typename Data>
 static inline void
-TraceScopeData(JSTracer* trc, Data* data)
+TraceBindingData(JSTracer* trc, Data* data)
 {
     TraceBindingNames(trc, data->names, data->length);
-}
-static inline void
-TraceFunctionScopeData(JSTracer* trc, FunctionScope::Data* data)
-{
-    TraceEdge(trc, &data->canonicalFunction, "scope canonical function");
-    TraceScopeData(trc, data);
 }
 void
 BindingIter::trace(JSTracer* trc)
@@ -1211,20 +1205,23 @@ Scope::traceChildren(JSTracer* trc)
     TraceNullableEdge(trc, &enclosing_, "scope enclosing");
     TraceNullableEdge(trc, &environmentShape_, "scope env shape");
     switch (kind_) {
-      case ScopeKind::Function:
-        TraceFunctionScopeData(trc, reinterpret_cast<FunctionScope::Data*>(data_));
+      case ScopeKind::Function: {
+        FunctionScope::Data* data = reinterpret_cast<FunctionScope::Data*>(data_);
+        TraceEdge(trc, &data->canonicalFunction, "scope canonical function");
+        TraceBindingData(trc, data->bindings);
         break;
+      }
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
-        TraceScopeData(trc, reinterpret_cast<LexicalScope::Data*>(data_));
+        TraceBindingData(trc, reinterpret_cast<LexicalScope::BindingData*>(data_));
         break;
       case ScopeKind::Global:
       case ScopeKind::NonSyntactic:
-        TraceScopeData(trc, reinterpret_cast<GlobalScope::Data*>(data_));
+        TraceBindingData(trc, reinterpret_cast<GlobalScope::BindingData*>(data_));
         break;
       case ScopeKind::Eval:
       case ScopeKind::StrictEval:
-        TraceScopeData(trc, reinterpret_cast<EvalScope::Data*>(data_));
+        TraceBindingData(trc, reinterpret_cast<EvalScope::BindingData*>(data_));
         break;
       default:
         break;
@@ -1243,13 +1240,14 @@ js::GCMarker::eagerlyMarkChildren(Scope* scope)
       case ScopeKind::Function: {
         FunctionScope::Data* data = reinterpret_cast<FunctionScope::Data*>(scope->data_);
         traverseEdge(scope, static_cast<JSObject*>(data->canonicalFunction));
-        names = data->names;
-        length = data->length;
+        names = data->bindings->names;
+        length = data->bindings->length;
         break;
       }
       case ScopeKind::Lexical:
       case ScopeKind::Catch: {
-        LexicalScope::Data* data = reinterpret_cast<LexicalScope::Data*>(scope->data_);
+        LexicalScope::BindingData* data =
+            reinterpret_cast<LexicalScope::BindingData*>(scope->data_);
         names = data->names;
         length = data->length;
         break;
@@ -1257,14 +1255,16 @@ js::GCMarker::eagerlyMarkChildren(Scope* scope)
 
       case ScopeKind::Global:
       case ScopeKind::NonSyntactic: {
-        GlobalScope::Data* data = reinterpret_cast<GlobalScope::Data*>(scope->data_);
+        GlobalScope::BindingData* data =
+            reinterpret_cast<GlobalScope::BindingData*>(scope->data_);
         names = data->names;
         length = data->length;
         break;
       }
       case ScopeKind::Eval:
       case ScopeKind::StrictEval: {
-        EvalScope::Data* data = reinterpret_cast<EvalScope::Data*>(scope->data_);
+        EvalScope::BindingData* data =
+            reinterpret_cast<EvalScope::BindingData*>(scope->data_);
         names = data->names;
         length = data->length;
         break;

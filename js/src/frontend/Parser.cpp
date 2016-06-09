@@ -1013,11 +1013,12 @@ Parser<FullParseHandler>::checkStatementsEOF()
 }
 
 template <typename Scope>
-static typename Scope::Data*
-AllocScopeData(ExclusiveContext* cx, LifoAlloc& alloc, uint32_t numBindings)
+static typename Scope::BindingData*
+NewEmptyBindingData(ExclusiveContext* cx, LifoAlloc& alloc, uint32_t numBindings)
 {
-    size_t allocSize = Scope::sizeOfData(numBindings);
-    typename Scope::Data* bindings = static_cast<typename Scope::Data*>(alloc.alloc(allocSize));
+    size_t allocSize = Scope::sizeOfBindingData(numBindings);
+    typename Scope::BindingData* bindings =
+        static_cast<typename Scope::BindingData*>(alloc.alloc(allocSize));
     if (!bindings) {
         ReportOutOfMemory(cx);
         return nullptr;
@@ -1027,7 +1028,7 @@ AllocScopeData(ExclusiveContext* cx, LifoAlloc& alloc, uint32_t numBindings)
 }
 
 template <>
-Maybe<GlobalScope::Data*>
+Maybe<GlobalScope::BindingData*>
 Parser<FullParseHandler>::newGlobalScopeData(ParseContext::Scope& scope,
                                              uint32_t* functionBindingEnd)
 {
@@ -1062,11 +1063,11 @@ Parser<FullParseHandler>::newGlobalScopeData(ParseContext::Scope& scope,
         }
     }
 
-    GlobalScope::Data* bindings = nullptr;
+    GlobalScope::BindingData* bindings = nullptr;
     uint32_t numBindings = funs.length() + vars.length() + lets.length() + consts.length();
 
     if (numBindings > 0) {
-        bindings = AllocScopeData<GlobalScope>(context, alloc, numBindings);
+        bindings = NewEmptyBindingData<GlobalScope>(context, alloc, numBindings);
         if (!bindings)
             return Nothing();
 
@@ -1096,7 +1097,7 @@ Parser<FullParseHandler>::newGlobalScopeData(ParseContext::Scope& scope,
 }
 
 template <>
-Maybe<EvalScope::Data*>
+Maybe<EvalScope::BindingData*>
 Parser<FullParseHandler>::newEvalScopeData(ParseContext::Scope& scope,
                                            uint32_t* functionBindingEnd)
 {
@@ -1117,11 +1118,11 @@ Parser<FullParseHandler>::newEvalScopeData(ParseContext::Scope& scope,
         }
     }
 
-    EvalScope::Data* bindings = nullptr;
+    EvalScope::BindingData* bindings = nullptr;
     uint32_t numBindings = vars.length();
 
     if (numBindings > 0) {
-        bindings = AllocScopeData<EvalScope>(context, alloc, numBindings);
+        bindings = NewEmptyBindingData<EvalScope>(context, alloc, numBindings);
         if (!bindings)
             return Nothing();
 
@@ -1142,7 +1143,7 @@ Parser<FullParseHandler>::newEvalScopeData(ParseContext::Scope& scope,
 }
 
 template <>
-Maybe<FunctionScope::Data*>
+Maybe<FunctionScope::BindingData*>
 Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope, bool hasDefaults)
 {
     Vector<BindingName> simpleFormals(context);
@@ -1191,11 +1192,11 @@ Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope, bool 
         }
     }
 
-    FunctionScope::Data* bindings = nullptr;
+    FunctionScope::BindingData* bindings = nullptr;
     uint32_t numBindings = simpleFormals.length() + formals.length() + vars.length();
 
     if (numBindings > 0) {
-        bindings = AllocScopeData<FunctionScope>(context, alloc, numBindings);
+        bindings = NewEmptyBindingData<FunctionScope>(context, alloc, numBindings);
         if (!bindings)
             return Nothing();
 
@@ -1219,7 +1220,7 @@ Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope, bool 
 }
 
 template <>
-Maybe<LexicalScope::Data*>
+Maybe<LexicalScope::BindingData*>
 Parser<FullParseHandler>::newLexicalScopeData(ParseContext::Scope& scope)
 {
     Vector<BindingName> lets(context);
@@ -1242,11 +1243,11 @@ Parser<FullParseHandler>::newLexicalScopeData(ParseContext::Scope& scope)
         }
     }
 
-    LexicalScope::Data* bindings = nullptr;
+    LexicalScope::BindingData* bindings = nullptr;
     uint32_t numBindings = lets.length() + consts.length();
 
     if (numBindings > 0) {
-        bindings = AllocScopeData<LexicalScope>(context, alloc, numBindings);
+        bindings = NewEmptyBindingData<LexicalScope>(context, alloc, numBindings);
         if (!bindings)
             return Nothing();
 
@@ -1280,7 +1281,7 @@ Parser<FullParseHandler>::makeLexicalScope(ParseContext::Scope& scope, ParseNode
 {
     if (!scope.propagateFreeNames(pc))
         return nullptr;
-    Maybe<LexicalScope::Data*> bindings = newLexicalScopeData(scope);
+    Maybe<LexicalScope::BindingData*> bindings = newLexicalScopeData(scope);
     if (!bindings)
         return nullptr;
     return handler.newLexicalScope(*bindings, body);
@@ -1360,7 +1361,8 @@ Parser<FullParseHandler>::evalBody()
     }
 
     uint32_t functionBindingEnd = 0;
-    Maybe<EvalScope::Data*> bindings = newEvalScopeData(pc->varScope(), &functionBindingEnd);
+    Maybe<EvalScope::BindingData*> bindings =
+        newEvalScopeData(pc->varScope(), &functionBindingEnd);
     if (!bindings)
         return nullptr;
 
@@ -1385,7 +1387,8 @@ Parser<FullParseHandler>::globalBody()
         return nullptr;
 
     uint32_t functionBindingEnd = 0;
-    Maybe<GlobalScope::Data*> bindings = newGlobalScopeData(pc->varScope(), &functionBindingEnd);
+    Maybe<GlobalScope::BindingData*> bindings = newGlobalScopeData(pc->varScope(),
+                                                                   &functionBindingEnd);
     if (!bindings)
         return nullptr;
 
@@ -1471,21 +1474,22 @@ Parser<FullParseHandler>::finishFunction()
     bool hasDefaults = funbox->hasDefaults();
 
     {
-        Maybe<FunctionScope::Data*> bindings = newFunctionScopeData(pc->varScope(), hasDefaults);
+        Maybe<FunctionScope::BindingData*> bindings = newFunctionScopeData(pc->varScope(),
+                                                                           hasDefaults);
         if (!bindings)
             return false;
         funbox->funScopeBindings = *bindings;
     }
 
     if (hasDefaults) {
-        Maybe<LexicalScope::Data*> bindings = newLexicalScopeData(pc->defaultsScope());
+        Maybe<LexicalScope::BindingData*> bindings = newLexicalScopeData(pc->defaultsScope());
         if (!bindings)
             return false;
         funbox->defaultsScopeBindings = *bindings;
     }
 
     if (funbox->function()->isNamedLambda()) {
-        Maybe<LexicalScope::Data*> bindings = newLexicalScopeData(pc->declEnvScope());
+        Maybe<LexicalScope::BindingData*> bindings = newLexicalScopeData(pc->declEnvScope());
         if (!bindings)
             return false;
         funbox->declEnvBindings = *bindings;

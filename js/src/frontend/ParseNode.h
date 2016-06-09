@@ -561,11 +561,11 @@ class ParseNode
                                            base object of PNK_DOT */
         } name;
         struct {
-            LexicalScope::Data* bindings;
-            ParseNode*          body;
+            LexicalScope::BindingData* bindings;
+            ParseNode*                 body;
         } scope;
         struct {
-            double      value;          /* aligned numeric literal value */
+            double       value;         /* aligned numeric literal value */
             DecimalPoint decimalPoint;  /* Whether the number has a decimal point */
         } number;
         class {
@@ -619,7 +619,7 @@ class ParseNode
         return !pn_u.scope.bindings;
     }
 
-    LexicalScope::Data* scopeBindings() const {
+    LexicalScope::BindingData* scopeBindings() const {
         MOZ_ASSERT(!isEmptyScope());
         return pn_u.scope.bindings;
     }
@@ -936,7 +936,7 @@ struct NameNode : public ParseNode
 
 struct LexicalScopeNode : public ParseNode
 {
-    LexicalScopeNode(LexicalScope::Data* bindings, ParseNode* body)
+    LexicalScopeNode(LexicalScope::BindingData* bindings, ParseNode* body)
       : ParseNode(PNK_LEXICALSCOPE, JSOP_NOP, PN_SCOPE, body->pn_pos)
     {
         pn_u.scope.bindings = bindings;
@@ -1301,7 +1301,7 @@ struct ClassNode : public TernaryNode {
         MOZ_ASSERT(list->isKind(PNK_CLASSMETHODLIST));
         return list;
     }
-    LexicalScope::Data* scopeBindings() const {
+    LexicalScope::BindingData* scopeBindings() const {
         MOZ_ASSERT(pn_kid3->is<LexicalScopeNode>());
         return pn_kid3->scopeBindings();
     }

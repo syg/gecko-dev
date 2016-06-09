@@ -463,7 +463,7 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
     void dump(BytecodeEmitter* bce);
 
     MOZ_MUST_USE bool enterLexical(BytecodeEmitter* bce, ScopeKind kind,
-                                   LexicalScope::Data* bindings);
+                                   LexicalScope::BindingData* bindings);
     MOZ_MUST_USE bool enterDeclEnv(BytecodeEmitter* bce, FunctionBox* funbox);
     MOZ_MUST_USE bool enterParameterDefaults(BytecodeEmitter* bce, FunctionBox* funbox);
     MOZ_MUST_USE bool enterFunctionBody(BytecodeEmitter* bce, FunctionBox* funbox);
@@ -713,7 +713,7 @@ BytecodeEmitter::EmitterScope::locationBoundInScope(BytecodeEmitter* bce, JSAtom
 
 bool
 BytecodeEmitter::EmitterScope::enterLexical(BytecodeEmitter* bce, ScopeKind kind,
-                                            LexicalScope::Data* bindings)
+                                            LexicalScope::BindingData* bindings)
 {
     MOZ_ASSERT(this == bce->innermostEmitterScope);
 
@@ -857,7 +857,7 @@ BytecodeEmitter::EmitterScope::enterFunctionBody(BytecodeEmitter* bce, FunctionB
 
     // Resolve body-level bindings, if there are any.
     uint32_t firstFrameSlot = frameSlotStart();
-    if (FunctionScope::Data* bindings = funbox->funScopeBindings) {
+    if (FunctionScope::BindingData* bindings = funbox->funScopeBindings) {
         NameLocationMap& cache = nameCache();
         BindingIter bi(*bindings, firstFrameSlot);
         for (; bi; bi++) {
@@ -921,14 +921,14 @@ class PrologueBindingIter : public BindingIter
     uint32_t functionEnd_;
 
   public:
-    PrologueBindingIter(GlobalScope::Data& data, uint32_t functionEnd)
+    PrologueBindingIter(GlobalScope::BindingData& data, uint32_t functionEnd)
       : BindingIter(data),
         functionEnd_(functionEnd)
     {
         MOZ_ASSERT(functionEnd_ >= varStart_ && functionEnd_ <= letStart_);
     }
 
-    PrologueBindingIter(EvalScope::Data& data, uint32_t functionEnd, bool strict)
+    PrologueBindingIter(EvalScope::BindingData& data, uint32_t functionEnd, bool strict)
       : BindingIter(data, strict),
         functionEnd_(functionEnd)
     {
@@ -980,7 +980,7 @@ BytecodeEmitter::EmitterScope::enterGlobal(BytecodeEmitter* bce, GlobalSharedCon
 
     // Resolve binding names and emit DEF{VAR,LET,CONST} prologue ops.
     bce->switchToPrologue();
-    if (GlobalScope::Data* bindings = globalsc->bindings) {
+    if (GlobalScope::BindingData* bindings = globalsc->bindings) {
         for (PrologueBindingIter bi(*bindings, globalsc->functionBindingEnd); bi; bi++) {
             NameLocation loc = NameLocation::fromBinding(bi.kind(), bi.location());
             JSAtom* name = bi.name();
@@ -1027,7 +1027,7 @@ BytecodeEmitter::EmitterScope::enterEval(BytecodeEmitter* bce, EvalSharedContext
     // Resolve binding names and emit DEFVAR prologue ops. Eval scripts always
     // have their own lexical scope, but non-strict scopes may introduce 'var'
     // bindings to the nearest var scope.
-    if (EvalScope::Data* bindings = evalsc->bindings) {
+    if (EvalScope::BindingData* bindings = evalsc->bindings) {
         for (BindingIter bi(*bindings, evalsc->strict()); bi; bi++) {
             NameLocation loc = NameLocation::fromBinding(bi.kind(), bi.location());
             if (!putNameInCache(bce, bi.name(), loc))

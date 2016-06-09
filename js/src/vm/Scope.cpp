@@ -109,7 +109,7 @@ CreateEnvironmentShape(ExclusiveContext* cx, BindingIter& bi, const Class* cls,
 
 template <typename ScopeData>
 static ScopeData*
-CopyScopeData(ExclusiveContext* cx, ScopeData* data, size_t dataSize)
+CopyBindingData(ExclusiveContext* cx, ScopeData* data, size_t dataSize)
 {
     // The copy itself copies JSAtom* bytes and is not GC safe unless in the
     // presence of an AutoKeepAtoms.
@@ -123,7 +123,7 @@ CopyScopeData(ExclusiveContext* cx, ScopeData* data, size_t dataSize)
 
 template <typename ScopeData>
 static ScopeData*
-CopyScopeData(ExclusiveContext* cx, BindingIter& bi, ScopeData* data, size_t dataSize,
+CopyBindingData(ExclusiveContext* cx, BindingIter& bi, ScopeData* data, size_t dataSize,
               const Class* cls, uint32_t baseShapeFlags, Shape** envShape)
 {
     // Copy a fresh BindingIter for use below.
@@ -139,7 +139,7 @@ CopyScopeData(ExclusiveContext* cx, BindingIter& bi, ScopeData* data, size_t dat
     if (!*envShape)
         return nullptr;
 
-    return CopyScopeData(cx, data, dataSize);
+    return CopyBindingData(cx, data, dataSize);
 }
 
 template <typename ScopeData>
@@ -202,6 +202,28 @@ Scope::clone(JSContext* cx, Scope* enclosing)
 }
 
 void
+Scope::RefCountedData::release(FreeOp* fop)
+{
+    MOZ_ASSERT(refCount > 0);
+    if (--refCount == 0)
+        fop->free_(this);
+}
+
+void
+Scope::finalize(FreeOp* fop)
+{
+    if (data_) {
+        if (is<FunctionScope>()) {
+            as<FunctionScope>().data().bindings->release(fop);
+            fop->free_(reinterpret_cast<void*>(data_));
+        } else {
+            reinterpret_cast<RefCountedData*>(data_)->release(fop);
+        }
+        data_ = 0;
+    }
+}
+
+void
 Scope::dump() const
 {
     for (ScopeIter si(const_cast<Scope*>(this)); si; si++) {
@@ -226,7 +248,7 @@ LexicalScope::computeNextFrameSlot(Scope* start)
 }
 
 /* static */ LexicalScope*
-LexicalScope::create(ExclusiveContext* cx, ScopeKind kind, Data* data,
+LexicalScope::create(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
                      uint32_t firstFrameSlot, Scope* enclosing)
 {
     MOZ_ASSERT(data, "LexicalScopes should not be created if there are no bindings.");
@@ -235,15 +257,16 @@ LexicalScope::create(ExclusiveContext* cx, ScopeKind kind, Data* data,
     // The data that's passed in is from the frontend and is LifoAlloc'd or is
     // from Scope::copy. Copy it now that we're creating a permanent VM scope.
     Shape* envShape = nullptr;
-    Data* copy;
+    BindingData* copy;
     BindingIter bi(*data, firstFrameSlot);
-    copy = CopyScopeData(cx, bi, data, sizeOfData(data->length),
-                         &ClonedBlockObject::class_,
-                         BaseShape::NOT_EXTENSIBLE | BaseShape::DELEGATE,
-                         &envShape);
+    copy = CopyBindingData(cx, bi, data, sizeOfBindingData(data->length),
+                           &ClonedBlockObject::class_,
+                           BaseShape::NOT_EXTENSIBLE | BaseShape::DELEGATE,
+                           &envShape);
     if (!copy)
         return nullptr;
 
+    copy->addRef();
     Scope* scope = Scope::create(cx, kind, enclosing, envShape, reinterpret_cast<uintptr_t>(copy));
     if (!scope)
         js_free(copy);
@@ -252,35 +275,39 @@ LexicalScope::create(ExclusiveContext* cx, ScopeKind kind, Data* data,
 }
 
 /* static */ FunctionScope*
-FunctionScope::create(ExclusiveContext* cx, Data* data, uint32_t firstFrameSlot,
+FunctionScope::create(ExclusiveContext* cx, BindingData* bindings, uint32_t firstFrameSlot,
                       JSFunction* fun, Scope* enclosing)
 {
     MOZ_ASSERT_IF(enclosing, firstFrameSlot == computeNextFrameSlot(enclosing));
     MOZ_ASSERT(fun->isTenured());
 
+    Data* data = NewEmptyScopeData<Data>(cx, sizeof(Data));
+    if (!data)
+        return nullptr;
+
+    data->canonicalFunction.init(fun);
+
     // The data that's passed in is from the frontend and is LifoAlloc'd or is
     // from Scope::copy. Copy it now that we're creating a permanent VM scope.
     Shape* envShape = nullptr;
-    Data* copy;
-    if (data) {
-        BindingIter bi(*data, firstFrameSlot);
-        copy = CopyScopeData(cx, bi, data, sizeOfData(data->length),
-                             &CallObject::class_,
-                             BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE,
-                             &envShape);
+    if (bindings) {
+        BindingIter bi(*bindings, firstFrameSlot);
+        data->bindings = CopyBindingData(cx, bi, bindings, sizeOfBindingData(bindings->length),
+                                         &CallObject::class_,
+                                         BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE,
+                                         &envShape);
     } else {
-        copy = NewEmptyScopeData<Data>(cx, sizeOfData(1));
+        data->bindings = NewEmptyScopeData<BindingData>(cx, sizeOfBindingData(1));
     }
 
-    if (!copy)
+    if (!data->bindings)
         return nullptr;
 
-    copy->canonicalFunction.init(fun);
-
+    data->bindings->addRef();
     Scope* scope = Scope::create(cx, ScopeKind::Function, enclosing, envShape,
-                                 reinterpret_cast<uintptr_t>(copy));
+                                 reinterpret_cast<uintptr_t>(data));
     if (!scope)
-        js_free(copy);
+        js_free(data);
     return static_cast<FunctionScope*>(scope);
 }
 
@@ -288,7 +315,7 @@ FunctionScope*
 FunctionScope::clone(JSContext* cx, JSFunction* fun, Scope* enclosing)
 {
     MOZ_ASSERT(fun != canonicalFunction());
-    return create(cx, &data(), computeFirstFrameSlot(), fun, enclosing);
+    return create(cx, data().bindings, computeFirstFrameSlot(), fun, enclosing);
 }
 
 JSScript*
@@ -298,24 +325,25 @@ FunctionScope::script() const
 }
 
 /* static */ GlobalScope*
-GlobalScope::create(ExclusiveContext* cx, ScopeKind kind, Data* data)
+GlobalScope::create(ExclusiveContext* cx, ScopeKind kind, BindingData* data)
 {
     // The data that's passed in is from the frontend and is LifoAlloc'd or is
     // from Scope::copy. Copy it now that we're creating a permanent VM scope.
-    Data* copy;
+    BindingData* copy;
     if (data) {
         // The global scope has no environment shape. Its environment is the
         // global lexical scope and the global object or non-syntactic objects
         // created by embedding, all of which are not only extensible but may
         // have names on them deleted.
-        copy = CopyScopeData(cx, data, sizeOfData(data->length));
+        copy = CopyBindingData(cx, data, sizeOfBindingData(data->length));
     } else {
-        copy = NewEmptyScopeData<Data>(cx, sizeOfData(1));
+        copy = NewEmptyScopeData<BindingData>(cx, sizeOfBindingData(1));
     }
 
     if (!copy)
         return nullptr;
 
+    copy->addRef();
     Scope* scope = Scope::create(cx, kind, nullptr, nullptr, reinterpret_cast<uintptr_t>(copy));
     if (!scope)
         js_free(copy);
@@ -337,31 +365,32 @@ WithScope::create(ExclusiveContext* cx, Scope* enclosing)
 }
 
 /* static */ EvalScope*
-EvalScope::create(ExclusiveContext* cx, ScopeKind scopeKind, Data* data, Scope* enclosing)
+EvalScope::create(ExclusiveContext* cx, ScopeKind scopeKind, BindingData* data, Scope* enclosing)
 {
     MOZ_ASSERT(scopeKind == ScopeKind::Eval || scopeKind == ScopeKind::StrictEval);
 
     // The data that's passed in is from the frontend and is LifoAlloc'd or is
     // from Scope::copy. Copy it now that we're creating a permanent VM scope.
     Shape* envShape = nullptr;
-    Data* copy;
+    BindingData* copy;
     if (data) {
         if (scopeKind == ScopeKind::StrictEval) {
             BindingIter bi(*data, true);
-            copy = CopyScopeData(cx, bi, data, sizeOfData(data->length),
-                                 &CallObject::class_,
-                                 BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE,
-                                 &envShape);
+            copy = CopyBindingData(cx, bi, data, sizeOfBindingData(data->length),
+                                   &CallObject::class_,
+                                   BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE,
+                                   &envShape);
         } else {
-            copy = CopyScopeData(cx, data, sizeOfData(data->length));
+            copy = CopyBindingData(cx, data, sizeOfBindingData(data->length));
         }
     } else {
-        copy = NewEmptyScopeData<Data>(cx, sizeOfData(1));
+        copy = NewEmptyScopeData<BindingData>(cx, sizeOfBindingData(1));
     }
 
     if (!copy)
         return nullptr;
 
+    copy->addRef();
     Scope* scope = Scope::create(cx, scopeKind, enclosing, envShape,
                                  reinterpret_cast<uintptr_t>(copy));
     if (!scope)
@@ -414,21 +443,12 @@ ScopeIter::hasSyntacticEnvironment() const
     MOZ_CRASH("Bad ScopeKind");
 }
 
-void
-Scope::finalize(FreeOp* fop)
-{
-    if (data_) {
-        fop->free_(reinterpret_cast<void*>(data_));
-        data_ = 0;
-    }
-}
-
 BindingIter::BindingIter(JSScript* script)
   : BindingIter(script->bodyScope())
 { }
 
 void
-BindingIter::init(LexicalScope::Data& data, uint32_t firstFrameSlot)
+BindingIter::init(LexicalScope::BindingData& data, uint32_t firstFrameSlot)
 {
     init(0, 0, 0, data.constStart,
          CanHaveFrameSlots | CanHaveEnvironmentSlots,
@@ -437,7 +457,7 @@ BindingIter::init(LexicalScope::Data& data, uint32_t firstFrameSlot)
 }
 
 void
-BindingIter::init(FunctionScope::Data& data, uint32_t firstFrameSlot)
+BindingIter::init(FunctionScope::BindingData& data, uint32_t firstFrameSlot)
 {
     init(data.nonSimpleFormalStart, data.varStart, data.length, 0,
          CanHaveArgumentSlots | CanHaveFrameSlots | CanHaveEnvironmentSlots,
@@ -446,7 +466,7 @@ BindingIter::init(FunctionScope::Data& data, uint32_t firstFrameSlot)
 }
 
 void
-BindingIter::init(GlobalScope::Data& data)
+BindingIter::init(GlobalScope::BindingData& data)
 {
     init(0, 0, data.letStart, data.constStart,
          CannotHaveSlots,
@@ -455,7 +475,7 @@ BindingIter::init(GlobalScope::Data& data)
 }
 
 void
-BindingIter::init(EvalScope::Data& data, bool strict)
+BindingIter::init(EvalScope::BindingData& data, bool strict)
 {
     if (strict) {
         init(0, 0, data.length, data.length,

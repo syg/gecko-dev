@@ -194,6 +194,20 @@ class Scope : public js::gc::TenuredCell
     GCPtrShape environmentShape_;
 
   protected:
+    // Most scope data are arrays of JSAtoms, which may be shared across
+    // runtimes. FunctionScope is an exception; see comments above
+    // FunctionScope::Data.
+    struct RefCountedData
+    {
+        uint32_t refCount;
+
+        void addRef() {
+            refCount++;
+        }
+
+        void release(FreeOp* fop);
+    };
+
     uintptr_t data_;
 
     Scope(ScopeKind kind, Scope* enclosing, Shape* environmentShape, uintptr_t data)
@@ -270,7 +284,7 @@ class LexicalScope : public Scope
   public:
     // Data is public because it is created by the frontend. See
     // Parser<FullParseHandler>::newLexicalScopeData.
-    struct Data
+    struct BindingData : public RefCountedData
     {
         // Bindings are sorted by kind in both frames and environments.
         //
@@ -288,21 +302,21 @@ class LexicalScope : public Scope
         BindingName names[1];
     };
 
-    static size_t sizeOfData(uint32_t length) {
+    static size_t sizeOfBindingData(uint32_t length) {
         MOZ_ASSERT(length > 0);
-        return sizeof(Data) + (length - 1) * sizeof(BindingName);
+        return sizeof(BindingData) + (length - 1) * sizeof(BindingName);
     }
 
-    static LexicalScope* create(ExclusiveContext* cx, ScopeKind kind, Data* data,
+    static LexicalScope* create(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
                                 uint32_t firstFrameSlot, Scope* enclosing);
 
   protected:
-    Data& data() {
-        return *reinterpret_cast<Data*>(data_);
+    BindingData& data() {
+        return *reinterpret_cast<BindingData*>(data_);
     }
 
-    const Data& data() const {
-        return *reinterpret_cast<Data*>(data_);
+    const BindingData& data() const {
+        return *reinterpret_cast<BindingData*>(data_);
     }
 
     static uint32_t computeNextFrameSlot(Scope* start);
@@ -335,14 +349,15 @@ Scope::is<LexicalScope>() const
 
 class FunctionScope : public Scope
 {
+    friend class GCMarker;
     friend class BindingIter;
     friend class Scope;
     static const ScopeKind classScopeKind_ = ScopeKind::Function;
 
   public:
-    // Data is public because it is created by the frontend. See
-    // Parser<FullParseHandler>::newFunctionScopeData.
-    struct Data
+    // BindingData is public because it is created by the
+    // frontend. See Parser<FullParseHandler>::newFunctionScopeData.
+    struct BindingData : public RefCountedData
     {
         // Bindings are sorted by kind in both frames and environments.
         //
@@ -361,25 +376,34 @@ class FunctionScope : public Scope
         // scope.
         uint32_t nextFrameSlot;
 
-        // The canonical function of the scope, as during a scope walk we
-        // often query properties of the JSFunction (e.g., is the function an
-        // arrow).
-        GCPtrFunction canonicalFunction;
-
         // The array of tagged JSAtom* names, allocated beyond the end of the
         // struct.
         BindingName names[1];
     };
 
-    static size_t sizeOfData(uint32_t length) {
+    static size_t sizeOfBindingData(uint32_t length) {
         MOZ_ASSERT(length > 0);
-        return sizeof(Data) + (length - 1) * sizeof(BindingName);
+        return sizeof(BindingData) + (length - 1) * sizeof(BindingName);
     }
 
-    static FunctionScope* create(ExclusiveContext* cx, Data* data, uint32_t firstFrameSlot,
+    static FunctionScope* create(ExclusiveContext* cx, BindingData* data, uint32_t firstFrameSlot,
                                  JSFunction* fun, Scope* enclosing);
 
   private:
+    // Because canonicalFunction is per-compartment and cannot be shared
+    // across runtimes, FunctionScopes have two data pointers, one for
+    // shareable data and one for per-compartment data.
+    struct Data
+    {
+        // The canonical function of the scope, as during a scope walk we
+        // often query properties of the JSFunction (e.g., is the function an
+        // arrow).
+        GCPtrFunction canonicalFunction;
+
+        // Shareable bindings.
+        BindingData* bindings;
+    };
+
     Data& data() {
         return *reinterpret_cast<Data*>(data_);
     }
@@ -406,7 +430,7 @@ class FunctionScope : public Scope
     }
 
     uint32_t nextFrameSlot() const {
-        return data().nextFrameSlot;
+        return data().bindings->nextFrameSlot;
     }
 
     JSFunction* canonicalFunction() const {
@@ -416,7 +440,7 @@ class FunctionScope : public Scope
     JSScript* script() const;
 
     uint32_t numSimpleFormalParameters() const {
-        return data().nonSimpleFormalStart;
+        return data().bindings->nonSimpleFormalStart;
     }
 };
 
@@ -439,7 +463,7 @@ class GlobalScope : public Scope
   public:
     // Data is public because it is created by the frontend. See
     // Parser<FullParseHandler>::newGlobalScopeData.
-    struct Data
+    struct BindingData : public RefCountedData
     {
         // Bindings are sorted by kind.
         //
@@ -455,20 +479,20 @@ class GlobalScope : public Scope
         BindingName names[1];
     };
 
-    static size_t sizeOfData(uint32_t length) {
+    static size_t sizeOfBindingData(uint32_t length) {
         MOZ_ASSERT(length > 0);
-        return sizeof(Data) + (length - 1) * sizeof(BindingName);
+        return sizeof(BindingData) + (length - 1) * sizeof(BindingName);
     }
 
-    static GlobalScope* create(ExclusiveContext* cx, ScopeKind kind, Data* data);
+    static GlobalScope* create(ExclusiveContext* cx, ScopeKind kind, BindingData* data);
 
   private:
-    Data& data() {
-        return *reinterpret_cast<Data*>(data_);
+    BindingData& data() {
+        return *reinterpret_cast<BindingData*>(data_);
     }
 
-    const Data& data() const {
-        return *reinterpret_cast<Data*>(data_);
+    const BindingData& data() const {
+        return *reinterpret_cast<BindingData*>(data_);
     }
 
   public:
@@ -505,9 +529,9 @@ class EvalScope : public Scope
     friend class BindingIter;
 
   public:
-    // Data is public because it is created by the frontend. See
+    // BindingData is public because it is created by the frontend. See
     // Parser<FullParseHandler>::newEvalScopeData.
-    struct Data
+    struct BindingData : public RefCountedData
     {
         // All bindings in an eval script are 'var' bindings. The implicit
         // lexical scope around the eval is present regardless of strictness
@@ -523,20 +547,21 @@ class EvalScope : public Scope
         BindingName names[1];
     };
 
-    static size_t sizeOfData(uint32_t length) {
+    static size_t sizeOfBindingData(uint32_t length) {
         MOZ_ASSERT(length > 0);
-        return sizeof(Data) + (length - 1) * sizeof(BindingName);
+        return sizeof(BindingData) + (length - 1) * sizeof(BindingName);
     }
 
-    static EvalScope* create(ExclusiveContext* cx, ScopeKind kind, Data* data, Scope* enclosing);
+    static EvalScope* create(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
+                             Scope* enclosing);
 
   private:
-    Data& data() {
-        return *reinterpret_cast<Data*>(data_);
+    BindingData& data() {
+        return *reinterpret_cast<BindingData*>(data_);
     }
 
-    const Data& data() const {
-        return *reinterpret_cast<Data*>(data_);
+    const BindingData& data() const {
+        return *reinterpret_cast<BindingData*>(data_);
     }
 
   public:
@@ -574,7 +599,7 @@ class BindingIter
 {
   protected:
     // Bindings are sorted by kind. Because different Scopes have differently
-    // laid out Data for packing, BindingIter must handle all binding kinds.
+    // laid out BindingData for packing, BindingIter must handle all binding kinds.
     //
     // simple formals - [0, nonSimpleFormalStart)
     //  other formals - [nonSimpleParamStart, varStart)
@@ -621,10 +646,10 @@ class BindingIter
         names_ = names;
     }
 
-    void init(LexicalScope::Data& data, uint32_t firstFrameSlot);
-    void init(FunctionScope::Data& data, uint32_t firstFrameSlot);
-    void init(GlobalScope::Data& data);
-    void init(EvalScope::Data& data, bool strict);
+    void init(LexicalScope::BindingData& data, uint32_t firstFrameSlot);
+    void init(FunctionScope::BindingData& data, uint32_t firstFrameSlot);
+    void init(GlobalScope::BindingData& data);
+    void init(EvalScope::BindingData& data, bool strict);
 
   public:
     explicit BindingIter(Scope* scope) {
@@ -639,7 +664,7 @@ class BindingIter
             MOZ_CRASH("With scopes do not have bindings");
             break;
           case ScopeKind::Function:
-            init(scope->as<FunctionScope>().data(),
+            init(*scope->as<FunctionScope>().data().bindings,
                  scope->as<FunctionScope>().computeFirstFrameSlot());
             break;
           case ScopeKind::Eval:
@@ -655,19 +680,19 @@ class BindingIter
         }
     }
 
-    BindingIter(LexicalScope::Data& data, uint32_t firstFrameSlot) {
+    BindingIter(LexicalScope::BindingData& data, uint32_t firstFrameSlot) {
         init(data, firstFrameSlot);
     }
 
-    explicit BindingIter(FunctionScope::Data& data, uint32_t firstFrameSlot) {
+    explicit BindingIter(FunctionScope::BindingData& data, uint32_t firstFrameSlot) {
         init(data, firstFrameSlot);
     }
 
-    explicit BindingIter(GlobalScope::Data& data) {
+    explicit BindingIter(GlobalScope::BindingData& data) {
         init(data);
     }
 
-    explicit BindingIter(EvalScope::Data& data, bool strict) {
+    explicit BindingIter(EvalScope::BindingData& data, bool strict) {
         init(data, strict);
     }
 
