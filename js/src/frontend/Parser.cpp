@@ -1295,6 +1295,33 @@ Parser<ParseHandler>::finishLexicalScope(ParseContext::Scope& scope, Node body)
     return node;
 }
 
+static bool
+IsArgumentsUsedInLegacyGenerator(ExclusiveContext* cx, Scope* scope)
+{
+    JSAtom* argumentsName = cx->names().arguments;
+    for (ScopeIter si(scope); si; si++) {
+        if (si.scope()->is<LexicalScope>()) {
+            // The parameter defaults scope has its enclosed function's
+            // 'arguments' binding. Legacy generators never have parameter
+            // defaults.
+            if (si.kind() == ScopeKind::ParameterDefaults)
+                return false;
+
+            // Using a shadowed lexical 'arguments' is okay.
+            for (::BindingIter bi(si.scope()); bi; bi++) {
+                if (bi.name() == argumentsName)
+                    return false;
+            }
+        } else if (si.scope()->is<FunctionScope>()) {
+            // It's an error to use 'arguments' in a legacy generator expression.
+            JSScript* script = si.scope()->as<FunctionScope>().script();
+            return script->isGeneratorExp() && script->isLegacyGenerator();
+        }
+    }
+
+    return false;
+}
+
 template <>
 ParseNode*
 Parser<FullParseHandler>::evalBody()
@@ -1324,17 +1351,11 @@ Parser<FullParseHandler>::evalBody()
     JSAtom* argumentsName = context->names().arguments;
     if (varScope.hasUsedName(argumentsName)) {
         DeclaredNamePtr ptr = varScope.lookupDeclaredName(argumentsName);
-        if (!ptr || !DeclarationKindIsLexical(ptr->value()->kind())) {
-            Scope* scope = pc->sc()->compilationEnclosingScope();
-            while (scope->is<EvalScope>())
-                scope = scope->enclosing();
-            if (scope->is<FunctionScope>()) {
-                JSScript* script = scope->as<FunctionScope>().script();
-                if (script->isGeneratorExp() && script->isLegacyGenerator()) {
-                    report(ParseError, false, nullptr, JSMSG_BAD_GENEXP_BODY, js_arguments_str);
-                    return nullptr;
-                }
-            }
+        if ((!ptr || !DeclarationKindIsLexical(ptr->value()->kind())) &&
+            IsArgumentsUsedInLegacyGenerator(context, pc->sc()->compilationEnclosingScope()))
+        {
+            report(ParseError, false, nullptr, JSMSG_BAD_GENEXP_BODY, js_arguments_str);
+            return nullptr;
         }
     }
 

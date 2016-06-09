@@ -340,7 +340,7 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
     bool hasEnvironment_;
 
     // The number of enclosing environments. Used for error checking.
-    uint8_t environmentDepth_;
+    uint8_t environmentChainLength_;
 
     // The next usable slot on the frame for unaliased (i.e., not closed
     // over) bindings.
@@ -379,15 +379,15 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
         return true;
     }
 
-    MOZ_MUST_USE bool checkEnvironmentDepth(BytecodeEmitter* bce) {
+    MOZ_MUST_USE bool checkEnvironmentChainLength(BytecodeEmitter* bce) {
         uint32_t hops;
         if (EmitterScope* emitterScope = enclosing(&bce))
-            hops = emitterScope->environmentDepth_;
+            hops = emitterScope->environmentChainLength_;
         else
-            hops = EnvironmentChainLength(bce->sc->compilationEnclosingScope());
+            hops = bce->sc->compilationEnclosingScope()->environmentChainLength();
         if (hops > SCOPECOORD_HOPS_LIMIT - 1)
             return bce->reportError(nullptr, JSMSG_TOO_DEEP, js_function_str);
-        environmentDepth_ = mozilla::AssertedCast<uint8_t>(hops + 1);
+        environmentChainLength_ = mozilla::AssertedCast<uint8_t>(hops + 1);
         return true;
     }
 
@@ -454,7 +454,7 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
       : Nestable<EmitterScope>(&bce->innermostEmitterScope),
         nameCache_(nullptr),
         hasEnvironment_(false),
-        environmentDepth_(0),
+        environmentChainLength_(0),
         nextFrameSlot_(0),
         scopeIndex_(ScopeNote::NoScopeIndex),
         noteIndex_(ScopeNote::NoScopeNoteIndex)
@@ -767,7 +767,7 @@ BytecodeEmitter::EmitterScope::enterLexical(BytecodeEmitter* bce, ScopeKind kind
     if (!appendScopeNote(bce))
         return false;
 
-    return checkEnvironmentDepth(bce);
+    return checkEnvironmentChainLength(bce);
 }
 
 bool
@@ -804,7 +804,7 @@ BytecodeEmitter::EmitterScope::enterDeclEnv(BytecodeEmitter* bce, FunctionBox* f
     if (!internScope(bce, createScope))
         return false;
 
-    return checkEnvironmentDepth(bce);
+    return checkEnvironmentChainLength(bce);
 }
 
 bool
@@ -905,7 +905,7 @@ BytecodeEmitter::EmitterScope::enterFunctionBody(BytecodeEmitter* bce, FunctionB
     if (!internBodyScope(bce, createScope))
         return false;
 
-    return checkEnvironmentDepth(bce);
+    return checkEnvironmentChainLength(bce);
 }
 
 class TemporarilyPopEmitterScope : public TemporarilyPopNestable<BytecodeEmitter::EmitterScope>

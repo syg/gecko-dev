@@ -32,15 +32,6 @@ using mozilla::PodCopy;
 
 /*****************************************************************************/
 
-static bool
-IsScriptDirectlyInFunction(JSScript* script)
-{
-    Scope* scope = script->bodyScope();
-    while (scope->is<EvalScope>())
-        scope = scope->enclosing();
-    return scope->is<FunctionScope>();
-}
-
 void
 InterpreterFrame::initExecuteFrame(JSContext* cx, HandleScript script, AbstractFramePtr evalInFramePrev,
                                    const Value& newTargetValue, HandleObject scopeChain)
@@ -53,12 +44,12 @@ InterpreterFrame::initExecuteFrame(JSContext* cx, HandleScript script, AbstractF
     RootedValue newTarget(cx, newTargetValue);
     if (script->isDirectEvalInFunction()) {
         if (evalInFramePrev) {
-            if (newTarget.isNull() && IsScriptDirectlyInFunction(evalInFramePrev.script()))
+            if (newTarget.isNull() && evalInFramePrev.script()->bodyScope()->isInFunction())
                 newTarget = evalInFramePrev.newTarget();
         } else {
             FrameIter iter(cx);
             MOZ_ASSERT(!iter.isWasm());
-            if (newTarget.isNull() && IsScriptDirectlyInFunction(iter.script()))
+            if (newTarget.isNull() && iter.script()->bodyScope()->isInFunction())
                 newTarget = iter.newTarget();
         }
     }

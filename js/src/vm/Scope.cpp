@@ -171,6 +171,50 @@ Scope::create(ExclusiveContext* cx, ScopeKind kind, Scope* enclosing, uintptr_t 
     return scope;
 }
 
+uint32_t
+Scope::chainLength() const
+{
+    uint32_t length = 0;
+    for (ScopeIter si(const_cast<Scope*>(this)); si; si++)
+        length++;
+    return length;
+}
+
+uint32_t
+Scope::environmentChainLength() const
+{
+    uint32_t length = 0;
+    for (ScopeIter si(const_cast<Scope*>(this)); si; si++) {
+        if (si.hasSyntacticEnvironment())
+            length++;
+    }
+    return length;
+}
+
+bool
+Scope::isInNonSyntacticChain() const
+{
+    for (ScopeIter si(const_cast<Scope*>(this)); si; si++) {
+        // If we hit a function scope, we can short circuit the logic, as
+        // scripts cache whether they are under a non-syntactic scope.
+        if (si.kind() == ScopeKind::Function)
+            return si.scope()->as<FunctionScope>().script()->hasNonSyntacticScope();
+        if (si.kind() == ScopeKind::NonSyntactic)
+            return true;
+    }
+    return false;
+}
+
+bool
+Scope::isInFunction() const
+{
+    for (ScopeIter si(const_cast<Scope*>(this)); si; si++) {
+        if (si.kind() == ScopeKind::Function)
+            return true;
+    }
+    return false;
+}
+
 Scope*
 Scope::clone(JSContext* cx, EnclosingForClone enclosing)
 {
@@ -193,14 +237,20 @@ Scope::clone(JSContext* cx, EnclosingForClone enclosing)
                                      self.canonicalFunction(), enclosingScope);
     }
 
-    if (is<EvalScope>()) {
-        EvalScope& self = as<EvalScope>();
-        return EvalScope::create(cx, self.kind(), &self.data(), enclosingScope);
-    }
-
-    if (is<WithScope>()) {
-        WithScope& self = as<WithScope>();
+    if (is<WithScope>())
         return WithScope::create(cx, enclosingScope);
+
+    EvalScope& self = as<EvalScope>();
+    return EvalScope::create(cx, self.kind(), &self.data(), enclosingScope);
+}
+
+void
+Scope::dump() const
+{
+    for (ScopeIter si(const_cast<Scope*>(this)); si; si++) {
+        fprintf(stdout, "%s [%p]", ScopeKindString(si.kind()), si.scope());
+        if (si.scope()->enclosing())
+            fprintf(stdout, " -> ");
     }
 }
 
@@ -344,6 +394,27 @@ EvalScope::create(ExclusiveContext* cx, ScopeKind scopeKind, Data* data, Scope* 
     return static_cast<EvalScope*>(scope);
 }
 
+/* static */ Scope*
+EvalScope::nearestVarScopeForDirectEval(Scope* scope)
+{
+    for (ScopeIter si(scope); si; si++) {
+        switch (si.kind()) {
+          case ScopeKind::Function:
+          case ScopeKind::ParameterDefaults:
+            // Direct evals in parameter default expressions always get
+            // their own var scopes. Note that the parameter defaults
+            // isn't itself the var scope (conceptually a fresh one is
+            // created for each default expression).
+          case ScopeKind::Global:
+          case ScopeKind::NonSyntactic:
+            return scope;
+          default:
+            break;
+        }
+    }
+    return nullptr;
+}
+
 bool
 ScopeIter::hasSyntacticEnvironment() const
 {
@@ -445,56 +516,6 @@ BindingIter::init(EvalScope::Data& data, bool strict)
         init(0, 0, data.length, data.length,
              CannotHaveSlots, UINT32_MAX, UINT32_MAX,
              data.names, data.length);
-    }
-}
-
-uint32_t
-js::ScopeChainLength(Scope* scope)
-{
-    uint32_t length = 0;
-    for (ScopeIter si(scope); si; si++)
-        length++;
-    return length;
-}
-
-uint32_t
-js::EnvironmentChainLength(Scope* scope)
-{
-    uint32_t length = 0;
-    for (ScopeIter si(scope); si; si++) {
-        if (si.hasSyntacticEnvironment())
-            length++;
-    }
-    return length;
-}
-
-bool
-js::HasNonSyntacticScopeChain(Scope* scope)
-{
-    for (ScopeIter si(scope); si; si++) {
-        // If we hit a function scope, we can short circuit the logic, as
-        // scripts cache whether they are under a non-syntactic scope.
-        if (si.kind() == ScopeKind::Function)
-            return si.scope()->as<FunctionScope>().script()->hasNonSyntacticScope();
-        if (si.kind() == ScopeKind::NonSyntactic)
-            return true;
-    }
-    return false;
-}
-
-void
-js::DumpScopeChain(JSScript* script)
-{
-    DumpScopeChain(script->bodyScope());
-}
-
-void
-js::DumpScopeChain(Scope* scope)
-{
-    for (ScopeIter si(scope); si; si++) {
-        fprintf(stdout, "%s [%p]", ScopeKindString(si.scope()->kind()), si.scope());
-        if (si.scope()->enclosing())
-            fprintf(stdout, " -> ");
     }
 }
 

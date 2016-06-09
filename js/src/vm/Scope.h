@@ -223,6 +223,12 @@ class Scope : public js::gc::TenuredCell
         return enclosing_;
     }
 
+    uint32_t chainLength() const;
+    uint32_t environmentChainLength() const;
+
+    bool isInNonSyntacticChain() const;
+    bool isInFunction() const;
+
     // Either the enclosing scope if the cloned scope is not an outermost
     // GlobalScope, or the new ScopeKind if the scope is a GlobalScope.
     using EnclosingForClone = mozilla::Variant<Scope*, ScopeKind>;
@@ -231,6 +237,8 @@ class Scope : public js::gc::TenuredCell
 
     void traceChildren(JSTracer* trc);
     void finalize(FreeOp* fop);
+
+    void dump() const;
 };
 
 class LexicalScope : public Scope
@@ -528,6 +536,10 @@ class EvalScope : public Scope
     }
 
   public:
+    // Starting a scope, the nearest var scope that a direct eval can
+    // introduce vars on.
+    static Scope* nearestVarScopeForDirectEval(Scope* scope);
+
     uint32_t nextFrameSlot() const {
         return data().nextFrameSlot;
     }
@@ -547,7 +559,7 @@ class EvalScope : public Scope
     bool isNonGlobal() const {
         if (strict())
             return true;
-        return !enclosing()->is<GlobalScope>();
+        return !nearestVarScopeForDirectEval(enclosing())->is<GlobalScope>();
     }
 };
 
@@ -843,20 +855,6 @@ class ScopeIter
         TraceEdge(trc, &scope_, "scope iter scope");
     }
 };
-
-// Starting at scope, count the number of scopes.
-uint32_t ScopeChainLength(Scope* scope);
-
-// Starting at scope, count the number of scopes that have syntactic
-// environments.
-uint32_t EnvironmentChainLength(Scope* scope);
-
-// Starting at scope, is there a scope of kind ScopeKind::NonSyntactic?
-bool HasNonSyntacticScopeChain(Scope* scope);
-
-// Starting at a scope or the body scope of a script, dump the chain.
-void DumpScopeChain(JSScript* script);
-void DumpScopeChain(Scope* scope);
 
 } // namespace js
 

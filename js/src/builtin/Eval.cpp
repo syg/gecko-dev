@@ -42,8 +42,8 @@ IsEvalCacheCandidate(JSScript* script)
 {
     // Make sure there are no inner objects which might use the wrong parent
     // and/or call scope by reusing the previous eval's script.
-    // TODOshu check presence of caller function in eval scope
-    return !script->hasSingletons() &&
+    return script->isDirectEvalInFunction() &&
+           !script->hasSingletons() &&
            script->objects()->length == 0;
 }
 

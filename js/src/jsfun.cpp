@@ -2238,7 +2238,7 @@ js::CloneFunctionAndScript(JSContext* cx, HandleFunction fun, HandleObject paren
     RootedObject terminatingScope(cx, parent);
     while (IsSyntacticScope(terminatingScope))
         terminatingScope = terminatingScope->enclosingScope();
-    MOZ_ASSERT_IF(!terminatingScope->is<GlobalObject>(), HasNonSyntacticScopeChain(newScope));
+    MOZ_ASSERT_IF(!terminatingScope->is<GlobalObject>(), newScope->isInNonSyntacticChain());
 #endif
 
     if (clone->isInterpreted()) {

@@ -211,7 +211,7 @@ bool
 BytecodeCompiler::canLazilyParse()
 {
     return options.canLazilyParse &&
-           !HasNonSyntacticScopeChain(enclosingScope) &&
+           !enclosingScope->isInNonSyntacticChain() &&
            !cx->compartment()->behaviors().disableLazyParsing() &&
            !cx->compartment()->behaviors().discardSource() &&
            !options.sourceIsLazy &&

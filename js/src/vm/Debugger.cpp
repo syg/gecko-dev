@@ -4232,8 +4232,8 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
             if (p) {
                 /* Is our newly found script deeper than the last one we found? */
                 JSScript* incumbent = p->value();
-                if (ScopeChainLength(script->innermostScope()) >
-                    ScopeChainLength(incumbent->innermostScope()))
+                if (script->innermostScope()->chainLength() >
+                    incumbent->innermostScope()->chainLength())
                 {
                     p->value() = script;
                 }

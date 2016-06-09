@@ -1361,10 +1361,17 @@ class JSScript : public js::gc::TenuredCell
   public:
 
     /* Return whether this script was compiled for 'eval' */
-    bool isForEval() const { return isCachedEval() || isActiveEval(); }
+    bool isForEval() const {
+        MOZ_ASSERT_IF(isCachedEval() || isActiveEval(), bodyScope()->is<js::EvalScope>());
+        return isCachedEval() || isActiveEval();
+    }
 
     /* Return whether this is a 'direct eval' script in a function scope. */
-    bool isDirectEvalInFunction() const { return isForEval(); /* TODOshu check scope for caller fun */ }
+    bool isDirectEvalInFunction() const {
+        if (!isForEval())
+            return false;
+        return bodyScope()->isInFunction();
+    }
 
     /*
      * Return whether this script is a top-level script.

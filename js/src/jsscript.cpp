@@ -2633,7 +2633,7 @@ JSScript::fullyInitFromEmitter(ExclusiveContext* cx, HandleScript script, Byteco
     // need to walk the entire static scope chain if the script is nested in a
     // function. In that case, we can propagate the cached value from the
     // outer script.
-    script->hasNonSyntacticScope_ = HasNonSyntacticScopeChain(bce->outermostScope());
+    script->hasNonSyntacticScope_ = bce->outermostScope()->isInNonSyntacticChain();
 
     if (bce->constList.length() != 0)
         bce->constList.finish(script->consts());
@@ -3261,7 +3261,7 @@ js::detail::CopyScript(JSContext* cx, Handle<Scope::EnclosingForClone> scriptEnc
     dst->cloneHasArray(src);
     dst->strict_ = src->strict();
     dst->explicitUseStrict_ = src->explicitUseStrict();
-    dst->hasNonSyntacticScope_ = HasNonSyntacticScopeChain(scopes[0]);
+    dst->hasNonSyntacticScope_ = scopes[0]->isInNonSyntacticChain();
     dst->bindingsAccessedDynamically_ = src->bindingsAccessedDynamically();
     dst->funHasExtensibleScope_ = src->funHasExtensibleScope();
     dst->funNeedsDeclEnvObject_ = src->funNeedsDeclEnvObject();

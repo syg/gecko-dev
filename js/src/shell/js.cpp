@@ -4907,7 +4907,7 @@ DumpScopeChain(JSContext* cx, unsigned argc, Value* vp)
         script = obj->as<ModuleObject>().script();
     }
 
-    js::DumpScopeChain(script);
+    script->bodyScope()->dump();
 
     args.rval().setUndefined();
     return true;
