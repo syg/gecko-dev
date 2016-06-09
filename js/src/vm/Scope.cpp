@@ -191,57 +191,25 @@ Scope::environmentChainLength() const
     return length;
 }
 
-bool
-Scope::isInNonSyntacticChain() const
-{
-    for (ScopeIter si(const_cast<Scope*>(this)); si; si++) {
-        // If we hit a function scope, we can short circuit the logic, as
-        // scripts cache whether they are under a non-syntactic scope.
-        if (si.kind() == ScopeKind::Function)
-            return si.scope()->as<FunctionScope>().script()->hasNonSyntacticScope();
-        if (si.kind() == ScopeKind::NonSyntactic)
-            return true;
-    }
-    return false;
-}
-
-bool
-Scope::isInFunction() const
-{
-    for (ScopeIter si(const_cast<Scope*>(this)); si; si++) {
-        if (si.kind() == ScopeKind::Function)
-            return true;
-    }
-    return false;
-}
-
 Scope*
-Scope::clone(JSContext* cx, EnclosingForClone enclosing)
+Scope::clone(JSContext* cx, Scope* enclosing)
 {
-    if (is<GlobalScope>()) {
-        GlobalScope& self = as<GlobalScope>();
-        return GlobalScope::create(cx, enclosing.as<ScopeKind>(), &self.data());
-    }
-
-    Scope* enclosingScope = enclosing.as<Scope*>();
+    MOZ_ASSERT(!is<FunctionScope>() && !is<GlobalScope>(),
+               "FunctionScopes and GlobalScopes should use the class-specific clone.");
 
     if (is<LexicalScope>()) {
         LexicalScope& self = as<LexicalScope>();
         return LexicalScope::create(cx, self.kind(), &self.data(), self.computeFirstFrameSlot(),
-                                    enclosingScope);
+                                    enclosing);
     }
 
-    if (is<FunctionScope>()) {
-        FunctionScope& self = as<FunctionScope>();
-        return FunctionScope::create(cx, &self.data(), self.computeFirstFrameSlot(),
-                                     self.canonicalFunction(), enclosingScope);
+    if (is<EvalScope>()) {
+        EvalScope& self = as<EvalScope>();
+        return EvalScope::create(cx, self.kind(), &self.data(), enclosing);
     }
 
-    if (is<WithScope>())
-        return WithScope::create(cx, enclosingScope);
-
-    EvalScope& self = as<EvalScope>();
-    return EvalScope::create(cx, self.kind(), &self.data(), enclosingScope);
+    MOZ_ASSERT(is<WithScope>());
+    return WithScope::create(cx, enclosing);
 }
 
 void
@@ -297,7 +265,7 @@ LexicalScope::create(ExclusiveContext* cx, ScopeKind kind, Data* data,
 FunctionScope::create(ExclusiveContext* cx, Data* data, uint32_t firstFrameSlot,
                       JSFunction* fun, Scope* enclosing)
 {
-    MOZ_ASSERT(firstFrameSlot == computeNextFrameSlot(enclosing));
+    MOZ_ASSERT_IF(enclosing, firstFrameSlot == computeNextFrameSlot(enclosing));
     MOZ_ASSERT(fun->isTenured());
 
     // The data that's passed in is from the frontend and is LifoAlloc'd or is
@@ -323,6 +291,13 @@ FunctionScope::create(ExclusiveContext* cx, Data* data, uint32_t firstFrameSlot,
     if (!scope)
         js_free(copy);
     return static_cast<FunctionScope*>(scope);
+}
+
+FunctionScope*
+FunctionScope::clone(JSContext* cx, JSFunction* fun, Scope* enclosing)
+{
+    MOZ_ASSERT(fun != canonicalFunction());
+    return create(cx, &data(), computeFirstFrameSlot(), fun, enclosing);
 }
 
 JSScript*
@@ -355,6 +330,12 @@ GlobalScope::create(ExclusiveContext* cx, ScopeKind kind, Data* data)
         js_free(copy);
     MOZ_ASSERT(static_cast<GlobalScope*>(scope)->is<GlobalScope>());
     return static_cast<GlobalScope*>(scope);
+}
+
+GlobalScope*
+GlobalScope::clone(JSContext* cx, ScopeKind kind)
+{
+    return create(cx, kind, &data());
 }
 
 /* static */ WithScope*

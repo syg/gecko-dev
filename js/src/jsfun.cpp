@@ -804,7 +804,7 @@ CreateFunctionPrototype(JSContext* cx, JSProtoKey key)
                                              sourceObject,
                                              0,
                                              ss->length()));
-    if (!script || !JSScript::fullyInitTrivial(cx, script))
+    if (!script || !JSScript::initFunctionPrototype(cx, script, functionProto))
         return nullptr;
 
     functionProto->initScript(script);
@@ -813,11 +813,6 @@ CreateFunctionPrototype(JSContext* cx, JSProtoKey key)
         return nullptr;
 
     protoGroup->setInterpretedFunction(functionProto);
-
-    Scope* functionProtoScope = FunctionScope::create(cx, nullptr, 0, functionProto, nullptr);
-    if (!functionProtoScope)
-        return false;
-    script->setFunction(functionProto);
 
     /*
      * The default 'new' group of Function.prototype is required by type
@@ -2242,7 +2237,8 @@ js::CloneFunctionAndScript(JSContext* cx, HandleFunction fun, HandleObject paren
     RootedObject terminatingScope(cx, parent);
     while (IsSyntacticScope(terminatingScope))
         terminatingScope = terminatingScope->enclosingScope();
-    MOZ_ASSERT_IF(!terminatingScope->is<GlobalObject>(), newScope->isInNonSyntacticChain());
+    MOZ_ASSERT_IF(!terminatingScope->is<GlobalObject>(),
+                  newScope->hasEnclosing(ScopeKind::NonSyntactic));
 #endif
 
     if (clone->isInterpreted()) {

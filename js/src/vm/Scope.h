@@ -226,14 +226,26 @@ class Scope : public js::gc::TenuredCell
     uint32_t chainLength() const;
     uint32_t environmentChainLength() const;
 
-    bool isInNonSyntacticChain() const;
-    bool isInFunction() const;
+    template <typename T>
+    bool hasEnclosing() const {
+        for (Scope* it = enclosing(); it; it = it->enclosing()) {
+            if (it->is<T>())
+                return true;
+        }
+        return false;
+    }
 
-    // Either the enclosing scope if the cloned scope is not an outermost
-    // GlobalScope, or the new ScopeKind if the scope is a GlobalScope.
-    using EnclosingForClone = mozilla::Variant<Scope*, ScopeKind>;
+    bool hasEnclosing(ScopeKind kind) const {
+        for (Scope* it = enclosing(); it; it = it->enclosing()) {
+            if (it->kind() == kind)
+                return true;
+        }
+        return false;
+    }
 
-    Scope* clone(JSContext* cx, EnclosingForClone enclosing);
+    // GlobalScopes and FunctionScopes have extra data that's needed when
+    // cloning and cannot use the generic clone.
+    Scope* clone(JSContext* cx, Scope* enclosing);
 
     void traceChildren(JSTracer* trc);
     void finalize(FreeOp* fop);
@@ -390,6 +402,8 @@ class FunctionScope : public Scope
     }
 
   public:
+    FunctionScope* clone(JSContext* cx, JSFunction* fun, Scope* enclosing);
+
     uint32_t computeFirstFrameSlot() const {
         return computeNextFrameSlot(enclosing());
     }
@@ -465,6 +479,8 @@ class GlobalScope : public Scope
     }
 
   public:
+    GlobalScope* clone(JSContext* cx, ScopeKind kind);
+
     bool isNonSyntactic() const {
         return kind() == ScopeKind::NonSyntactic;
     }

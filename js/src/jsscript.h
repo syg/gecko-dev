@@ -58,7 +58,6 @@ class Shape;
 
 namespace frontend {
     struct BytecodeEmitter;
-    class UpvarCookie;
     class FunctionBox;
     class ModuleBox;
 } // namespace frontend
@@ -68,8 +67,8 @@ namespace detail {
 // Do not call this directly! It is exposed for the friend declarations in
 // this file.
 bool
-CopyScript(JSContext* cx, Handle<Scope::EnclosingForClone> scriptEnclosingScope,
-           HandleScript src, HandleScript dst);
+CopyScript(JSContext* cx, HandleScript src, HandleScript dst,
+           MutableHandle<GCVector<Scope*>> scopes);
 
 } // namespace detail
 
@@ -158,8 +157,8 @@ struct ScopeNoteArray {
 
 class YieldOffsetArray {
     friend bool
-    detail::CopyScript(JSContext* cx, Handle<Scope::EnclosingForClone> scriptEnclosingScope,
-                       HandleScript src, HandleScript dst);
+    detail::CopyScript(JSContext* cx, HandleScript src, HandleScript dst,
+                       MutableHandle<GCVector<Scope*>> scopes);
 
     uint32_t*       vector_;    // Array of bytecode offsets.
     uint32_t        length_;    // Count of bytecode offsets.
@@ -650,9 +649,8 @@ class JSScript : public js::gc::TenuredCell
                   js::HandleFunction fun, js::MutableHandleScript scriptp);
 
     friend bool
-    js::detail::CopyScript(JSContext* cx,
-                           js::Handle<js::Scope::EnclosingForClone> scriptEnclosingScope,
-                           js::HandleScript src, js::HandleScript dst);
+    js::detail::CopyScript(JSContext* cx, js::HandleScript src, js::HandleScript dst,
+                           js::MutableHandle<GCVector<js::Scope*>> scopes);
 
   private:
     jsbytecode*     code_;     /* bytecodes and their immediate operands */
@@ -743,7 +741,6 @@ class JSScript : public js::gc::TenuredCell
     enum ArrayKind {
         CONSTS,
         OBJECTS,
-        SCOPES,
         TRYNOTES,
         SCOPENOTES,
         ARRAY_KIND_BITS
@@ -890,26 +887,27 @@ class JSScript : public js::gc::TenuredCell
     void initCompartment(js::ExclusiveContext* cx);
 
     // Three ways ways to initialize a JSScript. Callers of partiallyInit()
-    // and fullyInitTrivial() are responsible for notifying the debugger after
-    // successfully creating any kind (function or other) of new JSScript.
-    // However, callers of fullyInitFromEmitter() do not need to do this.
+    // are responsible for notifying the debugger after successfully creating
+    // any kind (function or other) of new JSScript.  However, callers of
+    // fullyInitFromEmitter() do not need to do this.
     static bool partiallyInit(js::ExclusiveContext* cx, JS::Handle<JSScript*> script,
-                              uint32_t nconsts, uint32_t nobjects, uint32_t nscopes,
+                              uint32_t nscopes, uint32_t nconsts, uint32_t nobjects,
                               uint32_t ntrynotes, uint32_t nscopenotes, uint32_t nyieldoffsets,
                               uint32_t nTypeSets);
 
   private:
-    static bool initFromFunctionBox(js::ExclusiveContext* cx, js::HandleScript script,
+    static void initFromFunctionBox(js::ExclusiveContext* cx, js::HandleScript script,
                                     js::frontend::FunctionBox* funbox);
-    static bool initFromModuleBox(js::ExclusiveContext* cx, js::HandleScript script,
+    static void initFromModuleBox(js::ExclusiveContext* cx, js::HandleScript script,
                                   js::frontend::ModuleBox* modulebox);
 
   public:
     static bool fullyInitFromEmitter(js::ExclusiveContext* cx, js::HandleScript script,
                                      js::frontend::BytecodeEmitter* bce);
 
-    // Initialize a no-op script.
-    static bool fullyInitTrivial(js::ExclusiveContext* cx, JS::Handle<JSScript*> script);
+    // Initialize the Function.prototype script.
+    static bool initFunctionPrototype(js::ExclusiveContext* cx, js::HandleScript script,
+                                      JS::HandleFunction functionProto);
 
 #ifdef DEBUG
   private:
@@ -1374,7 +1372,7 @@ class JSScript : public js::gc::TenuredCell
     bool isDirectEvalInFunction() const {
         if (!isForEval())
             return false;
-        return bodyScope()->isInFunction();
+        return bodyScope()->hasEnclosing(js::ScopeKind::Function);
     }
 
     /*
@@ -1398,6 +1396,10 @@ class JSScript : public js::gc::TenuredCell
 
     inline js::GlobalObject& global() const;
     js::GlobalObject& uninlinedGlobal() const;
+
+    uint32_t bodyScopeIndex() const {
+        return bodyScopeIndex_;
+    }
 
     js::Scope* bodyScope() const {
         return getScope(bodyScopeIndex_);
@@ -1472,19 +1474,20 @@ class JSScript : public js::gc::TenuredCell
 
     bool hasConsts() const       { return hasArray(CONSTS); }
     bool hasObjects() const      { return hasArray(OBJECTS); }
-    bool hasScopes() const       { return hasArray(SCOPES); }
     bool hasTrynotes() const     { return hasArray(TRYNOTES); }
     bool hasScopeNotes() const   { return hasArray(SCOPENOTES); }
     bool hasYieldOffsets() const { return isGenerator(); }
 
-    #define OFF(fooOff, hasFoo, t)   (fooOff() + (hasFoo() ? sizeof(t) : 0))
+#define OFF(fooOff, hasFoo, t)   (fooOff() + (hasFoo() ? sizeof(t) : 0))
 
-    size_t constsOffset() const       { return 0; }
+    size_t scopesOffset() const       { return 0; }
+    size_t constsOffset() const       { return scopesOffset() + sizeof(js::ScopeArray); }
     size_t objectsOffset() const      { return OFF(constsOffset,     hasConsts,     js::ConstArray); }
-    size_t scopesOffset() const       { return OFF(objectsOffset,    hasObjects,    js::ObjectArray); }
-    size_t trynotesOffset() const     { return OFF(scopesOffset,     hasScopes,     js::ScopeArray); }
+    size_t trynotesOffset() const     { return OFF(objectsOffset,    hasObjects,    js::ObjectArray); }
     size_t scopeNotesOffset() const   { return OFF(trynotesOffset,   hasTrynotes,   js::TryNoteArray); }
     size_t yieldOffsetsOffset() const { return OFF(scopeNotesOffset, hasScopeNotes, js::ScopeNoteArray); }
+
+#undef OFF
 
     size_t dataSize() const { return dataSize_; }
 
@@ -1499,7 +1502,6 @@ class JSScript : public js::gc::TenuredCell
     }
 
     js::ScopeArray* scopes() const {
-        MOZ_ASSERT(hasScopes());
         return reinterpret_cast<js::ScopeArray*>(data + scopesOffset());
     }
 

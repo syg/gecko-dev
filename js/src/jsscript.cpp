@@ -402,8 +402,7 @@ js::XDRScript(XDRState<mode>* xdr, HandleObject enclosingScopeArg, HandleScript 
             nconsts = script->consts()->length;
         if (script->hasObjects())
             nobjects = script->objects()->length;
-        if (script->hasScopes())
-            nscopes = script->scopes()->length;
+        nscopes = script->scopes()->length;
         if (script->hasTrynotes())
             ntrynotes = script->trynotes()->length;
         if (script->hasScopeNotes())
@@ -551,7 +550,7 @@ js::XDRScript(XDRState<mode>* xdr, HandleObject enclosingScopeArg, HandleScript 
     }
 
     if (mode == XDR_DECODE) {
-        if (!JSScript::partiallyInit(cx, script, nconsts, nobjects, nscopes, ntrynotes,
+        if (!JSScript::partiallyInit(cx, script, nscopes, nconsts, nobjects, ntrynotes,
                                      nscopenotes, nyieldoffsets, nTypeSets))
         {
             return false;
@@ -2337,17 +2336,17 @@ JS_STATIC_ASSERT(NO_PADDING_BETWEEN_ENTRIES(GCPtrObject, ScopeNote));
 JS_STATIC_ASSERT(NO_PADDING_BETWEEN_ENTRIES(ScopeNote, uint32_t));
 
 static inline size_t
-ScriptDataSize(uint32_t nconsts, uint32_t nobjects, uint32_t nscopes,
+ScriptDataSize(uint32_t nscopes, uint32_t nconsts, uint32_t nobjects,
                uint32_t ntrynotes, uint32_t nscopenotes, uint32_t nyieldoffsets)
 {
     size_t size = 0;
 
+    MOZ_ASSERT(nscopes != 0);
+    size += sizeof(ScopeArray) + nscopes * sizeof(Scope*);
     if (nconsts != 0)
         size += sizeof(ConstArray) + nconsts * sizeof(Value);
     if (nobjects != 0)
         size += sizeof(ObjectArray) + nobjects * sizeof(NativeObject*);
-    if (nscopes != 0)
-        size += sizeof(ScopeArray) + nscopes * sizeof(Scope*);
     if (ntrynotes != 0)
         size += sizeof(TryNoteArray) + ntrynotes * sizeof(JSTryNote);
     if (nscopenotes != 0)
@@ -2406,11 +2405,11 @@ AllocScriptData(JS::Zone* zone, size_t size)
 }
 
 /* static */ bool
-JSScript::partiallyInit(ExclusiveContext* cx, HandleScript script, uint32_t nconsts,
-                        uint32_t nobjects, uint32_t nscopes, uint32_t ntrynotes,
+JSScript::partiallyInit(ExclusiveContext* cx, HandleScript script, uint32_t nscopes,
+                        uint32_t nconsts, uint32_t nobjects, uint32_t ntrynotes,
                         uint32_t nscopenotes, uint32_t nyieldoffsets, uint32_t nTypeSets)
 {
-    size_t size = ScriptDataSize(nconsts, nobjects, nscopes, ntrynotes,
+    size_t size = ScriptDataSize(nscopes, nconsts, nobjects, ntrynotes,
                                  nscopenotes, nyieldoffsets);
     script->data = AllocScriptData(script->zone(), size);
     if (size && !script->data) {
@@ -2423,6 +2422,11 @@ JSScript::partiallyInit(ExclusiveContext* cx, HandleScript script, uint32_t ncon
     script->nTypeSets_ = uint16_t(nTypeSets);
 
     uint8_t* cursor = script->data;
+
+    // There must always be at least 1 scope, the body scope.
+    MOZ_ASSERT(nscopes != 0);
+    cursor += sizeof(ScopeArray);
+
     if (nconsts != 0) {
         script->setHasArray(CONSTS);
         cursor += sizeof(ConstArray);
@@ -2431,10 +2435,7 @@ JSScript::partiallyInit(ExclusiveContext* cx, HandleScript script, uint32_t ncon
         script->setHasArray(OBJECTS);
         cursor += sizeof(ObjectArray);
     }
-    if (nscopes != 0) {
-        script->setHasArray(SCOPES);
-        cursor += sizeof(ScopeArray);
-    }
+
     if (ntrynotes != 0) {
         script->setHasArray(TRYNOTES);
         cursor += sizeof(TryNoteArray);
@@ -2450,6 +2451,10 @@ JSScript::partiallyInit(ExclusiveContext* cx, HandleScript script, uint32_t ncon
         cursor += sizeof(YieldOffsetArray);
     }
 
+    script->scopes()->length = nscopes;
+    script->scopes()->vector = (GCPtrScope*)cursor;
+    cursor += nscopes * sizeof(script->scopes()->vector[0]);
+
     if (nconsts != 0) {
         MOZ_ASSERT(reinterpret_cast<uintptr_t>(cursor) % sizeof(JS::Value) == 0);
         script->consts()->length = nconsts;
@@ -2461,12 +2466,6 @@ JSScript::partiallyInit(ExclusiveContext* cx, HandleScript script, uint32_t ncon
         script->objects()->length = nobjects;
         script->objects()->vector = (GCPtrObject*)cursor;
         cursor += nobjects * sizeof(script->objects()->vector[0]);
-    }
-
-    if (nscopes != 0) {
-        script->scopes()->length = nscopes;
-        script->scopes()->vector = (GCPtrScope*)cursor;
-        cursor += nscopes * sizeof(script->scopes()->vector[0]);
     }
 
     if (ntrynotes != 0) {
@@ -2503,10 +2502,16 @@ JSScript::partiallyInit(ExclusiveContext* cx, HandleScript script, uint32_t ncon
 }
 
 /* static */ bool
-JSScript::fullyInitTrivial(ExclusiveContext* cx, Handle<JSScript*> script)
+JSScript::initFunctionPrototype(ExclusiveContext* cx, Handle<JSScript*> script,
+                                HandleFunction functionProto)
 {
-    if (!partiallyInit(cx, script, 0, 0, 0, 0, 0, 0, 0))
+    if (!partiallyInit(cx, script, 1, 0, 0, 0, 0, 0, 0))
         return false;
+
+    Scope* functionProtoScope = FunctionScope::create(cx, nullptr, 0, functionProto, nullptr);
+    if (!functionProtoScope)
+        return false;
+    script->scopes()->vector[0].init(functionProtoScope);
 
     SharedScriptData* ssd = SharedScriptData::new_(cx, 1, 1, 0);
     if (!ssd)
@@ -2529,7 +2534,7 @@ InitAtomMap(frontend::AtomIndexMap* indices, GCPtrAtom* atoms)
     }
 }
 
-/* static */ bool
+/* static */ void
 JSScript::initFromFunctionBox(ExclusiveContext* cx, HandleScript script,
                               frontend::FunctionBox* funbox)
 {
@@ -2564,7 +2569,7 @@ JSScript::initFromFunctionBox(ExclusiveContext* cx, HandleScript script,
         fun->setScript(script);
 }
 
-/* static */ bool
+/* static */ void
 JSScript::initFromModuleBox(ExclusiveContext* cx, HandleScript script,
                             frontend::ModuleBox* modulebox)
 {
@@ -2602,17 +2607,12 @@ JSScript::fullyInitFromEmitter(ExclusiveContext* cx, HandleScript script, Byteco
         return false;
     uint32_t natoms = bce->atomIndices->count();
     if (!partiallyInit(cx, script,
-                       bce->constList.length(), bce->objectList.length, bce->scopeList.length(),
+                       bce->scopeList.length(), bce->constList.length(), bce->objectList.length,
                        bce->tryNoteList.length(), bce->scopeNoteList.length(),
                        bce->yieldOffsetList.length(), bce->typesetCount))
     {
         return false;
     }
-
-    if (bce->sc->isFunctionBox())
-        initFromFunctionBox(cx, script, bce->sc->asFunctionBox());
-    else if (bce->sc->isModuleBox())
-        initFromModuleBox(cx, script, bce->sc->asModuleBox());
 
     MOZ_ASSERT(script->mainOffset() == 0);
     script->mainOffset_ = prologueLength;
@@ -2638,7 +2638,7 @@ JSScript::fullyInitFromEmitter(ExclusiveContext* cx, HandleScript script, Byteco
     // need to walk the entire static scope chain if the script is nested in a
     // function. In that case, we can propagate the cached value from the
     // outer script.
-    script->hasNonSyntacticScope_ = bce->outermostScope()->isInNonSyntacticChain();
+    script->hasNonSyntacticScope_ = bce->outermostScope()->hasEnclosing(ScopeKind::NonSyntactic);
 
     if (bce->constList.length() != 0)
         bce->constList.finish(script->consts());
@@ -2668,6 +2668,11 @@ JSScript::fullyInitFromEmitter(ExclusiveContext* cx, HandleScript script, Byteco
     script->nslots_ = nslots;
 
     script->bodyScopeIndex_ = bce->bodyScopeIndex;
+
+    if (bce->sc->isFunctionBox())
+        initFromFunctionBox(cx, script, bce->sc->asFunctionBox());
+    else if (bce->sc->isModuleBox())
+        initFromModuleBox(cx, script, bce->sc->asModuleBox());
 
 #ifdef DEBUG
     script->assertValidJumpTargets();
@@ -3110,8 +3115,8 @@ CloneInnerInterpretedFunction(JSContext* cx, HandleScope enclosingScope, HandleF
 }
 
 bool
-js::detail::CopyScript(JSContext* cx, Handle<Scope::EnclosingForClone> scriptEnclosingScope,
-                       HandleScript src, HandleScript dst)
+js::detail::CopyScript(JSContext* cx, HandleScript src, HandleScript dst,
+                       MutableHandle<GCVector<Scope*>> scopes)
 {
     if (src->treatAsRunOnce() && !src->functionNonDelazifying()) {
         JS_ReportError(cx, "No cloning toplevel run-once scripts");
@@ -3125,7 +3130,7 @@ js::detail::CopyScript(JSContext* cx, Handle<Scope::EnclosingForClone> scriptEnc
 
     uint32_t nconsts   = src->hasConsts()   ? src->consts()->length   : 0;
     uint32_t nobjects  = src->hasObjects()  ? src->objects()->length  : 0;
-    uint32_t nscopes   = src->hasScopes()   ? src->scopes()->length   : 0;
+    uint32_t nscopes   = src->scopes()->length;
     uint32_t ntrynotes = src->hasTrynotes() ? src->trynotes()->length : 0;
     uint32_t nscopenotes = src->hasScopeNotes() ? src->scopeNotes()->length : 0;
     uint32_t nyieldoffsets = src->hasYieldOffsets() ? src->yieldOffsets().length() : 0;
@@ -3141,26 +3146,20 @@ js::detail::CopyScript(JSContext* cx, Handle<Scope::EnclosingForClone> scriptEnc
 
     /* Scopes */
 
-    Rooted<GCVector<Scope*>> scopes(cx, GCVector<Scope*>(cx));
-    if (nscopes != 0) {
-        GCPtrScope* vector = src->scopes()->vector;
-        RootedScope original(cx);
-        RootedScope clone(cx);
-        for (uint32_t i = 0; i < nscopes; i++) {
-            original = vector[i];
-
-            // The first scope is the outermost scope in the script and needs
-            // the new enclosing scope.
-            if (i == 0) {
-                clone = original->clone(cx, scriptEnclosingScope);
-            } else {
-                Scope* enclosingClone = scopes[FindScopeIndex(src, *original->enclosing())];
-                clone = original->clone(cx, AsVariant(enclosingClone));
-            }
-
-            if (!clone || !scopes.append(clone))
-                return false;
-        }
+    // The passed in scopes vector contains body scopes that needed to be
+    // cloned especially, depending on whether the script is a function or
+    // global scope. Starting at scopes.length() means we only deal with
+    // intra-body scopes.
+    MOZ_ASSERT(nscopes != 0);
+    MOZ_ASSERT(src->bodyScopeIndex() + 1 == scopes.length());
+    GCPtrScope* vector = src->scopes()->vector;
+    RootedScope original(cx);
+    RootedScope clone(cx);
+    for (uint32_t i = scopes.length(); i < nscopes; i++) {
+        original = vector[i];
+        clone = original->clone(cx, scopes[FindScopeIndex(src, *original->enclosing())]);
+        if (!clone || !scopes.append(clone))
+            return false;
     }
 
     /* Objects */
@@ -3232,7 +3231,7 @@ js::detail::CopyScript(JSContext* cx, Handle<Scope::EnclosingForClone> scriptEnc
     dst->cloneHasArray(src);
     dst->strict_ = src->strict();
     dst->explicitUseStrict_ = src->explicitUseStrict();
-    dst->hasNonSyntacticScope_ = scopes[0]->isInNonSyntacticChain();
+    dst->hasNonSyntacticScope_ = scopes[0]->hasEnclosing(ScopeKind::NonSyntactic);
     dst->bindingsAccessedDynamically_ = src->bindingsAccessedDynamically();
     dst->funHasExtensibleScope_ = src->funHasExtensibleScope();
     dst->funNeedsDeclEnvObject_ = src->funNeedsDeclEnvObject();
@@ -3258,7 +3257,7 @@ js::detail::CopyScript(JSContext* cx, Handle<Scope::EnclosingForClone> scriptEnc
         for (unsigned i = 0; i < nobjects; ++i)
             vector[i].init(&objects[i]->as<NativeObject>());
     }
-    if (nscopes != 0) {
+    {
         GCPtrScope* vector = Rebase<GCPtrScope>(dst, src, src->scopes()->vector);
         dst->scopes()->vector = vector;
         for (uint32_t i = 0; i < nscopes; ++i)
@@ -3335,8 +3334,13 @@ js::CloneGlobalScript(JSContext* cx, ScopeKind scopeKind, HandleScript src)
     if (!dst)
         return nullptr;
 
-    Rooted<Scope::EnclosingForClone> enclosingData(cx, AsVariant(scopeKind));
-    if (!detail::CopyScript(cx, enclosingData, src, dst))
+    MOZ_ASSERT(src->bodyScopeIndex() == 0);
+    Rooted<GCVector<Scope*>> scopes(cx, GCVector<Scope*>(cx));
+    GlobalScope* clone = src->bodyScope()->as<GlobalScope>().clone(cx, scopeKind);
+    if (!clone || !scopes.append(clone))
+        return nullptr;
+
+    if (!detail::CopyScript(cx, src, dst, &scopes))
         return nullptr;
 
     return dst;
@@ -3361,7 +3365,6 @@ js::CloneScriptIntoFunction(JSContext* cx, HandleScope enclosingScope, HandleFun
     // Save flags in case we need to undo the early mutations.
     const int preservedFlags = fun->flags();
 
-    dst->setFunction(fun);
     Rooted<LazyScript*> lazy(cx);
     if (fun->isInterpretedLazy()) {
         lazy = fun->lazyScriptOrNull();
@@ -3370,8 +3373,30 @@ js::CloneScriptIntoFunction(JSContext* cx, HandleScope enclosingScope, HandleFun
         fun->initScript(dst);
     }
 
-    Rooted<Scope::EnclosingForClone> enclosingData(cx, AsVariant(enclosingScope.get()));
-    if (!detail::CopyScript(cx, enclosingData, src, dst)) {
+    // Clone the non-intra-body scopes.
+    Rooted<GCVector<Scope*>> scopes(cx, GCVector<Scope*>(cx));
+    for (uint32_t i = 0; i <= src->bodyScopeIndex(); i++) {
+        Scope* original = src->getScope(i);
+
+        Scope* enclosingClone;
+        if (i == 0) {
+            enclosingClone = enclosingScope;
+        } else {
+            MOZ_ASSERT(src->getScope(i - 1) == original->enclosing());
+            enclosingClone = scopes[i - 1];
+        }
+
+        Scope* clone;
+        if (original->is<FunctionScope>())
+            clone = original->as<FunctionScope>().clone(cx, fun, enclosingClone);
+        else
+            clone = original->clone(cx, enclosingClone);
+
+        if (!clone || !scopes.append(clone))
+            return nullptr;
+    }
+
+    if (!detail::CopyScript(cx, src, dst, &scopes)) {
         if (lazy)
             fun->initLazyScript(lazy);
         else
@@ -3588,19 +3613,17 @@ JSScript::traceChildren(JSTracer* trc)
             TraceNullableEdge(trc, &atoms[i], "atom");
     }
 
-    if (hasObjects()) {
-        ObjectArray* objarray = objects();
-        TraceRange(trc, objarray->length, objarray->vector, "objects");
-    }
+    ScopeArray* scopearray = scopes();
+    TraceRange(trc, scopearray->length, scopearray->vector, "scopes");
 
     if (hasConsts()) {
         ConstArray* constarray = consts();
         TraceRange(trc, constarray->length, constarray->vector, "consts");
     }
 
-    if (hasScopes()) {
-        ScopeArray* scopearray = scopes();
-        TraceRange(trc, scopearray->length, scopearray->vector, "scopes");
+    if (hasObjects()) {
+        ObjectArray* objarray = objects();
+        TraceRange(trc, objarray->length, objarray->vector, "objects");
     }
 
     MOZ_ASSERT_IF(sourceObject(), MaybeForwarded(sourceObject())->compartment() == compartment());
