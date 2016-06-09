@@ -336,8 +336,14 @@ GlobalObject::createInternal(JSContext* cx, const Class* clasp)
     global->setReservedSlot(LEXICAL_SCOPE, ObjectValue(*lexical));
 
     if (!cx->runtime()->emptyGlobalScope) {
-        cx->runtime()->emptyGlobalScope = GlobalScope::create(cx, ScopeKind::Global, nullptr);
-        if (!cx->runtime()->emptyGlobalScope)
+        JSRuntime* rt = cx->runtime();
+        rt->emptyGlobalScope = GlobalScope::create(cx, ScopeKind::Global, nullptr);
+        if (!rt->emptyGlobalScope)
+            return nullptr;
+
+        MOZ_ASSERT(!rt->emptyNonSyntacticScope);
+        rt->emptyNonSyntacticScope = GlobalScope::create(cx, ScopeKind::NonSyntactic, nullptr);
+        if (!rt->emptyNonSyntacticScope)
             return nullptr;
     }
 

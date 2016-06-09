@@ -1796,7 +1796,7 @@ BytecodeEmitter::emitGoto(NestableControl* target, JumpList* jumplist, SrcNoteTy
     return emitJump(JSOP_GOTO, jumplist);
 }
 
-Scope*
+HandleScope
 BytecodeEmitter::innermostScope() const
 {
     return innermostEmitterScope->scope(this);

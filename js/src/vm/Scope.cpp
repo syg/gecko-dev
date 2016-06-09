@@ -171,6 +171,39 @@ Scope::create(ExclusiveContext* cx, ScopeKind kind, Scope* enclosing, uintptr_t 
     return scope;
 }
 
+Scope*
+Scope::clone(JSContext* cx, EnclosingForClone enclosing)
+{
+    if (is<GlobalScope>()) {
+        GlobalScope& self = as<GlobalScope>();
+        return GlobalScope::create(cx, enclosing.as<ScopeKind>(), &self.data());
+    }
+
+    Scope* enclosingScope = enclosing.as<Scope*>();
+
+    if (is<LexicalScope>()) {
+        LexicalScope& self = as<LexicalScope>();
+        return LexicalScope::create(cx, self.kind(), &self.data(), self.computeFirstFrameSlot(),
+                                    enclosingScope);
+    }
+
+    if (is<FunctionScope>()) {
+        FunctionScope& self = as<FunctionScope>();
+        return FunctionScope::create(cx, &self.data(), self.computeFirstFrameSlot(),
+                                     self.canonicalFunction(), enclosingScope);
+    }
+
+    if (is<EvalScope>()) {
+        EvalScope& self = as<EvalScope>();
+        return EvalScope::create(cx, self.kind(), &self.data(), enclosingScope);
+    }
+
+    if (is<WithScope>()) {
+        WithScope& self = as<WithScope>();
+        return WithScope::create(cx, enclosingScope);
+    }
+}
+
 /* static */ uint32_t
 LexicalScope::computeNextFrameSlot(Scope* start)
 {
@@ -192,8 +225,8 @@ LexicalScope::create(ExclusiveContext* cx, ScopeKind kind, Data* data,
     MOZ_ASSERT(data, "LexicalScopes should not be created if there are no bindings.");
     MOZ_ASSERT(firstFrameSlot == computeNextFrameSlot(enclosing));
 
-    // The data that's passed in is from the frontend and is LifoAlloc'd. Copy
-    // it now that we're creating a permanent VM scope.
+    // The data that's passed in is from the frontend and is LifoAlloc'd or is
+    // from Scope::copy. Copy it now that we're creating a permanent VM scope.
     Data* copy;
     BindingIter bi(*data, firstFrameSlot);
     copy = CopyFrameScopeData(cx, bi,
@@ -216,8 +249,8 @@ FunctionScope::create(ExclusiveContext* cx, Data* data, uint32_t firstFrameSlot,
 {
     MOZ_ASSERT(firstFrameSlot == computeNextFrameSlot(enclosing));
 
-    // The data that's passed in is from the frontend and is LifoAlloc'd. Copy
-    // it now that we're creating a permanent VM scope.
+    // The data that's passed in is from the frontend and is LifoAlloc'd or is
+    // from Scope::copy. Copy it now that we're creating a permanent VM scope.
     Data* copy;
     if (data) {
         BindingIter bi(*data, firstFrameSlot);
@@ -250,8 +283,8 @@ FunctionScope::script() const
 /* static */ GlobalScope*
 GlobalScope::create(ExclusiveContext* cx, ScopeKind kind, Data* data)
 {
-    // The data that's passed in is from the frontend and is LifoAlloc'd. Copy
-    // it now that we're creating a permanent VM scope.
+    // The data that's passed in is from the frontend and is LifoAlloc'd or is
+    // from Scope::copy. Copy it now that we're creating a permanent VM scope.
     Data* copy;
     if (data) {
         // The global scope has no environment shape. Its environment is the
@@ -285,8 +318,8 @@ EvalScope::create(ExclusiveContext* cx, ScopeKind scopeKind, Data* data, Scope* 
 {
     MOZ_ASSERT(scopeKind == ScopeKind::Eval || scopeKind == ScopeKind::StrictEval);
 
-    // The data that's passed in is from the frontend and is LifoAlloc'd. Copy
-    // it now that we're creating a permanent VM scope.
+    // The data that's passed in is from the frontend and is LifoAlloc'd or is
+    // from Scope::copy. Copy it now that we're creating a permanent VM scope.
     Data* copy;
     if (data) {
         if (scopeKind == ScopeKind::StrictEval) {

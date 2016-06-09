@@ -68,7 +68,8 @@ namespace detail {
 // Do not call this directly! It is exposed for the friend declarations in
 // this file.
 bool
-CopyScript(JSContext* cx, HandleObject scriptStaticScope, HandleScript src, HandleScript dst);
+CopyScript(JSContext* cx, Handle<Scope::EnclosingForClone> scriptEnclosingScope,
+           HandleScript src, HandleScript dst);
 
 } // namespace detail
 
@@ -157,8 +158,8 @@ struct ScopeNoteArray {
 
 class YieldOffsetArray {
     friend bool
-    detail::CopyScript(JSContext* cx, HandleObject scriptStaticScope, HandleScript src,
-                       HandleScript dst);
+    detail::CopyScript(JSContext* cx, Handle<Scope::EnclosingForClone> scriptEnclosingScope,
+                       HandleScript src, HandleScript dst);
 
     uint32_t*       vector_;    // Array of bytecode offsets.
     uint32_t        length_;    // Count of bytecode offsets.
@@ -649,8 +650,9 @@ class JSScript : public js::gc::TenuredCell
                   js::HandleFunction fun, js::MutableHandleScript scriptp);
 
     friend bool
-    js::detail::CopyScript(JSContext* cx, js::HandleObject scriptStaticScope, js::HandleScript src,
-                           js::HandleScript dst);
+    js::detail::CopyScript(JSContext* cx,
+                           js::Handle<js::Scope::EnclosingForClone> scriptEnclosingScope,
+                           js::HandleScript src, js::HandleScript dst);
 
   private:
     jsbytecode*     code_;     /* bytecodes and their immediate operands */
@@ -1390,8 +1392,14 @@ class JSScript : public js::gc::TenuredCell
         return getScope(bodyScopeIndex_);
     }
 
+    js::Scope* outermostScope() const {
+        // The body scope may not be the outermost scope in the script, such
+        // as when decl env or defaults scopes are present.
+        return getScope(0);
+    }
+
     js::Scope* enclosingScope() const {
-        return bodyScope()->enclosing();
+        return outermostScope()->enclosing();
     }
 
     // Switch the script over from the off-thread compartment's static
@@ -1560,13 +1568,11 @@ class JSScript : public js::gc::TenuredCell
         return arr->vector[index];
     }
 
-    // The following 4 functions find the static scope just before the
+    // The following 3 functions find the static scope just before the
     // execution of the instruction pointed to by pc.
 
     js::Scope* getScope(jsbytecode* pc);
 
-    // As innermostStaticScopeInScript, but returns the enclosing static scope
-    // if the innermost static scope falls without the extent of the script.
     js::Scope* innermostScope(jsbytecode* pc);
     js::Scope* innermostScope() { return innermostScope(main()); }
 
@@ -2085,7 +2091,7 @@ CloneScriptIntoFunction(JSContext* cx, HandleScope enclosingScope, HandleFunctio
                         HandleScript src);
 
 JSScript*
-CloneGlobalScript(JSContext* cx, Handle<StaticScope*> enclosingScope, HandleScript src);
+CloneGlobalScript(JSContext* cx, ScopeKind scopeKind, HandleScript src);
 
 } /* namespace js */
 

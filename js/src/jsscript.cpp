@@ -66,6 +66,7 @@ using namespace js::frontend;
 using mozilla::PodCopy;
 using mozilla::PodZero;
 using mozilla::RotateLeft;
+using mozilla::AsVariant;
 
 template<XDRMode mode>
 bool
@@ -276,6 +277,20 @@ FindScopeObjectIndex(JSScript* script, NestedStaticScope& scope)
     GCPtrObject* vector = objects->vector;
     unsigned length = objects->length;
     for (unsigned i = 0; i < length; ++i) {
+        if (vector[i] == &scope)
+            return i;
+    }
+
+    MOZ_CRASH("Scope not found");
+}
+
+static inline uint32_t
+FindScopeIndex(JSScript* script, Scope& scope)
+{
+    ScopeArray* scopes = script->scopes();
+    GCPtrScope* vector = scopes->vector;
+    unsigned length = scopes->length;
+    for (uint32_t i = 0; i < length; ++i) {
         if (vector[i] == &scope)
             return i;
     }
@@ -2618,7 +2633,7 @@ JSScript::fullyInitFromEmitter(ExclusiveContext* cx, HandleScript script, Byteco
     // need to walk the entire static scope chain if the script is nested in a
     // function. In that case, we can propagate the cached value from the
     // outer script.
-    script->hasNonSyntacticScope_ = HasNonSyntacticScopeChain(bce->bodyScope());
+    script->hasNonSyntacticScope_ = HasNonSyntacticScopeChain(bce->outermostScope());
 
     if (bce->constList.length() != 0)
         bce->constList.finish(script->consts());
@@ -3084,7 +3099,7 @@ Rebase(JSScript* dst, JSScript* src, T* srcp)
 }
 
 static JSObject*
-CloneInnerInterpretedFunction(JSContext* cx, HandleObject enclosingScope, HandleFunction srcFun)
+CloneInnerInterpretedFunction(JSContext* cx, HandleScope enclosingScope, HandleFunction srcFun)
 {
     /* NB: Keep this in sync with XDRInterpretedFunction. */
     RootedObject cloneProto(cx);
@@ -3113,8 +3128,7 @@ CloneInnerInterpretedFunction(JSContext* cx, HandleObject enclosingScope, Handle
     JSScript::AutoDelazify srcScript(cx, srcFun);
     if (!srcScript)
         return nullptr;
-    // TODOshu
-    JSScript* cloneScript = CloneScriptIntoFunction(cx, nullptr, clone, srcScript);
+    JSScript* cloneScript = CloneScriptIntoFunction(cx, enclosingScope, clone, srcScript);
     if (!cloneScript)
         return nullptr;
 
@@ -3125,11 +3139,10 @@ CloneInnerInterpretedFunction(JSContext* cx, HandleObject enclosingScope, Handle
 }
 
 bool
-js::detail::CopyScript(JSContext* cx, HandleObject scriptStaticScope, HandleScript src,
-                       HandleScript dst)
+js::detail::CopyScript(JSContext* cx, Handle<Scope::EnclosingForClone> scriptEnclosingScope,
+                       HandleScript src, HandleScript dst)
 {
     if (src->treatAsRunOnce() && !src->functionNonDelazifying()) {
-        // Toplevel run-once scripts may not be cloned.
         JS_ReportError(cx, "No cloning toplevel run-once scripts");
         return false;
     }
@@ -3155,39 +3168,42 @@ js::detail::CopyScript(JSContext* cx, HandleObject scriptStaticScope, HandleScri
         return false;
     }
 
-    /* Scope */
+    /* Scopes */
 
-    // TODOshu copy body scope
+    Rooted<GCVector<Scope*>> scopes(cx, GCVector<Scope*>(cx));
+    if (nscopes != 0) {
+        GCPtrScope* vector = src->scopes()->vector;
+        RootedScope original(cx);
+        RootedScope clone(cx);
+        for (uint32_t i = 0; i < nscopes; i++) {
+            original = vector[i];
+
+            // The first scope is the outermost scope in the script and needs
+            // the new enclosing scope.
+            if (i == 0) {
+                clone = original->clone(cx, scriptEnclosingScope);
+            } else {
+                Scope* enclosingClone = scopes[FindScopeIndex(src, *original->enclosing())];
+                clone = original->clone(cx, AsVariant(enclosingClone));
+            }
+
+            if (!clone || !scopes.append(clone))
+                return false;
+        }
+    }
 
     /* Objects */
 
     AutoObjectVector objects(cx);
     if (nobjects != 0) {
         GCPtrObject* vector = src->objects()->vector;
+        RootedObject obj(cx);
+        RootedObject clone(cx);
         for (unsigned i = 0; i < nobjects; i++) {
-            RootedObject obj(cx, vector[i]);
-            RootedObject clone(cx);
-            if (obj->is<NestedStaticScope>()) {
-                Rooted<NestedStaticScope*> innerBlock(cx, &obj->as<NestedStaticScope>());
-
-                RootedObject enclosingScope(cx);
-                if (NestedStaticScope* enclosingBlock = innerBlock->enclosingNestedScope()) {
-                    if (IsStaticGlobalLexicalScope(enclosingBlock)) {
-                        MOZ_ASSERT(IsStaticGlobalLexicalScope(scriptStaticScope) ||
-                                   scriptStaticScope->is<StaticNonSyntacticScope>());
-                        enclosingScope = scriptStaticScope;
-                    } else {
-                        enclosingScope = objects[FindScopeObjectIndex(src, *enclosingBlock)];
-                    }
-                } else {
-                    enclosingScope = scriptStaticScope;
-                }
-
-                clone = CloneNestedScopeObject(cx, enclosingScope, innerBlock);
-
-            } else if (obj->is<RegExpObject>()) {
+            obj = vector[i];
+            clone = nullptr;
+            if (obj->is<RegExpObject>()) {
                 clone = CloneScriptRegExpObject(cx, obj->as<RegExpObject>());
-
             } else if (obj->is<JSFunction>()) {
                 RootedFunction innerFun(cx, &obj->as<JSFunction>());
                 if (innerFun->isNative()) {
@@ -3203,30 +3219,11 @@ js::detail::CopyScript(JSContext* cx, HandleObject scriptStaticScope, HandleScri
                         if (!innerFun->getOrCreateScript(cx))
                             return false;
                     }
-                    // TODOshu
-                    RootedObject staticScope(cx, /* innerFun->nonLazyScript()->enclosingStaticScope() */ nullptr);
-                    StaticScopeIter<CanGC> ssi(cx, staticScope);
-                    RootedObject enclosingScope(cx);
-                    if (ssi.done() || ssi.type() == StaticScopeIter<CanGC>::NonSyntactic) {
-                        enclosingScope = scriptStaticScope;
-                    } else if (ssi.type() == StaticScopeIter<CanGC>::Function) {
-                        MOZ_ASSERT(scriptStaticScope->is<JSFunction>());
-                        enclosingScope = scriptStaticScope;
-                    } else if (ssi.type() == StaticScopeIter<CanGC>::Block) {
-                        if (ssi.block().isGlobal()) {
-                            MOZ_ASSERT(IsStaticGlobalLexicalScope(scriptStaticScope) ||
-                                       scriptStaticScope->is<StaticNonSyntacticScope>());
-                            enclosingScope = scriptStaticScope;
-                        } else {
-                            enclosingScope = objects[FindScopeObjectIndex(src, ssi.block())];
-                        }
-                    } else {
-                        enclosingScope = objects[FindScopeObjectIndex(src, ssi.staticWith())];
-                    }
 
-                    clone = CloneInnerInterpretedFunction(cx, enclosingScope, innerFun);
+                    Scope* enclosing = innerFun->nonLazyScript()->enclosingScope();
+                    RootedScope enclosingClone(cx, scopes[FindScopeIndex(src, *enclosing)]);
+                    clone = CloneInnerInterpretedFunction(cx, enclosingClone, innerFun);
                 }
-
             } else {
                 clone = DeepCloneObjectLiteral(cx, obj, TenuredObject);
             }
@@ -3235,8 +3232,6 @@ js::detail::CopyScript(JSContext* cx, HandleObject scriptStaticScope, HandleScri
                 return false;
         }
     }
-
-    // TODOshu copy scopes.
 
     /* This assignment must occur before all the Rebase calls. */
     dst->data = data.forget();
@@ -3251,9 +3246,11 @@ js::detail::CopyScript(JSContext* cx, HandleObject scriptStaticScope, HandleScri
     dst->lineno_ = src->lineno();
     dst->mainOffset_ = src->mainOffset();
     dst->natoms_ = src->natoms();
+    dst->nfixed_ = src->nfixed();
+    dst->nslots_ = src->nslots();
+    dst->bodyScopeIndex_ = src->bodyScopeIndex_;
     dst->funLength_ = src->funLength();
     dst->nTypeSets_ = src->nTypeSets();
-    dst->nslots_ = src->nslots();
     if (src->argumentsHasVarBinding()) {
         dst->setArgumentsHasVarBinding();
         if (src->analyzedArgsUsage())
@@ -3264,6 +3261,7 @@ js::detail::CopyScript(JSContext* cx, HandleObject scriptStaticScope, HandleScri
     dst->cloneHasArray(src);
     dst->strict_ = src->strict();
     dst->explicitUseStrict_ = src->explicitUseStrict();
+    dst->hasNonSyntacticScope_ = HasNonSyntacticScopeChain(scopes[0]);
     dst->bindingsAccessedDynamically_ = src->bindingsAccessedDynamically();
     dst->funHasExtensibleScope_ = src->funHasExtensibleScope();
     dst->funNeedsDeclEnvObject_ = src->funNeedsDeclEnvObject();
@@ -3289,7 +3287,12 @@ js::detail::CopyScript(JSContext* cx, HandleObject scriptStaticScope, HandleScri
         for (unsigned i = 0; i < nobjects; ++i)
             vector[i].init(&objects[i]->as<NativeObject>());
     }
-    // TODOshu clone scopes
+    if (nscopes != 0) {
+        GCPtrScope* vector = Rebase<GCPtrScope>(dst, src, src->scopes()->vector);
+        dst->scopes()->vector = vector;
+        for (uint32_t i = 0; i < nscopes; ++i)
+            vector[i].init(scopes[i]);
+    }
     if (ntrynotes != 0)
         dst->trynotes()->vector = Rebase<JSTryNote>(dst, src, src->trynotes()->vector);
     if (nscopenotes != 0)
@@ -3353,16 +3356,16 @@ CreateEmptyScriptForClone(JSContext* cx, HandleScript src)
 }
 
 JSScript*
-js::CloneGlobalScript(JSContext* cx, Handle<StaticScope*> enclosingScope, HandleScript src)
+js::CloneGlobalScript(JSContext* cx, ScopeKind scopeKind, HandleScript src)
 {
-    MOZ_ASSERT(IsStaticGlobalLexicalScope(enclosingScope) ||
-               enclosingScope->is<StaticNonSyntacticScope>());
+    MOZ_ASSERT(scopeKind == ScopeKind::Global || scopeKind == ScopeKind::NonSyntactic);
 
     RootedScript dst(cx, CreateEmptyScriptForClone(cx, src));
     if (!dst)
         return nullptr;
 
-    if (!detail::CopyScript(cx, enclosingScope, src, dst))
+    Rooted<Scope::EnclosingForClone> enclosingData(cx, AsVariant(scopeKind));
+    if (!detail::CopyScript(cx, enclosingData, src, dst))
         return nullptr;
 
     return dst;
@@ -3396,7 +3399,8 @@ js::CloneScriptIntoFunction(JSContext* cx, HandleScope enclosingScope, HandleFun
         fun->initScript(dst);
     }
 
-    if (!detail::CopyScript(cx, fun, src, dst)) {
+    Rooted<Scope::EnclosingForClone> enclosingData(cx, AsVariant(enclosingScope.get()));
+    if (!detail::CopyScript(cx, enclosingData, src, dst)) {
         if (lazy)
             fun->initLazyScript(lazy);
         else

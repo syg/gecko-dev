@@ -11,6 +11,7 @@
 #include "jsopcode.h"
 
 #include "mozilla/Maybe.h"
+#include "mozilla/Variant.h"
 
 #include "gc/Heap.h"
 #include "gc/Policy.h"
@@ -222,12 +223,19 @@ class Scope : public js::gc::TenuredCell
         return enclosing_;
     }
 
+    // Either the enclosing scope if the cloned scope is not an outermost
+    // GlobalScope, or the new ScopeKind if the scope is a GlobalScope.
+    using EnclosingForClone = mozilla::Variant<Scope*, ScopeKind>;
+
+    Scope* clone(JSContext* cx, EnclosingForClone enclosing);
+
     void traceChildren(JSTracer* trc);
     void finalize(FreeOp* fop);
 };
 
 class LexicalScope : public Scope
 {
+    friend class Scope;
     friend class BindingIter;
 
   public:
@@ -410,6 +418,7 @@ class FunctionScope : public Scope
 // distinction is important for optimizations.
 class GlobalScope : public Scope
 {
+    friend class Scope;
     friend class BindingIter;
 
   public:
@@ -475,6 +484,7 @@ class WithScope : public Scope
 
 class EvalScope : public Scope
 {
+    friend class Scope;
     friend class BindingIter;
 
   public:
@@ -851,6 +861,9 @@ void DumpScopeChain(Scope* scope);
 } // namespace js
 
 namespace JS {
+
+template <> struct GCPolicy<js::ScopeKind> : public IgnoreGCPolicy<js::ScopeKind> {};
+
 namespace ubi {
 
 template <>

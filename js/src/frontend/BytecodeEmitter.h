@@ -309,7 +309,8 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     NameLocation locationOfNameBoundInScope(JSAtom* name, EmitterScope* target);
 
     HandleScope bodyScope() const { return scopeList.vector[bodyScopeIndex]; }
-    Scope* innermostScope() const;
+    HandleScope outermostScope() const { return scopeList.vector[0]; }
+    HandleScope innermostScope() const;
 
     MOZ_ALWAYS_INLINE
     MOZ_MUST_USE bool makeAtomIndex(JSAtom* atom, uint32_t* indexp) {

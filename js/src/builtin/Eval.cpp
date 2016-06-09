@@ -446,7 +446,6 @@ JS_FRIEND_API(bool)
 js::ExecuteInGlobalAndReturnScope(JSContext* cx, HandleObject global, HandleScript scriptArg,
                                   MutableHandleObject scopeArg)
 {
-    //TODOshu
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, global);
     MOZ_ASSERT(global->is<GlobalObject>());
@@ -455,11 +454,7 @@ js::ExecuteInGlobalAndReturnScope(JSContext* cx, HandleObject global, HandleScri
     RootedScript script(cx, scriptArg);
     Rooted<GlobalObject*> globalRoot(cx, &global->as<GlobalObject>());
     if (script->compartment() != cx->compartment()) {
-        Rooted<StaticScope*> staticScope(cx, &globalRoot->lexicalScope().staticBlock());
-        staticScope = StaticNonSyntacticScope::create(cx, staticScope);
-        if (!staticScope)
-            return false;
-        script = CloneGlobalScript(cx, staticScope, script);
+        script = CloneGlobalScript(cx, ScopeKind::NonSyntactic, script);
         if (!script)
             return false;
 

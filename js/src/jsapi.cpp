@@ -3492,14 +3492,14 @@ JS::NewFunctionFromSpec(JSContext* cx, const JSFunctionSpec* fs, HandleId id)
 
 static bool
 CreateNonSyntacticEnvironmentChain(JSContext* cx, AutoObjectVector& envChain,
-                                   MutableHandleObject environment, ScopeKind* scopeKind)
+                                   MutableHandleObject environment, MutableHandleScope scope)
 {
     Rooted<ClonedBlockObject*> globalLexical(cx, &cx->global()->lexicalScope());
     if (!js::CreateScopeObjectsForScopeChain(cx, envChain, globalLexical, environment))
         return false;
 
     if (!envChain.empty()) {
-        *scopeKind = ScopeKind::NonSyntactic;
+        scope.set(cx->emptyNonSyntacticScope());
 
         // The XPConnect subscript loader, which may pass in its own dynamic
         // scopes to load scripts in, expects the dynamic scope chain to be
@@ -3525,8 +3525,8 @@ CreateNonSyntacticEnvironmentChain(JSContext* cx, AutoObjectVector& envChain,
                                                                    environment));
         if (!environment)
             return false;
-    } else {
-        *scopeKind = ScopeKind::Global;
+    } else if (scope) {
+        scope.set(cx->emptyGlobalScope());
     }
 
     return true;
@@ -3646,10 +3646,10 @@ extern JS_PUBLIC_API(JSObject*)
 JS::CloneFunctionObject(JSContext* cx, HandleObject funobj, AutoObjectVector& envChain)
 {
     RootedObject environment(cx);
-    ScopeKind scopeKind;
-    if (!CreateNonSyntacticEnvironmentChain(cx, envChain, &environment, &scopeKind))
+    RootedScope scope(cx);
+    if (!CreateNonSyntacticEnvironmentChain(cx, envChain, &environment, &scope))
         return nullptr;
-    return CloneFunctionObject(cx, funobj, environment, cx->emptyGlobalScope());
+    return CloneFunctionObject(cx, funobj, environment, scope);
 }
 
 JS_PUBLIC_API(JSObject*)
@@ -4330,11 +4330,10 @@ JS::CompileFunction(JSContext* cx, AutoObjectVector& envChain,
                     SourceBufferHolder& srcBuf, MutableHandleFunction fun)
 {
     RootedObject environment(cx);
-    ScopeKind scopeKind;
-    if (!CreateNonSyntacticEnvironmentChain(cx, envChain, &environment, &scopeKind))
+    RootedScope scope(cx);
+    if (!CreateNonSyntacticEnvironmentChain(cx, envChain, &environment, &scope))
         return false;
-    return CompileFunction(cx, options, name, nargs, argnames,
-                           srcBuf, environment, cx->emptyGlobalScope(), fun);
+    return CompileFunction(cx, options, name, nargs, argnames, srcBuf, environment, scope, fun);
 }
 
 JS_PUBLIC_API(bool)
@@ -4409,14 +4408,13 @@ static bool
 ExecuteScript(JSContext* cx, AutoObjectVector& envChain, HandleScript scriptArg, Value* rval)
 {
     RootedObject environment(cx);
-    ScopeKind scopeKind;
-    if (!CreateNonSyntacticEnvironmentChain(cx, envChain, &environment, &scopeKind))
+    RootedScope dummy(cx);
+    if (!CreateNonSyntacticEnvironmentChain(cx, envChain, &environment, &dummy))
         return false;
 
     RootedScript script(cx, scriptArg);
     if (!script->hasNonSyntacticScope() && !IsGlobalLexicalScope(environment)) {
-        // TODOshu global script enclosing scope?
-        script = CloneGlobalScript(cx, nullptr, script);
+        script = CloneGlobalScript(cx, ScopeKind::NonSyntactic, script);
         if (!script)
             return false;
         js::Debugger::onNewScript(cx, script);
@@ -4459,8 +4457,7 @@ JS::CloneAndExecuteScript(JSContext* cx, HandleScript scriptArg)
     RootedScript script(cx, scriptArg);
     Rooted<ClonedBlockObject*> globalLexical(cx, &cx->global()->lexicalScope());
     if (script->compartment() != cx->compartment()) {
-        Rooted<StaticScope*> staticLexical(cx, &globalLexical->staticBlock());
-        script = CloneGlobalScript(cx, staticLexical, script);
+        script = CloneGlobalScript(cx, ScopeKind::Global, script);
         if (!script)
             return false;
 
@@ -4519,10 +4516,10 @@ Evaluate(JSContext* cx, AutoObjectVector& envChain, const ReadOnlyCompileOptions
          SourceBufferHolder& srcBuf, MutableHandleValue rval)
 {
     RootedObject environment(cx);
-    ScopeKind scopeKind;
-    if (!CreateNonSyntacticEnvironmentChain(cx, envChain, &environment, &scopeKind))
+    RootedScope scope(cx);
+    if (!CreateNonSyntacticEnvironmentChain(cx, envChain, &environment, &scope))
         return false;
-    return ::Evaluate(cx, scopeKind, environment, optionsArg, srcBuf, rval);
+    return ::Evaluate(cx, scope->kind(), environment, optionsArg, srcBuf, rval);
 }
 
 static bool
