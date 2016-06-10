@@ -2562,6 +2562,8 @@ JSScript::initFromFunctionBox(ExclusiveContext* cx, HandleScript script,
     ClosedOverArgumentSlotIter fi(script);
     script->funHasAnyAliasedFormal_ = !!fi;
 
+    script->setHasInnerFunctions(funbox->hasInnerFunctions());
+
     JSFunction* fun = funbox->function();
     if (fun->isInterpretedLazy())
         fun->setUnlazifiedScript(script);

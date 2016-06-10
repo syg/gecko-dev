@@ -6250,10 +6250,9 @@ BytecodeEmitter::emitFunction(ParseNode* pn, bool needsProto)
             if (funbox->isLikelyConstructorWrapper())
                 script->setLikelyConstructorWrapper();
         }
-        /* TODOshu
+
         if (outersc->isFunctionBox())
-            outersc->asFunctionBox()->function()->nonLazyScript()->setHasInnerFunctions(true);
-        */
+            outersc->asFunctionBox()->setHasInnerFunctions();
     } else {
         MOZ_ASSERT(IsAsmJSModule(fun));
     }
@@ -6284,37 +6283,12 @@ BytecodeEmitter::emitFunction(ParseNode* pn, bool needsProto)
 
     MOZ_ASSERT(!needsProto);
 
-    /*
-     * For scripts we put the bytecode for top-level functions in the prologue
-     * to predefine their names in the variable object before the main code is
-     * executed.
-     *
-     * Functions are fully parsed prior to invocation of the emitter and calls
-     * to emitTree for function definitions are scheduled before generating
-     * the rest of code.
-     *
-     * For modules, we record the function and instantiate the binding during
-     * ModuleDeclarationInstantiation(), before the script is run.
-     */
+    RootedAtom name(cx, fun->name());
+    if (sc->isGlobalContext() && lookupName(name).bindingKind() == BindingKind::Var) {
+        // For global and eval scripts we put the bytecode for top-level
+        // functions in the prologue to predefine their names in the variable
+        // object before the main code is executed.
 
-    // Check for functions that were parsed under labeled statements per ES6
-    // Annex B.3.2.
-    bool blockScopedFunction = false;
-    /* TODO use scopes
-    !atBodyLevel();
-    if (!sc->strict() && blockScopedFunction) {
-        StmtInfoBCE* stmt = innermostStmt();
-        while (stmt && stmt->type == StmtType::LABEL)
-            stmt = stmt->enclosing;
-        blockScopedFunction = !atBodyLevel(stmt);
-    }
-    */
-
-    if (blockScopedFunction) {
-        if (!emitIndexOp(JSOP_LAMBDA, index))
-            return false;
-        MOZ_CRASH("TODOshu");
-    } else if (sc->isGlobalContext()) {
         MOZ_ASSERT(pn->getOp() == JSOP_NOP);
         switchToPrologue();
         if (!emitIndex32(JSOP_DEFFUN, index))
@@ -6322,12 +6296,24 @@ BytecodeEmitter::emitFunction(ParseNode* pn, bool needsProto)
         if (!updateSourceCoordNotes(pn->pn_pos.begin))
             return false;
         switchToMain();
-    } else if (sc->isFunctionBox()) {
-        // TODOshu
-    } else {
+    } else if (sc->isModuleBox()) {
+        // For modules, we record the function and instantiate the binding
+        // during ModuleDeclarationInstantiation(), before the script is run.
+
         RootedModuleObject module(cx, sc->asModuleBox()->module());
-        RootedAtom name(cx, fun->name());
         if (!module->noteFunctionDeclaration(cx, name, fun))
+            return false;
+    } else {
+        // For functions nested within functions and blocks, make a lambda and
+        // initialize the binding name of the function in the current scope.
+
+        auto emitLambda = [index](BytecodeEmitter* bce, const NameLocation&, bool) {
+            return bce->emitIndexOp(JSOP_LAMBDA, index);
+        };
+
+        if (!emitInitializeName(name, emitLambda))
+            return false;
+        if (!emit1(JSOP_POP))
             return false;
     }
 

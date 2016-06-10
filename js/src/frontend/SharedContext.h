@@ -244,6 +244,9 @@ class FunctionContextFlags
     // JSOP_FUNCTIONTHIS in the prologue to initialize it.
     bool hasThisBinding:1;
 
+    // Whether this function has inner functions.
+    bool hasInnerFunctions:1;
+
   public:
     FunctionContextFlags()
      :  mightAliasLocals(false),
@@ -253,7 +256,8 @@ class FunctionContextFlags
         definitelyNeedsArgsObj(false),
         needsHomeObject(false),
         isDerivedClassConstructor(false),
-        hasThisBinding(false)
+        hasThisBinding(false),
+        hasInnerFunctions(false)
     { }
 };
 
@@ -543,14 +547,15 @@ class FunctionBox : public ObjectBox, public SharedContext
         generatorKindBits_ = GeneratorKindAsBits(kind);
     }
 
-    bool mightAliasLocals()         const { return funCxFlags.mightAliasLocals; }
-    bool hasExtensibleScope()       const { return funCxFlags.hasExtensibleScope; }
-    bool needsDeclEnvObject()       const { return funCxFlags.needsDeclEnvObject; }
-    bool hasThisBinding()           const { return funCxFlags.hasThisBinding; }
-    bool argumentsHasLocalBinding() const { return funCxFlags.argumentsHasLocalBinding; }
-    bool definitelyNeedsArgsObj()   const { return funCxFlags.definitelyNeedsArgsObj; }
-    bool needsHomeObject()          const { return funCxFlags.needsHomeObject; }
+    bool mightAliasLocals()          const { return funCxFlags.mightAliasLocals; }
+    bool hasExtensibleScope()        const { return funCxFlags.hasExtensibleScope; }
+    bool needsDeclEnvObject()        const { return funCxFlags.needsDeclEnvObject; }
+    bool hasThisBinding()            const { return funCxFlags.hasThisBinding; }
+    bool argumentsHasLocalBinding()  const { return funCxFlags.argumentsHasLocalBinding; }
+    bool definitelyNeedsArgsObj()    const { return funCxFlags.definitelyNeedsArgsObj; }
+    bool needsHomeObject()           const { return funCxFlags.needsHomeObject; }
     bool isDerivedClassConstructor() const { return funCxFlags.isDerivedClassConstructor; }
+    bool hasInnerFunctions()         const { return funCxFlags.hasInnerFunctions; }
 
     void setMightAliasLocals()             { funCxFlags.mightAliasLocals         = true; }
     void setHasExtensibleScope()           { funCxFlags.hasExtensibleScope       = true; }
@@ -563,6 +568,7 @@ class FunctionBox : public ObjectBox, public SharedContext
                                              funCxFlags.needsHomeObject          = true; }
     void setDerivedClassConstructor()      { MOZ_ASSERT(function()->isClassConstructor());
                                              funCxFlags.isDerivedClassConstructor = true; }
+    void setHasInnerFunctions()            { funCxFlags.hasInnerFunctions         = true; }
 
     bool hasDefaults() const {
         return length != function()->nargs() - function()->hasRest();
