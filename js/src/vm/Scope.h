@@ -365,14 +365,18 @@ class FunctionScope : public Scope
     {
         // Bindings are sorted by kind in both frames and environments.
         //
-        // Simple formal parameter names are those without default expressions
-        // or destructuring, i.e. those that may be referred to by argument
-        // slots.
+        // Positional formal parameter names are those without default
+        // expressions or destructuring, i.e. those that may be referred to by
+        // argument slots.
         //
-        // simple formals - [0, nonSimpleFormalStart)
-        //  other formals - [nonSimpleParamStart, varStart)
-        //           vars - [varStart, length)
-        uint16_t nonSimpleFormalStart;
+        // An argument slot that needs to be skipped due to being destructured
+        // or having defaults will have a nullptr name in the name array to
+        // advance the argument slot.
+        //
+        // positional formals - [0, nonPositionalFormalStart)
+        //      other formals - [nonPositionalParamStart, varStart)
+        //               vars - [varStart, length)
+        uint16_t nonPositionalFormalStart;
         uint16_t varStart;
         uint32_t length;
 
@@ -443,8 +447,8 @@ class FunctionScope : public Scope
 
     JSScript* script() const;
 
-    uint32_t numSimpleFormalParameters() const {
-        return data().bindings->nonSimpleFormalStart;
+    uint32_t numPositionalFormalParameters() const {
+        return data().bindings->nonPositionalFormalStart;
     }
 };
 
@@ -605,12 +609,12 @@ class BindingIter
     // Bindings are sorted by kind. Because different Scopes have differently
     // laid out BindingData for packing, BindingIter must handle all binding kinds.
     //
-    // simple formals - [0, nonSimpleFormalStart)
-    //  other formals - [nonSimpleParamStart, varStart)
-    //           vars - [varStart, letStart)
-    //           lets - [letStart, constStart)
-    //         consts - [constStart, length)
-    uint16_t nonSimpleFormalStart_;
+    // positional formals - [0, nonPositionalFormalStart)
+    //      other formals - [nonPositionalParamStart, varStart)
+    //               vars - [varStart, letStart)
+    //               lets - [letStart, constStart)
+    //             consts - [constStart, length)
+    uint16_t nonPositionalFormalStart_;
     uint16_t varStart_;
     uint32_t letStart_;
     uint32_t constStart_;
@@ -632,12 +636,12 @@ class BindingIter
     uint32_t length_;
     BindingName* names_;
 
-    void init(uint16_t nonSimpleFormalStart, uint16_t varStart,
+    void init(uint16_t nonPositionalFormalStart, uint16_t varStart,
               uint32_t letStart, uint32_t constStart, uint8_t canHaveSlots,
               uint32_t firstFrameSlot, uint32_t firstEnvironmentSlot,
               BindingName* names, uint32_t length)
     {
-        nonSimpleFormalStart_ = nonSimpleFormalStart;
+        nonPositionalFormalStart_ = nonPositionalFormalStart;
         varStart_ = varStart;
         letStart_ = letStart;
         constStart_ = constStart;
@@ -648,12 +652,40 @@ class BindingIter
         environmentSlot_ = firstEnvironmentSlot;
         length_ = length;
         names_ = names;
+        settle();
     }
 
     void init(LexicalScope::BindingData& data, uint32_t firstFrameSlot);
     void init(FunctionScope::BindingData& data, uint32_t firstFrameSlot);
     void init(GlobalScope::BindingData& data);
     void init(EvalScope::BindingData& data, bool strict);
+
+    void increment() {
+        MOZ_ASSERT(!done());
+        if (canHaveSlots_) {
+            if (index_ < nonPositionalFormalStart_) {
+                MOZ_ASSERT(canHaveArgumentSlots());
+                argumentSlot_++;
+            }
+            if (closedOver()) {
+                MOZ_ASSERT(canHaveEnvironmentSlots());
+                environmentSlot_++;
+            } else if (index_ >= nonPositionalFormalStart_) {
+                MOZ_ASSERT(canHaveFrameSlots());
+                frameSlot_++;
+            }
+        }
+        index_++;
+    }
+
+    void settle() {
+        // Null names are only present as positional placeholders for formal
+        // parameters with destructuring or default expressions.
+        if (nonPositionalFormalStart_ == 0)
+            return;
+        while (!done() && !name())
+            increment();
+    }
 
   public:
     explicit BindingIter(Scope* scope) {
@@ -703,7 +735,7 @@ class BindingIter
     explicit BindingIter(JSScript* script);
 
     explicit BindingIter(const BindingIter& bi)
-      : nonSimpleFormalStart_(bi.nonSimpleFormalStart_),
+      : nonPositionalFormalStart_(bi.nonPositionalFormalStart_),
         varStart_(bi.varStart_),
         letStart_(bi.letStart_),
         constStart_(bi.constStart_),
@@ -725,21 +757,8 @@ class BindingIter
     }
 
     void operator++(int) {
-        MOZ_ASSERT(!done());
-        if (canHaveSlots_) {
-            if (index_ < nonSimpleFormalStart_) {
-                MOZ_ASSERT(canHaveArgumentSlots());
-                argumentSlot_++;
-            }
-            if (closedOver()) {
-                MOZ_ASSERT(canHaveEnvironmentSlots());
-                environmentSlot_++;
-            } else if (index_ >= nonSimpleFormalStart_) {
-                MOZ_ASSERT(canHaveFrameSlots());
-                frameSlot_++;
-            }
-        }
-        index_++;
+        increment();
+        settle();
     }
 
     bool canHaveArgumentSlots() const {
@@ -772,7 +791,7 @@ class BindingIter
             MOZ_ASSERT(canHaveEnvironmentSlots());
             return BindingLocation::Environment(environmentSlot_);
         }
-        if (index_ < nonSimpleFormalStart_) {
+        if (index_ < nonPositionalFormalStart_) {
             MOZ_ASSERT(canHaveArgumentSlots());
             return BindingLocation::Argument(argumentSlot_);
         }
@@ -793,7 +812,7 @@ class BindingIter
 
     bool hasArgumentSlot() const {
         MOZ_ASSERT(!done());
-        return index_ < nonSimpleFormalStart_;
+        return index_ < nonPositionalFormalStart_;
     }
 
     uint16_t argumentSlot() const {

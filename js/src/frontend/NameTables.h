@@ -16,7 +16,7 @@ namespace frontend {
 
 enum class DeclarationKind : uint8_t
 {
-    SimpleFormalParameter,
+    PositionalFormalParameter,
     FormalParameter,
     Var,
     Let,
@@ -31,7 +31,7 @@ static inline BindingKind
 DeclarationKindToBindingKind(DeclarationKind kind)
 {
     switch (kind) {
-      case DeclarationKind::SimpleFormalParameter:
+      case DeclarationKind::PositionalFormalParameter:
       case DeclarationKind::FormalParameter:
         return BindingKind::FormalParameter;
 

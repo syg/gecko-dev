@@ -7136,7 +7136,8 @@ BytecodeEmitter::isRestParameter(ParseNode* pn, bool* result)
         return true;
     }
 
-    RootedFunction fun(cx, sc->asFunctionBox()->function());
+    FunctionBox* funbox = sc->asFunctionBox();
+    RootedFunction fun(cx, funbox->function());
     if (!fun->hasRest()) {
         *result = false;
         return true;
@@ -7152,8 +7153,15 @@ BytecodeEmitter::isRestParameter(ParseNode* pn, bool* result)
         return true;
     }
 
-    // TODOshu
-    *result = pn->getOp() == JSOP_GETARG; // && pn->pn_scopecoord.slot() == fun->nargs() - 1;
+    JSAtom* name = pn->name();
+    if (!BindingKindIsLexical(lookupName(name).bindingKind())) {
+        FunctionScope::BindingData* bindings = funbox->funScopeBindings;
+        if (bindings->nonPositionalFormalStart > 0) {
+            *result = name == bindings->names[bindings->nonPositionalFormalStart - 1].name();
+            return true;
+        }
+    }
+
     return true;
 }
 
@@ -8051,7 +8059,7 @@ BytecodeEmitter::emitFunctionFormalParametersAndBody(ParseNode *pn)
 
             // If there are defaults or if the rest parameter is destructured,
             // leave the value on the stack as we'll need it below.
-            if (!hasDefaults && isDestructuring) {
+            if (!hasDefaults && !isDestructuring) {
                 if (!emitArgOp(JSOP_SETARG, argSlot))
                     return false;
                 if (!emit1(JSOP_POP))

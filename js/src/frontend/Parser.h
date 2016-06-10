@@ -353,7 +353,7 @@ class ParseContext : public Nestable<ParseContext>
 
     // Simple formal parameter names, in order of appearance. Only used when
     // isFunctionBox().
-    Vector<JSAtom*> simpleFormalParameterNames;
+    Vector<JSAtom*> positionalFormalParameterNames;
 
     // All inner functions in this context. Only used when syntax parsing.
     Rooted<GCVector<JSFunction*>> innerFunctions;
@@ -392,7 +392,7 @@ class ParseContext : public Nestable<ParseContext>
         isStandaloneFunctionBody_(false),
         superScopeNeedsHomeObject_(false),
         lastYieldOffset(NoYieldOffset),
-        simpleFormalParameterNames(prs->context),
+        positionalFormalParameterNames(prs->context),
         innerFunctions(prs->context, GCVector<JSFunction*>(prs->context)),
         newDirectives(newDirectives),
         inDeclDestructuring(false),
@@ -1135,6 +1135,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     bool notePositionalFormalParameter(Node fn, HandlePropertyName name,
                                        bool disallowDuplicateParams = false,
                                        bool* duplicatedParam = nullptr);
+    bool noteDestructuredPositionalFormalParameter();
     bool noteDeclaredName(HandlePropertyName name, DeclarationKind kind, Node node = null());
     bool noteUsedName(HandlePropertyName name);
 

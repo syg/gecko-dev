@@ -89,7 +89,7 @@ static const char*
 DeclarationKindString(DeclarationKind kind)
 {
     switch (kind) {
-      case DeclarationKind::SimpleFormalParameter:
+      case DeclarationKind::PositionalFormalParameter:
       case DeclarationKind::FormalParameter:
         return "formal parameter";
       case DeclarationKind::Var:
@@ -748,8 +748,9 @@ Parser<ParseHandler>::reportRedeclaration(HandlePropertyName name, DeclarationKi
            DeclarationKindString(kind), bytes.ptr());
 }
 
-// notePositionalFormalParameter is called for both the arguments of a regular function
-// definition and the arguments specified by the Function constructor.
+// notePositionalFormalParameter is called for both the arguments of a regular
+// function definition and the arguments specified by the Function
+// constructor.
 //
 // The 'disallowDuplicateParams' bool indicates whether the use of another
 // feature (destructuring or default arguments) disables duplicate arguments.
@@ -762,15 +763,6 @@ Parser<ParseHandler>::notePositionalFormalParameter(Node fn, HandlePropertyName 
                                                     bool disallowDuplicateParams,
                                                     bool *duplicatedParam)
 {
-    // The contexts where we disallow duplicate parameters (destructuring,
-    // defaults, rest) are exactly those where we cannot access a
-    // parameter name by its argument slot.
-    DeclarationKind paramKind;
-    if (disallowDuplicateParams)
-        paramKind = DeclarationKind::FormalParameter;
-    else
-        paramKind = DeclarationKind::SimpleFormalParameter;
-
     AddDeclaredNamePtr p = pc->varScope().lookupDeclaredNameForAdd(name);
     if (p) {
         // Strict-mode disallows duplicate args. We may not know whether we are
@@ -796,15 +788,13 @@ Parser<ParseHandler>::notePositionalFormalParameter(Node fn, HandlePropertyName 
         if (duplicatedParam)
             *duplicatedParam = true;
     } else {
-        if (!pc->varScope().addDeclaredName(pc, p, name, paramKind))
+        DeclarationKind kind = DeclarationKind::PositionalFormalParameter;
+        if (!pc->varScope().addDeclaredName(pc, p, name, kind))
             return false;
     }
 
-    if (paramKind == DeclarationKind::SimpleFormalParameter &&
-        !pc->simpleFormalParameterNames.append(name))
-    {
+    if (!pc->positionalFormalParameterNames.append(name))
         return false;
-    }
 
     Node paramNode = newName(name);
     if (!paramNode)
@@ -816,6 +806,15 @@ Parser<ParseHandler>::notePositionalFormalParameter(Node fn, HandlePropertyName 
     handler.addFunctionFormalParameter(fn, paramNode);
 
     return true;
+}
+
+template <typename ParseHandler>
+bool
+Parser<ParseHandler>::noteDestructuredPositionalFormalParameter()
+{
+    // Append an empty name to the positional formals vector to keep track of
+    // argument slots when making FunctionScope::BindingData.
+    return pc->positionalFormalParameterNames.append(nullptr);
 }
 
 template <typename ParseHandler>
@@ -1146,39 +1145,42 @@ template <>
 Maybe<FunctionScope::BindingData*>
 Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope, bool hasDefaults)
 {
-    Vector<BindingName> simpleFormals(context);
+    Vector<BindingName> positionalFormals(context);
     Vector<BindingName> formals(context);
     Vector<BindingName> vars(context);
 
     bool closeOverAllBindings = pc->sc()->closeOverAllBindings();
 
-    // If there are default expressions, no formal parameters may be
-    // considered "simple" (i.e. accessed via argument slots), as after
-    // defaults initialization the values of the arguments are copied into to
-    // the body scope.
-    //
-    // Simple parameter names must be added in order of appearance as they are
+    // Positional parameter names must be added in order of appearance as they are
     // referenced using argument slots.
-    if (!hasDefaults) {
-        for (size_t i = 0; i < pc->simpleFormalParameterNames.length(); i++) {
-            JSAtom* name = pc->simpleFormalParameterNames[i];
+    for (size_t i = 0; i < pc->positionalFormalParameterNames.length(); i++) {
+        JSAtom* name = pc->positionalFormalParameterNames[i];
+
+        // If there are default expressions, no formal parameters may be
+        // considered positional (i.e. accessed via argument slots), as after
+        // defaults initialization the values of the arguments are copied into
+        // to the body scope.
+        if (hasDefaults)
+            name = nullptr;
+
+        BindingName bindName;
+        if (name) {
             DeclaredNamePtr p = scope.lookupDeclaredName(name);
-            MOZ_ASSERT(p->value()->kind() == DeclarationKind::SimpleFormalParameter);
-            if (!simpleFormals.append(BindingName(name, closeOverAllBindings ||
-                                                  p->value()->closedOver())))
-            {
-                return Nothing();
-            }
+            MOZ_ASSERT(p->value()->kind() == DeclarationKind::PositionalFormalParameter);
+            bindName = BindingName(name, closeOverAllBindings || p->value()->closedOver());
         }
+
+        if (!positionalFormals.append(bindName))
+            return Nothing();
     }
 
     for (BindingIter bi = scope.bindings(pc); bi; bi++) {
         BindingName binding(bi.name(), closeOverAllBindings || bi.closedOver());
         switch (bi.kind()) {
           case BindingKind::FormalParameter:
-            // Simple parameter names are already handled above when there are
-            // no default expressions.
-            if (hasDefaults || bi.declarationKind() != DeclarationKind::SimpleFormalParameter) {
+            // Positional parameter names are already handled above when there
+            // are no default expressions.
+            if (hasDefaults || bi.declarationKind() == DeclarationKind::FormalParameter) {
                 if (!formals.append(binding))
                     return Nothing();
             }
@@ -1193,7 +1195,7 @@ Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope, bool 
     }
 
     FunctionScope::BindingData* bindings = nullptr;
-    uint32_t numBindings = simpleFormals.length() + formals.length() + vars.length();
+    uint32_t numBindings = positionalFormals.length() + formals.length() + vars.length();
 
     if (numBindings > 0) {
         bindings = NewEmptyBindingData<FunctionScope>(context, alloc, numBindings);
@@ -1204,9 +1206,9 @@ Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope, bool 
         BindingName* start = bindings->names;
         BindingName* cursor = start;
 
-        PodCopy(cursor, simpleFormals.begin(), simpleFormals.length());
-        cursor += simpleFormals.length();
-        bindings->nonSimpleFormalStart = cursor - start;
+        PodCopy(cursor, positionalFormals.begin(), positionalFormals.length());
+        cursor += positionalFormals.length();
+        bindings->nonPositionalFormalStart = cursor - start;
 
         PodCopy(cursor, formals.begin(), formals.length());
         cursor += formals.length();
@@ -1976,13 +1978,13 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
         bool hasDefaults = false;
         bool duplicatedParam = false;
         bool disallowDuplicateParams = kind == Arrow || kind == Method || kind == ClassConstructor;
+        Vector<JSAtom*>& positionalFormals = pc->positionalFormalParameterNames;
 
         if (IsGetterKind(kind)) {
             report(ParseError, false, null(), JSMSG_ACCESSOR_WRONG_ARGS, "getter", "no", "s");
             return false;
         }
 
-        uint32_t numPositionalFormals = 0;
         while (true) {
             if (hasRest) {
                 report(ParseError, false, null(), JSMSG_PARAMETER_AFTER_REST);
@@ -2010,6 +2012,9 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
                     yieldHandling, tt,
                     JSMSG_YIELD_IN_DEFAULT);
                 if (!destruct)
+                    return false;
+
+                if (!noteDestructuredPositionalFormalParameter())
                     return false;
 
                 handler.addFunctionFormalParameter(funcpn, destruct);
@@ -2050,6 +2055,7 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
                     report(ParseError, false, null(), JSMSG_BAD_DUP_ARGS);
                     return false;
                 }
+
                 goto TOK_NAME;
               }
 
@@ -2073,8 +2079,7 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
                 return false;
             }
 
-            numPositionalFormals++;
-            if (numPositionalFormals > ARGNO_LIMIT) {
+            if (positionalFormals.length() > ARGNO_LIMIT) {
                 report(ParseError, false, null(), JSMSG_TOO_MANY_FUN_ARGS);
                 return false;
             }
@@ -2110,20 +2115,9 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
                 if (!hasDefaults) {
                     hasDefaults = true;
 
-                    // Clear the simple formal parameter list. With defaults,
-                    // no formal parameter names should be accessed directly
-                    // with argument slots.
-                    //
-                    // For maximum consistency we should mutate the last
-                    // formal parameter's DeclarationKind from
-                    // SimpleFormalParameter to FormalParameter, but this kind
-                    // is ignored in newFunctionScopeData when default
-                    // expressions are present anyways.
-                    pc->simpleFormalParameterNames.clear();
-
                     // The Function.length property is the number of formals
                     // before the first default argument.
-                    funbox->length = numPositionalFormals - 1;
+                    funbox->length = positionalFormals.length() - 1;
                 }
 
                 Node def_expr = assignExprWithoutYield(yieldHandling, JSMSG_YIELD_IN_DEFAULT);
@@ -2165,7 +2159,7 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
             ParseContext::Scope& defaultsScope = pc->defaultsScope();
             for (BindingIter bi = pc->varScope().bindings(pc); bi; bi++) {
                 DeclarationKind declKind = bi.declarationKind();
-                if (declKind == DeclarationKind::SimpleFormalParameter ||
+                if (declKind == DeclarationKind::PositionalFormalParameter ||
                     declKind == DeclarationKind::FormalParameter)
                 {
                     AddDeclaredNamePtr p = defaultsScope.lookupDeclaredNameForAdd(bi.name());
@@ -2175,10 +2169,10 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
                 }
             }
         } else {
-            funbox->length = numPositionalFormals - hasRest;
+            funbox->length = positionalFormals.length() - hasRest;
         }
 
-        funbox->function()->setArgCount(numPositionalFormals);
+        funbox->function()->setArgCount(positionalFormals.length());
     } else if (IsSetterKind(kind)) {
         report(ParseError, false, null(), JSMSG_ACCESSOR_WRONG_ARGS, "setter", "one", "");
         return false;

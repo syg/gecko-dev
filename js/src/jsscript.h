@@ -1002,7 +1002,7 @@ class JSScript : public js::gc::TenuredCell
 
     unsigned numArgs() const {
         if (bodyScope()->is<js::FunctionScope>())
-            return bodyScope()->as<js::FunctionScope>().numSimpleFormalParameters();
+            return bodyScope()->as<js::FunctionScope>().numPositionalFormalParameters();
         return 0;
     }
 

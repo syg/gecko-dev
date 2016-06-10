@@ -1188,11 +1188,25 @@ TraceBindingNames(JSTracer* trc, BindingName* names, uint32_t length)
         TraceManuallyBarrieredEdge(trc, &name, "scope name");
     }
 };
+static inline void
+TraceNullableBindingNames(JSTracer* trc, BindingName* names, uint32_t length)
+{
+    for (uint32_t i = 0; i < length; i++) {
+        if (JSAtom* name = names[i].name())
+            TraceManuallyBarrieredEdge(trc, &name, "scope name");
+    }
+};
 template <typename Data>
 static inline void
 TraceBindingData(JSTracer* trc, Data* data)
 {
     TraceBindingNames(trc, data->names, data->length);
+}
+template <>
+void
+TraceBindingData<FunctionScope::BindingData>(JSTracer* trc, FunctionScope::BindingData* data)
+{
+    TraceNullableBindingNames(trc, data->names, data->length);
 }
 void
 BindingIter::trace(JSTracer* trc)
@@ -1280,8 +1294,15 @@ js::GCMarker::eagerlyMarkChildren(Scope* scope)
       case ScopeKind::With:
         break;
     }
-    for (uint32_t i = 0; i < length; i++)
-        traverseEdge(scope, static_cast<JSString*>(names[i].name()));
+    if (scope->kind_ == ScopeKind::Function) {
+        for (uint32_t i = 0; i < length; i++) {
+            if (JSAtom* name = names[i].name())
+                traverseEdge(scope, static_cast<JSString*>(name));
+        }
+    } else {
+        for (uint32_t i = 0; i < length; i++)
+            traverseEdge(scope, static_cast<JSString*>(names[i].name()));
+    }
 }
 
 void

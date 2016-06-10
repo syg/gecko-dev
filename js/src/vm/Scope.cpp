@@ -502,7 +502,7 @@ BindingIter::init(LexicalScope::BindingData& data, uint32_t firstFrameSlot)
 void
 BindingIter::init(FunctionScope::BindingData& data, uint32_t firstFrameSlot)
 {
-    init(data.nonSimpleFormalStart, data.varStart, data.length, 0,
+    init(data.nonPositionalFormalStart, data.varStart, data.length, 0,
          CanHaveArgumentSlots | CanHaveFrameSlots | CanHaveEnvironmentSlots,
          firstFrameSlot, JSSLOT_FREE(&CallObject::class_),
          data.names, data.length);
