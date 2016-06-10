@@ -737,6 +737,17 @@ BytecodeEmitter::EmitterScope::enterLexical(BytecodeEmitter* bce, ScopeKind kind
 
     updateFrameFixedSlots(bce, bi);
 
+    // Initialized frame slots to TDZ poison. Environment slots are
+    // poisoned by environment creation.
+    if (!bce->emit1(JSOP_UNINITIALIZED))
+        return false;
+    for (uint32_t slot = frameSlotStart(); slot < frameSlotEnd(); slot++) {
+        if (!bce->emitLocalOp(JSOP_INITLEXICAL, slot))
+            return false;
+    }
+    if (!bce->emit1(JSOP_POP))
+        return false;
+
     // Create and intern the VM scope.
     auto createScope = [kind, bindings, firstFrameSlot](ExclusiveContext* cx, Scope* enclosing) {
         return LexicalScope::create(cx, kind, bindings, firstFrameSlot, enclosing);
@@ -744,23 +755,10 @@ BytecodeEmitter::EmitterScope::enterLexical(BytecodeEmitter* bce, ScopeKind kind
     if (!internScope(bce, createScope))
         return false;
 
-    if (ScopeKindIsInBody(kind)) {
-        // Initialized frame slots to TDZ poison. Environment slots are
-        // poisoned by environment creation.
-        if (!bce->emit1(JSOP_UNINITIALIZED))
-            return false;
-        for (uint32_t slot = frameSlotStart(); slot < frameSlotEnd(); slot++) {
-            if (!bce->emitLocalOp(JSOP_INITLEXICAL, slot))
-                return false;
-        }
-        if (!bce->emit1(JSOP_POP))
-            return false;
-
+    if (ScopeKindIsInBody(kind) && hasEnvironment_) {
         // After interning the VM scope we can get the scope index.
-        if (hasEnvironment_) {
-            if (!bce->emitInternedScopeOp(index(), JSOP_PUSHBLOCKSCOPE))
-                return false;
-        }
+        if (!bce->emitInternedScopeOp(index(), JSOP_PUSHBLOCKSCOPE))
+            return false;
     }
 
     // Lexical scopes need notes to be mapped from a pc.
