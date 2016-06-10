@@ -652,6 +652,7 @@ class BindingIter
         environmentSlot_ = firstEnvironmentSlot;
         length_ = length;
         names_ = names;
+
         settle();
     }
 
