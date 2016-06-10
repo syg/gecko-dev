@@ -2075,7 +2075,7 @@ TrackPropertiesForSingletonScopes(JSContext* cx, JSScript* script, BaselineFrame
     }
 
     if (baselineFrame) {
-        JSObject* scope = baselineFrame->scopeChain();
+        JSObject* scope = baselineFrame->environmentChain();
         if (scope->is<CallObject>() && scope->isSingleton())
             TrackAllProperties(cx, scope);
     }
@@ -2786,7 +2786,7 @@ EnterIon(JSContext* cx, EnterJitData& data)
         nogc.reset();
 #endif
         CALL_GENERATED_CODE(enter, data.jitcode, data.maxArgc, data.maxArgv, /* osrFrame = */nullptr, data.calleeToken,
-                            /* scopeChain = */ nullptr, 0, data.result.address());
+                            /* envChain = */ nullptr, 0, data.result.address());
     }
 
     MOZ_ASSERT(!cx->runtime()->jitRuntime()->hasIonReturnOverride());
@@ -2818,7 +2818,7 @@ jit::SetEnterJitData(JSContext* cx, EnterJitData& data, RunState& state,
         data.constructing = state.asInvoke()->constructing();
         data.numActualArgs = args.length();
         data.maxArgc = Max(args.length(), numFormals) + 1;
-        data.scopeChain = nullptr;
+        data.envChain = nullptr;
         data.calleeToken = CalleeToToken(&args.callee().as<JSFunction>(), data.constructing);
 
         if (data.numActualArgs >= numFormals) {
@@ -2848,7 +2848,7 @@ jit::SetEnterJitData(JSContext* cx, EnterJitData& data, RunState& state,
         data.numActualArgs = 0;
         data.maxArgc = 0;
         data.maxArgv = nullptr;
-        data.scopeChain = state.asExecute()->scopeChain();
+        data.envChain = state.asExecute()->environmentChain();
 
         data.calleeToken = CalleeToToken(state.script());
 
@@ -2927,7 +2927,7 @@ jit::FastInvoke(JSContext* cx, HandleFunction fun, CallArgs& args)
     nogc.reset();
 #endif
     CALL_GENERATED_CODE(enter, jitcode, args.length() + 1, args.array() - 1, /* osrFrame = */nullptr,
-                        calleeToken, /* scopeChain = */ nullptr, 0, result.address());
+                        calleeToken, /* envChain = */ nullptr, 0, result.address());
 
     MOZ_ASSERT(!cx->runtime()->jitRuntime()->hasIonReturnOverride());
 

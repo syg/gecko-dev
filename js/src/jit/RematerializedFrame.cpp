@@ -50,7 +50,7 @@ RematerializedFrame::RematerializedFrame(JSContext* cx, uint8_t* top, unsigned n
         callee_ = nullptr;
 
     CopyValueToRematerializedFrame op(slots_);
-    iter.readFrameArgsAndLocals(cx, op, op, &scopeChain_, &hasCallObj_, &returnValue_,
+    iter.readFrameArgsAndLocals(cx, op, op, &envChain_, &hasCallObj_, &returnValue_,
                                 &argsObj_, &thisArgument_, ReadFrame_Actuals,
                                 fallback);
 }
@@ -87,8 +87,8 @@ RematerializedFrame::RematerializeInlineFrames(JSContext* cx, uint8_t* top,
         RematerializedFrame* frame = RematerializedFrame::New(cx, top, iter, fallback);
         if (!frame)
             return false;
-        if (frame->scopeChain()) {
-            if (!EnsureHasScopeObjects(cx, frame))
+        if (frame->environmentChain()) {
+            if (!EnsureHasEnvironmentObjects(cx, frame))
                 return false;
         }
 
@@ -127,29 +127,28 @@ RematerializedFrame::callObj() const
 {
     MOZ_ASSERT(hasCallObj());
 
-    JSObject* scope = scopeChain();
-    while (!scope->is<CallObject>())
-        scope = scope->enclosingScope();
-    return scope->as<CallObject>();
+    JSObject* env = environmentChain();
+    while (!env->is<CallObject>())
+        env = env->enclosingScope();
+    return env->as<CallObject>();
 }
 
 void
-RematerializedFrame::pushOnScopeChain(ScopeObject& scope)
+RematerializedFrame::pushOnEnvironmentChain(ScopeObject& env)
 {
-    MOZ_ASSERT(*scopeChain() == scope.enclosingScope() ||
-               *scopeChain() == scope.as<CallObject>().enclosingScope().as<DeclEnvObject>().enclosingScope());
-    scopeChain_ = &scope;
+    MOZ_ASSERT(*environmentChain() == env.enclosingScope());
+    envChain_ = &env;
 }
 
 bool
-RematerializedFrame::initFunctionScopeObjects(JSContext* cx)
+RematerializedFrame::initFunctionEnvironmentObjects(JSContext* cx)
 {
     MOZ_ASSERT(isFunctionFrame());
     MOZ_ASSERT(callee()->needsCallObject());
     CallObject* callobj = CallObject::createForFunction(cx, this);
     if (!callobj)
         return false;
-    pushOnScopeChain(*callobj);
+    pushOnEnvironmentChain(*callobj);
     hasCallObj_ = true;
     return true;
 }
@@ -158,7 +157,7 @@ void
 RematerializedFrame::mark(JSTracer* trc)
 {
     TraceRoot(trc, &script_, "remat ion frame script");
-    TraceRoot(trc, &scopeChain_, "remat ion frame scope chain");
+    TraceRoot(trc, &envChain_, "remat ion frame env chain");
     if (callee_)
         TraceRoot(trc, &callee_, "remat ion frame callee");
     if (argsObj_)
@@ -191,9 +190,9 @@ RematerializedFrame::dump()
     fprintf(stderr, "  script = %p\n", (void*) script());
 
     if (isFunctionFrame()) {
-        fprintf(stderr, "  scope chain: ");
+        fprintf(stderr, "  env chain: ");
 #ifdef DEBUG
-        DumpValue(ObjectValue(*scopeChain()));
+        DumpValue(ObjectValue(*environmentChain()));
 #else
         fprintf(stderr, "?\n");
 #endif

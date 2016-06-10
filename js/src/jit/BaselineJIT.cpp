@@ -152,8 +152,9 @@ EnterBaseline(JSContext* cx, EnterJitData& data)
         nogc.reset();
 #endif
         // Single transition point from Interpreter to Baseline.
-        CALL_GENERATED_CODE(enter, data.jitcode, data.maxArgc, data.maxArgv, data.osrFrame, data.calleeToken,
-                            data.scopeChain.get(), data.osrNumStackValues, data.result.address());
+        CALL_GENERATED_CODE(enter, data.jitcode, data.maxArgc, data.maxArgv, data.osrFrame,
+                            data.calleeToken, data.envChain.get(), data.osrNumStackValues,
+                            data.result.address());
 
         if (data.osrFrame)
             data.osrFrame->clearRunningInJit();
@@ -227,7 +228,7 @@ jit::EnterBaselineAtBranch(JSContext* cx, InterpreterFrame* fp, jsbytecode* pc)
         data.numActualArgs = fp->numActualArgs();
         data.maxArgc = Max(fp->numActualArgs(), fp->numFormalArgs()) + 1; // +1 = include |this|
         data.maxArgv = fp->argv() - 1; // -1 = include |this|
-        data.scopeChain = nullptr;
+        data.envChain = nullptr;
         data.calleeToken = CalleeToToken(&fp->callee(), data.constructing);
     } else {
         thisv.setUndefined();
@@ -235,7 +236,7 @@ jit::EnterBaselineAtBranch(JSContext* cx, InterpreterFrame* fp, jsbytecode* pc)
         data.numActualArgs = 0;
         data.maxArgc = 1;
         data.maxArgv = thisv.address();
-        data.scopeChain = fp->scopeChain();
+        data.envChain = fp->environmentChain();
 
         data.calleeToken = CalleeToToken(fp->script());
 

@@ -538,7 +538,7 @@ class TryNoteIterBaseline : public TryNoteIter<BaselineFrameStackDepthOp>
 };
 
 // Close all live iterators on a BaselineFrame due to exception unwinding. The
-// pc parameter is updated to where the scopes have been unwound to.
+// pc parameter is updated to where the envs have been unwound to.
 static void
 CloseLiveIteratorsBaselineForUncatchableException(JSContext* cx, const JitFrameIterator& frame,
                                                   jsbytecode* pc)
@@ -2396,13 +2396,13 @@ InlineFrameIterator::callee(MaybeReadFallback& fallback) const
 }
 
 JSObject*
-InlineFrameIterator::computeScopeChain(Value scopeChainValue, MaybeReadFallback& fallback,
-                                       bool* hasCallObj) const
+InlineFrameIterator::computeEnvironmentChain(Value envChainValue, MaybeReadFallback& fallback,
+                                             bool* hasCallObj) const
 {
-    if (scopeChainValue.isObject()) {
+    if (envChainValue.isObject()) {
         if (hasCallObj) {
             if (fallback.canRecoverResults()) {
-                RootedObject obj(fallback.maybeCx, &scopeChainValue.toObject());
+                RootedObject obj(fallback.maybeCx, &envChainValue.toObject());
                 *hasCallObj = isFunctionFrame() && callee(fallback)->needsCallObject();
                 return obj;
             } else {
@@ -2411,17 +2411,17 @@ InlineFrameIterator::computeScopeChain(Value scopeChainValue, MaybeReadFallback&
             }
         }
 
-        return &scopeChainValue.toObject();
+        return &envChainValue.toObject();
     }
 
     // Note we can hit this case even for functions with a CallObject, in case
-    // we are walking the frame during the function prologue, before the scope
+    // we are walking the frame during the function prologue, before the env
     // chain has been initialized.
     if (isFunctionFrame())
         return callee(fallback)->environment();
 
     // Ion does not handle non-function scripts that have anything other than
-    // the global on their scope chain.
+    // the global on their env chain.
     MOZ_ASSERT(!script()->isForEval());
     MOZ_ASSERT(!script()->hasNonSyntacticScope());
     return &script()->global().lexicalScope();
@@ -2620,7 +2620,7 @@ InlineFrameIterator::dump() const
     for (unsigned i = 0; i < si.numAllocations() - 1; i++) {
         if (isFunction) {
             if (i == 0)
-                fprintf(stderr, "  scope chain: ");
+                fprintf(stderr, "  env chain: ");
             else if (i == 1)
                 fprintf(stderr, "  this: ");
             else if (i - 2 < calleeTemplate()->nargs())

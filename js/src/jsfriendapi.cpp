@@ -743,8 +743,8 @@ FormatFrame(JSContext* cx, const ScriptFrameIter& iter, char* buf, int num,
     RootedScript script(cx, iter.script());
     jsbytecode* pc = iter.pc();
 
-    RootedObject scopeChain(cx, iter.scopeChain(cx));
-    JSAutoCompartment ac(cx, scopeChain);
+    RootedObject envChain(cx, iter.environmentChain(cx));
+    JSAutoCompartment ac(cx, envChain);
 
     const char* filename = script->filename();
     unsigned lineno = PCToLineNumber(script, pc);

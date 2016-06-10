@@ -254,9 +254,10 @@ jit::ExceptionHandlerBailout(JSContext* cx, const InlineFrameIterator& frame,
     return retval;
 }
 
-// Initialize the decl env Object, call object, and any arguments obj of the current frame.
+// Initialize the decl env Object, call object, and any arguments obj of the
+// current frame.
 bool
-jit::EnsureHasScopeObjects(JSContext* cx, AbstractFramePtr fp)
+jit::EnsureHasEnvironmentObjects(JSContext* cx, AbstractFramePtr fp)
 {
     // Ion does not compile eval scripts.
     MOZ_ASSERT(!fp.isEvalFrame());
@@ -265,7 +266,7 @@ jit::EnsureHasScopeObjects(JSContext* cx, AbstractFramePtr fp)
         fp.callee()->needsCallObject() &&
         !fp.hasCallObj())
     {
-        return fp.initFunctionScopeObjects(cx);
+        return fp.initFunctionEnvironmentObjects(cx);
     }
     return true;
 }

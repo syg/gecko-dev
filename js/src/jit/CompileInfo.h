@@ -23,7 +23,7 @@ inline unsigned
 StartArgSlot(JSScript* script)
 {
     // Reserved slots:
-    // Slot 0: Scope chain.
+    // Slot 0: Environment chain.
     // Slot 1: Return value.
 
     // When needed:
@@ -215,7 +215,7 @@ class CompileInfo
             MOZ_ASSERT(fun_->isTenured());
         }
 
-        nimplicit_ = StartArgSlot(script)                   /* scope chain and argument obj */
+        nimplicit_ = StartArgSlot(script)                   /* env chain and argument obj */
                    + (fun ? 1 : 0);                         /* this */
         nargs_ = fun ? fun->nargs() : 0;
         nfixedvars_ = script->nfixedvars();
@@ -315,7 +315,7 @@ class CompileInfo
         return nslots_;
     }
 
-    // Number of slots needed for Scope chain, return value,
+    // Number of slots needed for env chain, return value,
     // maybe argumentsobject and this value.
     unsigned nimplicit() const {
         return nimplicit_;
@@ -342,7 +342,7 @@ class CompileInfo
         return fixedLexicalBegin_;
     }
 
-    uint32_t scopeChainSlot() const {
+    uint32_t environmentChainSlot() const {
         MOZ_ASSERT(script());
         return 0;
     }
@@ -453,14 +453,14 @@ class CompileInfo
         if (slot == thisSlot())
             return true;
 
-        if (funMaybeLazy()->needsCallObject() && slot == scopeChainSlot())
+        if (funMaybeLazy()->needsCallObject() && slot == environmentChainSlot())
             return true;
 
         // If the function may need an arguments object, then make sure to
-        // preserve the scope chain, because it may be needed to construct the
+        // preserve the env chain, because it may be needed to construct the
         // arguments object during bailout. If we've already created an
         // arguments object (or got one via OSR), preserve that as well.
-        if (hasArguments() && (slot == scopeChainSlot() || slot == argsObjSlot()))
+        if (hasArguments() && (slot == environmentChainSlot() || slot == argsObjSlot()))
             return true;
 
         return false;
@@ -491,8 +491,8 @@ class CompileInfo
         if (!funMaybeLazy())
             return true;
 
-        // The |this| and the |scopeChain| values can be recovered.
-        if (slot == thisSlot() || slot == scopeChainSlot())
+        // The |this| and the |envChain| values can be recovered.
+        if (slot == thisSlot() || slot == environmentChainSlot())
             return true;
 
         if (isObservableFrameSlot(slot))

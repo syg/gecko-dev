@@ -255,6 +255,13 @@ ScopeObject::setEnclosingScope(HandleObject obj)
     setFixedSlot(SCOPE_CHAIN_SLOT, ObjectValue(*obj));
 }
 
+void
+EnvironmentObject::init(Scope* scope, JSObject* enclosing)
+{
+    setPrivate(scope);
+    initFixedSlot(ENCLOSING_ENV_SLOT, ObjectOrNullValue(enclosing));
+}
+
 CallObject*
 CallObject::create(JSContext* cx, HandleShape shape, HandleObjectGroup group)
 {
@@ -371,7 +378,7 @@ CallObject::createForFunction(JSContext* cx, AbstractFramePtr frame)
     MOZ_ASSERT(frame.isFunctionFrame());
     assertSameCompartment(cx, frame);
 
-    RootedObject scopeChain(cx, frame.scopeChain());
+    RootedObject scopeChain(cx, frame.environmentChain());
     RootedFunction callee(cx, frame.callee());
 
     CallObject* callobj = createForFunction(cx, scopeChain, callee);
@@ -396,7 +403,7 @@ CallObject::createForStrictEval(JSContext* cx, AbstractFramePtr frame)
 
     RootedFunction callee(cx);
     RootedScript script(cx, frame.script());
-    RootedObject scopeChain(cx, frame.scopeChain());
+    RootedObject scopeChain(cx, frame.environmentChain());
     return create(cx, script, scopeChain, callee);
 }
 
@@ -981,7 +988,7 @@ ClonedBlockObject::create(JSContext* cx, Handle<StaticBlockScope*> block, Handle
 ClonedBlockObject::create(JSContext* cx, Handle<StaticBlockScope*> block, AbstractFramePtr frame)
 {
     assertSameCompartment(cx, frame);
-    RootedObject enclosing(cx, frame.scopeChain());
+    RootedObject enclosing(cx, frame.environmentChain());
     return create(cx, block, enclosing);
 }
 
@@ -1396,7 +1403,7 @@ EnvironmentIter::EnvironmentIter(JSContext* cx, JSObject* scope, JSObject* stati
 EnvironmentIter::EnvironmentIter(JSContext* cx, AbstractFramePtr frame, jsbytecode* pc
                      MOZ_GUARD_OBJECT_NOTIFIER_PARAM_IN_IMPL)
   : ssi_(cx, nullptr/* TODOshu frame.script()->innermostStaticScope(pc)*/),
-    scope_(cx, frame.scopeChain()),
+    scope_(cx, frame.environmentChain()),
     frame_(frame)
 {
     assertSameCompartment(cx, frame);
@@ -1772,7 +1779,7 @@ class DebugScopeProxy : public BaseProxyHandler
             // Currently consider all global and non-syntactic top-level lexical
             // bindings to be aliased.
             if (block->isExtensible()) {
-                MOZ_ASSERT(IsGlobalLexicalScope(block) || !IsSyntacticScope(block));
+                MOZ_ASSERT(IsGlobalLexicalEnvironment(block) || !IsSyntacticScope(block));
                 return true;
             }
 
@@ -2694,7 +2701,7 @@ DebugScopes::onPopCall(AbstractFramePtr frame, JSContext* cx)
         if (frame.callee()->isGenerator())
             return;
 
-        CallObject& callobj = frame.scopeChain()->as<CallObject>();
+        CallObject& callobj = frame.environmentChain()->as<CallObject>();
         scopes->liveScopes.remove(&callobj);
         if (JSObject* obj = scopes->proxiedScopes.lookup(&callobj))
             debugScope = &obj->as<DebugScopeObject>();
@@ -2795,7 +2802,7 @@ DebugScopes::onPopWith(AbstractFramePtr frame)
 {
     DebugScopes* scopes = frame.compartment()->debugScopes;
     if (scopes)
-        scopes->liveScopes.remove(&frame.scopeChain()->as<DynamicWithObject>());
+        scopes->liveScopes.remove(&frame.environmentChain()->as<DynamicWithObject>());
 }
 
 void
@@ -2810,7 +2817,7 @@ DebugScopes::onPopStrictEvalScope(AbstractFramePtr frame)
      * CallObject. See EnvironmentIter::settle.
      */
     if (frame.hasCallObj())
-        scopes->liveScopes.remove(&frame.scopeChain()->as<CallObject>());
+        scopes->liveScopes.remove(&frame.environmentChain()->as<CallObject>());
 }
 
 void
@@ -2845,7 +2852,7 @@ DebugScopes::updateLiveScopes(JSContext* cx)
             continue;
 
         AbstractFramePtr frame = i.abstractFramePtr();
-        if (frame.scopeChain()->compartment() != cx->compartment())
+        if (frame.environmentChain()->compartment() != cx->compartment())
             continue;
 
         if (frame.isFunctionFrame() && frame.callee()->isGenerator())
@@ -2867,7 +2874,7 @@ DebugScopes::updateLiveScopes(JSContext* cx)
 
         if (frame.prevUpToDate())
             return true;
-        MOZ_ASSERT(frame.scopeChain()->compartment()->isDebuggee());
+        MOZ_ASSERT(frame.environmentChain()->compartment()->isDebuggee());
         frame.setPrevUpToDate();
     }
 
@@ -2906,7 +2913,7 @@ DebugScopes::unsetPrevUpToDateUntil(JSContext* cx, AbstractFramePtr until)
         if (frame == until)
             return;
 
-        if (frame.scopeChain()->compartment() != cx->compartment())
+        if (frame.environmentChain()->compartment() != cx->compartment())
             continue;
 
         frame.unsetPrevUpToDate();
@@ -3128,7 +3135,7 @@ js::GetDebugScopeForGlobalLexicalScope(JSContext* cx)
 
 // See declaration and documentation in jsfriendapi.h
 JS_FRIEND_API(JSObject*)
-js::GetNearestEnclosingWithScopeObjectForFunction(JSFunction* fun)
+js::GetNearestEnclosingWithEnvironmentObjectForFunction(JSFunction* fun)
 {
     if (!fun->isInterpreted())
         return &fun->global();
@@ -3144,38 +3151,31 @@ js::GetNearestEnclosingWithScopeObjectForFunction(JSFunction* fun)
 }
 
 bool
-js::CreateScopeObjectsForScopeChain(JSContext* cx, AutoObjectVector& scopeChain,
-                                    HandleObject dynamicTerminatingScope,
-                                    MutableHandleObject dynamicScopeObj)
+js::CreateObjectsForEnvironmentChain(JSContext* cx, AutoObjectVector& chain,
+                                     HandleObject terminatingEnv,
+                                     MutableHandleObject envObj)
 {
 #ifdef DEBUG
-    for (size_t i = 0; i < scopeChain.length(); ++i) {
-        assertSameCompartment(cx, scopeChain[i]);
-        MOZ_ASSERT(!scopeChain[i]->is<GlobalObject>());
+    for (size_t i = 0; i < chain.length(); ++i) {
+        assertSameCompartment(cx, chain[i]);
+        MOZ_ASSERT(!chain[i]->is<GlobalObject>());
     }
 #endif
 
     // Construct With object wrappers for the things on this scope
     // chain and use the result as the thing to scope the function to.
-    Rooted<StaticWithScope*> staticWith(cx);
-    RootedObject staticEnclosingScope(cx);
-    Rooted<DynamicWithObject*> dynamicWith(cx);
-    RootedObject dynamicEnclosingScope(cx, dynamicTerminatingScope);
-    for (size_t i = scopeChain.length(); i > 0; ) {
-        staticWith = StaticWithScope::create(cx);
-        if (!staticWith)
+    Rooted<DynamicWithObject*> withEnv(cx);
+    RootedObject enclosingEnv(cx, terminatingEnv);
+    for (size_t i = chain.length(); i > 0; ) {
+        // TODOshu
+        withEnv = DynamicWithObject::create(cx, chain[--i], enclosingEnv,
+                                            nullptr, DynamicWithObject::NonSyntacticWith);
+        if (!withEnv)
             return false;
-        staticWith->initEnclosingScope(staticEnclosingScope);
-        staticEnclosingScope = staticWith;
-
-        dynamicWith = DynamicWithObject::create(cx, scopeChain[--i], dynamicEnclosingScope,
-                                                staticWith, DynamicWithObject::NonSyntacticWith);
-        if (!dynamicWith)
-            return false;
-        dynamicEnclosingScope = dynamicWith;
+        enclosingEnv = withEnv;
     }
 
-    dynamicScopeObj.set(dynamicEnclosingScope);
+    envObj.set(enclosingEnv);
     return true;
 }
 
@@ -3285,7 +3285,7 @@ js::GetThisValueForDebuggerMaybeOptimizedOut(JSContext* cx, AbstractFramePtr fra
         return true;
     }
 
-    RootedObject scopeChain(cx, frame.scopeChain());
+    RootedObject scopeChain(cx, frame.environmentChain());
     return GetNonSyntacticGlobalThis(cx, scopeChain, res);
 }
 

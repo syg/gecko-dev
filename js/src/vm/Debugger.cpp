@@ -1416,7 +1416,7 @@ Debugger::parseResumptionValue(Maybe<AutoCompartment>& ac, bool ok, const Value&
     if (frame.debuggerNeedsCheckPrimitiveReturn()) {
         bool success;
         {
-            AutoCompartment ac2(cx, frame.scopeChain());
+            AutoCompartment ac2(cx, frame.environmentChain());
             success = GetThisValueForDebuggerMaybeOptimizedOut(cx, frame, pc, &rootThis);
         }
         if (!success || !cx->compartment()->wrap(cx, &rootThis)) {
@@ -7081,7 +7081,7 @@ DebuggerFrame_getEnvironment(JSContext* cx, unsigned argc, Value* vp)
 
     Rooted<Env*> env(cx);
     {
-        AutoCompartment ac(cx, iter.abstractFramePtr().scopeChain());
+        AutoCompartment ac(cx, iter.abstractFramePtr().environmentChain());
         UpdateFrameIterPc(iter);
         env = GetDebugScopeForFrame(cx, iter.abstractFramePtr(), iter.pc());
         if (!env)
@@ -7125,7 +7125,7 @@ DebuggerFrame_getThis(JSContext* cx, unsigned argc, Value* vp)
     RootedValue thisv(cx);
     {
         AbstractFramePtr frame = iter.abstractFramePtr();
-        AutoCompartment ac(cx, frame.scopeChain());
+        AutoCompartment ac(cx, frame.environmentChain());
 
         UpdateFrameIterPc(iter);
 
@@ -7357,7 +7357,7 @@ DebuggerFrame_setOnStep(JSContext* cx, unsigned argc, Value* vp)
     Value prior = thisobj->getReservedSlot(JSSLOT_DEBUGFRAME_ONSTEP_HANDLER);
     if (!args[0].isUndefined() && prior.isUndefined()) {
         // Single stepping toggled off->on.
-        AutoCompartment ac(cx, frame.scopeChain());
+        AutoCompartment ac(cx, frame.environmentChain());
         // Ensure observability *before* incrementing the step mode
         // count. Calling this function after calling incrementStepModeCount
         // will make it a no-op.
@@ -7433,7 +7433,12 @@ EvaluateInEnv(JSContext* cx, Handle<Env*> env, AbstractFramePtr frame,
     RootedScript callerScript(cx, frame ? frame.script() : nullptr);
     SourceBufferHolder srcBuf(chars.start().get(), chars.length(), SourceBufferHolder::NoOwnership);
     RootedScript script(cx);
-    ScopeKind scopeKind = IsGlobalLexicalScope(env) ? ScopeKind::Global : ScopeKind::NonSyntactic;
+
+    ScopeKind scopeKind;
+    if (IsGlobalLexicalEnvironment(env))
+        scopeKind = ScopeKind::Global;
+    else
+        scopeKind = ScopeKind::NonSyntactic;
 
     if (frame) {
         script = frontend::CompileEvalScript(cx, &cx->tempLifoAlloc(), env, cx->emptyGlobalScope(),
@@ -7466,7 +7471,7 @@ DebuggerGenericEval(JSContext* cx, const char* fullMethodName, const Value& code
 {
     /* Either we're specifying the frame, or a global. */
     MOZ_ASSERT_IF(iter, !scope);
-    MOZ_ASSERT_IF(!iter, scope && IsGlobalLexicalScope(scope));
+    MOZ_ASSERT_IF(!iter, scope && IsGlobalLexicalEnvironment(scope));
 
     /* Check the first argument, the eval code string. */
     if (!code.isString()) {
@@ -7535,7 +7540,7 @@ DebuggerGenericEval(JSContext* cx, const char* fullMethodName, const Value& code
 
     Maybe<AutoCompartment> ac;
     if (iter)
-        ac.emplace(cx, iter->scopeChain(cx));
+        ac.emplace(cx, iter->environmentChain(cx));
     else
         ac.emplace(cx, scope);
 
@@ -7564,15 +7569,15 @@ DebuggerGenericEval(JSContext* cx, const char* fullMethodName, const Value& code
             }
         }
 
-        AutoObjectVector scopeChain(cx);
-        if (!scopeChain.append(nenv))
+        AutoObjectVector envChain(cx);
+        if (!envChain.append(nenv))
             return false;
 
-        RootedObject dynamicScope(cx);
-        if (!CreateScopeObjectsForScopeChain(cx, scopeChain, env, &dynamicScope))
+        RootedObject newEnv(cx);
+        if (!CreateObjectsForEnvironmentChain(cx, envChain, env, &newEnv))
             return false;
 
-        env = dynamicScope;
+        env = newEnv;
     }
 
     /* Run the code and produce the completion value. */

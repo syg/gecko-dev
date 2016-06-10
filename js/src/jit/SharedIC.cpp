@@ -373,26 +373,26 @@ ICStub::trace(JSTracer* trc)
         TraceEdge(trc, &globalStub->globalShape(), "baseline-global-stub-globalshape");
         break;
       }
-      case ICStub::GetName_Scope0:
-        static_cast<ICGetName_Scope<0>*>(this)->traceScopes(trc);
+      case ICStub::GetName_Env0:
+        static_cast<ICGetName_Env<0>*>(this)->traceEnvironments(trc);
         break;
-      case ICStub::GetName_Scope1:
-        static_cast<ICGetName_Scope<1>*>(this)->traceScopes(trc);
+      case ICStub::GetName_Env1:
+        static_cast<ICGetName_Env<1>*>(this)->traceEnvironments(trc);
         break;
-      case ICStub::GetName_Scope2:
-        static_cast<ICGetName_Scope<2>*>(this)->traceScopes(trc);
+      case ICStub::GetName_Env2:
+        static_cast<ICGetName_Env<2>*>(this)->traceEnvironments(trc);
         break;
-      case ICStub::GetName_Scope3:
-        static_cast<ICGetName_Scope<3>*>(this)->traceScopes(trc);
+      case ICStub::GetName_Env3:
+        static_cast<ICGetName_Env<3>*>(this)->traceEnvironments(trc);
         break;
-      case ICStub::GetName_Scope4:
-        static_cast<ICGetName_Scope<4>*>(this)->traceScopes(trc);
+      case ICStub::GetName_Env4:
+        static_cast<ICGetName_Env<4>*>(this)->traceEnvironments(trc);
         break;
-      case ICStub::GetName_Scope5:
-        static_cast<ICGetName_Scope<5>*>(this)->traceScopes(trc);
+      case ICStub::GetName_Env5:
+        static_cast<ICGetName_Env<5>*>(this)->traceEnvironments(trc);
         break;
-      case ICStub::GetName_Scope6:
-        static_cast<ICGetName_Scope<6>*>(this)->traceScopes(trc);
+      case ICStub::GetName_Env6:
+        static_cast<ICGetName_Env<6>*>(this)->traceEnvironments(trc);
         break;
       case ICStub::GetIntrinsic_Constant: {
         ICGetIntrinsic_Constant* constantStub = toGetIntrinsic_Constant();

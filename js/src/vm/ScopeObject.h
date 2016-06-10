@@ -649,10 +649,14 @@ class ScopeObject : public NativeObject
     }
 };
 
+
 class EnvironmentObject : public NativeObject
 {
   protected:
     void init(Scope* scope, JSObject* enclosing);
+
+    inline void setAliasedName(JSContext* cx, uint32_t slot, PropertyName* name,
+                               const Value& v);
 
   public:
     // The enclosing environment. Either another EnvironmentObject, a
@@ -671,16 +675,23 @@ class EnvironmentObject : public NativeObject
         return *static_cast<Scope*>(getPrivate());
     }
 
-    // Get or set an aliased variable contained in this scope. Unaliased
-    // variables should instead access the stack frame. Aliased variable access
-    // is primarily made through JOF_SCOPECOORD ops which is why these members
-    // take a ScopeCoordinate instead of just the slot index.
-    inline const Value& aliasedVar(ScopeCoordinate sc);
+    // Get or set a name contained in this environment.
+    const Value& closedOverName(ScopeCoordinate sc) {
+        return getSlot(sc.slot());
+    }
 
-    inline void setAliasedVar(JSContext* cx, ScopeCoordinate sc, PropertyName* name,
-                              const Value& v);
+    const Value& closedOverName(const BindingIter& bi) {
+        MOZ_ASSERT(bi.location().kind() == BindingLocation::Kind::Environment);
+        return getSlot(bi.location().slot());
+    }
 
-    /* For jit access. */
+    inline void setAliasedName(JSContext* cx, ScopeCoordinate sc, PropertyName* name,
+                               const Value& v);
+
+    inline void setAliasedName(JSContext* cx, const BindingIter& bi, PropertyName* name,
+                               const Value& v);
+
+    // For JITs.
     static size_t offsetOfEnclosingEnvironment() {
         return getFixedSlotOffset(ENCLOSING_ENV_SLOT);
     }
@@ -1437,15 +1448,15 @@ IsStaticGlobalLexicalScope(JSObject* scope)
 }
 
 inline bool
-IsExtensibleLexicalScope(JSObject* scope)
+IsExtensibleLexicalEnvironment(JSObject* env)
 {
-    return scope->is<ClonedBlockObject>() && scope->as<ClonedBlockObject>().isExtensible();
+    return env->is<ClonedBlockObject>() && env->as<ClonedBlockObject>().isExtensible();
 }
 
 inline bool
-IsGlobalLexicalScope(JSObject* scope)
+IsGlobalLexicalEnvironment(JSObject* env)
 {
-    return scope->is<ClonedBlockObject>() && scope->as<ClonedBlockObject>().isGlobal();
+    return env->is<ClonedBlockObject>() && env->as<ClonedBlockObject>().isGlobal();
 }
 
 inline NestedStaticScope*
@@ -1542,9 +1553,9 @@ EnvironmentIter::enclosingScope() const
 }
 
 extern bool
-CreateScopeObjectsForScopeChain(JSContext* cx, AutoObjectVector& scopeChain,
-                                HandleObject dynamicTerminatingScope,
-                                MutableHandleObject dynamicScopeObj);
+CreateObjectsForEnvironmentChain(JSContext* cx, AutoObjectVector& chain,
+                                 HandleObject terminatingEnv,
+                                 MutableHandleObject envObj);
 
 bool HasNonSyntacticStaticScopeChain(JSObject* staticScope);
 uint32_t StaticScopeChainLength(JSObject* staticScope);

@@ -248,23 +248,23 @@ class RunState
 class ExecuteState : public RunState
 {
     RootedValue newTargetValue_;
-    RootedObject scopeChain_;
+    RootedObject envChain_;
 
     AbstractFramePtr evalInFrame_;
     Value* result_;
 
   public:
     ExecuteState(JSContext* cx, JSScript* script, const Value& newTargetValue,
-                 JSObject& scopeChain, AbstractFramePtr evalInFrame, Value* result)
+                 JSObject& envChain, AbstractFramePtr evalInFrame, Value* result)
       : RunState(cx, Execute, script),
         newTargetValue_(cx, newTargetValue),
-        scopeChain_(cx, &scopeChain),
+        envChain_(cx, &envChain),
         evalInFrame_(evalInFrame),
         result_(result)
     { }
 
     Value newTarget() { return newTargetValue_; }
-    JSObject* scopeChain() const { return scopeChain_; }
+    JSObject* environmentChain() const { return envChain_; }
     bool isDebuggerEval() const { return !!evalInFrame_; }
 
     virtual InterpreterFrame* pushInterpreterFrame(JSContext* cx);
@@ -418,11 +418,12 @@ bool
 GetProperty(JSContext* cx, HandleValue value, HandlePropertyName name, MutableHandleValue vp);
 
 bool
-GetScopeName(JSContext* cx, HandleObject obj, HandlePropertyName name, MutableHandleValue vp);
+GetEnvironmentName(JSContext* cx, HandleObject obj, HandlePropertyName name,
+                   MutableHandleValue vp);
 
 bool
-GetScopeNameForTypeOf(JSContext* cx, HandleObject obj, HandlePropertyName name,
-                      MutableHandleValue vp);
+GetEnvironmentNameForTypeOf(JSContext* cx, HandleObject obj, HandlePropertyName name,
+                            MutableHandleValue vp);
 
 JSObject*
 Lambda(JSContext* cx, HandleFunction fun, HandleObject parent);
@@ -481,7 +482,7 @@ bool
 DeleteElementJit(JSContext* cx, HandleValue val, HandleValue index, bool* bv);
 
 bool
-DefFunOperation(JSContext* cx, HandleScript script, HandleObject scopeChain, HandleFunction funArg);
+DefFunOperation(JSContext* cx, HandleScript script, HandleObject envChain, HandleFunction funArg);
 
 bool
 ThrowMsgOperation(JSContext* cx, const unsigned errorNum);

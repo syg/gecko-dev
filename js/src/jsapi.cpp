@@ -3492,38 +3492,37 @@ JS::NewFunctionFromSpec(JSContext* cx, const JSFunctionSpec* fs, HandleId id)
 
 static bool
 CreateNonSyntacticEnvironmentChain(JSContext* cx, AutoObjectVector& envChain,
-                                   MutableHandleObject environment, MutableHandleScope scope)
+                                   MutableHandleObject env, MutableHandleScope scope)
 {
     Rooted<ClonedBlockObject*> globalLexical(cx, &cx->global()->lexicalScope());
-    if (!js::CreateScopeObjectsForScopeChain(cx, envChain, globalLexical, environment))
+    if (!js::CreateObjectsForEnvironmentChain(cx, envChain, globalLexical, env))
         return false;
 
     if (!envChain.empty()) {
         scope.set(cx->emptyNonSyntacticScope());
 
-        // The XPConnect subscript loader, which may pass in its own dynamic
-        // scopes to load scripts in, expects the dynamic scope chain to be
-        // the holder of "var" declarations. In SpiderMonkey, such objects are
-        // called "qualified varobjs", the "qualified" part meaning the
+        // The XPConnect subscript loader, which may pass in its own
+        // environments to load scripts in, expects the environment chain to
+        // be the holder of "var" declarations. In SpiderMonkey, such objects
+        // are called "qualified varobjs", the "qualified" part meaning the
         // declaration was qualified by "var". There is only sadness.
         //
         // See JSObject::isQualifiedVarObj.
-        if (!environment->setQualifiedVarObj(cx))
+        if (!env->setQualifiedVarObj(cx))
             return false;
 
-        // Also get a non-syntactic lexical scope to capture 'let' and 'const'
-        // bindings. To persist lexical bindings, we have a 1-1 mapping with
-        // the final unwrapped dynamic scope object (the scope that stores the
-        // 'var' bindings) and the lexical scope.
+        // Also get a non-syntactic lexical environment to capture 'let' and
+        // 'const' bindings. To persist lexical bindings, we have a 1-1
+        // mapping with the final unwrapped environment object (the
+        // environment that stores the 'var' bindings) and the lexical
+        // environment.
         //
         // TODOshu: disallow the subscript loader from using non-distinguished
         // objects as dynamic scopes.
         //
         // TODOshu: fix static scope requirement?
-        environment.set(
-            cx->compartment()->getOrCreateNonSyntacticLexicalScope(cx, nullptr,
-                                                                   environment));
-        if (!environment)
+        env.set(cx->compartment()->getOrCreateNonSyntacticLexicalScope(cx, nullptr, env));
+        if (!env)
             return false;
     } else if (scope) {
         scope.set(cx->emptyGlobalScope());
@@ -3645,11 +3644,11 @@ JS::CloneFunctionObject(JSContext* cx, HandleObject funobj)
 extern JS_PUBLIC_API(JSObject*)
 JS::CloneFunctionObject(JSContext* cx, HandleObject funobj, AutoObjectVector& envChain)
 {
-    RootedObject environment(cx);
+    RootedObject env(cx);
     RootedScope scope(cx);
-    if (!CreateNonSyntacticEnvironmentChain(cx, envChain, &environment, &scope))
+    if (!CreateNonSyntacticEnvironmentChain(cx, envChain, &env, &scope))
         return nullptr;
-    return CloneFunctionObject(cx, funobj, environment, scope);
+    return CloneFunctionObject(cx, funobj, env, scope);
 }
 
 JS_PUBLIC_API(JSObject*)
@@ -4282,13 +4281,13 @@ static bool
 CompileFunction(JSContext* cx, const ReadOnlyCompileOptions& optionsArg,
                 const char* name, unsigned nargs, const char* const* argnames,
                 SourceBufferHolder& srcBuf,
-                HandleObject enclosingEnvironment, HandleScope enclosingScope,
+                HandleObject enclosingEnv, HandleScope enclosingScope,
                 MutableHandleFunction fun)
 {
     MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
-    assertSameCompartment(cx, enclosingEnvironment);
+    assertSameCompartment(cx, enclosingEnv);
     RootedAtom funAtom(cx);
     AutoLastFrameCheck lfc(cx);
 
@@ -4308,13 +4307,13 @@ CompileFunction(JSContext* cx, const ReadOnlyCompileOptions& optionsArg,
     fun.set(NewScriptedFunction(cx, 0, JSFunction::INTERPRETED_NORMAL, funAtom,
                                 /* proto = */ nullptr,
                                 gc::AllocKind::FUNCTION, TenuredObject,
-                                enclosingEnvironment));
+                                enclosingEnv));
     if (!fun)
         return false;
 
     // Make sure the static scope chain matches up when we have a
     // non-syntactic scope.
-    MOZ_ASSERT_IF(!IsGlobalLexicalScope(enclosingEnvironment),
+    MOZ_ASSERT_IF(!IsGlobalLexicalEnvironment(enclosingEnv),
                   enclosingScope->hasEnclosing(ScopeKind::NonSyntactic));
 
     if (!frontend::CompileFunctionBody(cx, fun, optionsArg, formals, srcBuf, enclosingScope))
@@ -4329,11 +4328,11 @@ JS::CompileFunction(JSContext* cx, AutoObjectVector& envChain,
                     const char* name, unsigned nargs, const char* const* argnames,
                     SourceBufferHolder& srcBuf, MutableHandleFunction fun)
 {
-    RootedObject environment(cx);
+    RootedObject env(cx);
     RootedScope scope(cx);
-    if (!CreateNonSyntacticEnvironmentChain(cx, envChain, &environment, &scope))
+    if (!CreateNonSyntacticEnvironmentChain(cx, envChain, &env, &scope))
         return false;
-    return CompileFunction(cx, options, name, nargs, argnames, srcBuf, environment, scope, fun);
+    return CompileFunction(cx, options, name, nargs, argnames, srcBuf, env, scope, fun);
 }
 
 JS_PUBLIC_API(bool)
@@ -4399,7 +4398,7 @@ ExecuteScript(JSContext* cx, HandleObject scope, HandleScript script, Value* rva
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, scope, script);
-    MOZ_ASSERT_IF(!IsGlobalLexicalScope(scope), script->hasNonSyntacticScope());
+    MOZ_ASSERT_IF(!IsGlobalLexicalEnvironment(scope), script->hasNonSyntacticScope());
     AutoLastFrameCheck lfc(cx);
     return Execute(cx, script, *scope, rval);
 }
@@ -4407,20 +4406,20 @@ ExecuteScript(JSContext* cx, HandleObject scope, HandleScript script, Value* rva
 static bool
 ExecuteScript(JSContext* cx, AutoObjectVector& envChain, HandleScript scriptArg, Value* rval)
 {
-    RootedObject environment(cx);
+    RootedObject env(cx);
     RootedScope dummy(cx);
-    if (!CreateNonSyntacticEnvironmentChain(cx, envChain, &environment, &dummy))
+    if (!CreateNonSyntacticEnvironmentChain(cx, envChain, &env, &dummy))
         return false;
 
     RootedScript script(cx, scriptArg);
-    if (!script->hasNonSyntacticScope() && !IsGlobalLexicalScope(environment)) {
+    if (!script->hasNonSyntacticScope() && !IsGlobalLexicalEnvironment(env)) {
         script = CloneGlobalScript(cx, ScopeKind::NonSyntactic, script);
         if (!script)
             return false;
         js::Debugger::onNewScript(cx, script);
     }
 
-    return ExecuteScript(cx, environment, script, rval);
+    return ExecuteScript(cx, env, script, rval);
 }
 
 MOZ_NEVER_INLINE JS_PUBLIC_API(bool)
@@ -4469,7 +4468,7 @@ JS::CloneAndExecuteScript(JSContext* cx, HandleScript scriptArg)
 static const unsigned LARGE_SCRIPT_LENGTH = 500*1024;
 
 static bool
-Evaluate(JSContext* cx, ScopeKind scopeKind, HandleObject environment,
+Evaluate(JSContext* cx, ScopeKind scopeKind, HandleObject env,
          const ReadOnlyCompileOptions& optionsArg,
          SourceBufferHolder& srcBuf, MutableHandleValue rval)
 {
@@ -4477,11 +4476,11 @@ Evaluate(JSContext* cx, ScopeKind scopeKind, HandleObject environment,
     MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
-    assertSameCompartment(cx, environment);
+    assertSameCompartment(cx, env);
 
     AutoLastFrameCheck lfc(cx);
 
-    MOZ_ASSERT_IF(!IsGlobalLexicalScope(environment), scopeKind == ScopeKind::NonSyntactic);
+    MOZ_ASSERT_IF(!IsGlobalLexicalEnvironment(env), scopeKind == ScopeKind::NonSyntactic);
 
     options.setIsRunOnce(true);
     SourceCompressionTask sct(cx);
@@ -4492,7 +4491,7 @@ Evaluate(JSContext* cx, ScopeKind scopeKind, HandleObject environment,
 
     MOZ_ASSERT(script->getVersion() == options.version);
 
-    bool result = Execute(cx, script, *environment,
+    bool result = Execute(cx, script, *env,
                           options.noScriptRval ? nullptr : rval.address());
     if (!sct.complete())
         result = false;
@@ -4515,11 +4514,11 @@ static bool
 Evaluate(JSContext* cx, AutoObjectVector& envChain, const ReadOnlyCompileOptions& optionsArg,
          SourceBufferHolder& srcBuf, MutableHandleValue rval)
 {
-    RootedObject environment(cx);
+    RootedObject env(cx);
     RootedScope scope(cx);
-    if (!CreateNonSyntacticEnvironmentChain(cx, envChain, &environment, &scope))
+    if (!CreateNonSyntacticEnvironmentChain(cx, envChain, &env, &scope))
         return false;
-    return ::Evaluate(cx, scope->kind(), environment, optionsArg, srcBuf, rval);
+    return ::Evaluate(cx, scope->kind(), env, optionsArg, srcBuf, rval);
 }
 
 static bool

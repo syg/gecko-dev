@@ -4322,9 +4322,9 @@ class MGetDynamicName
     public MixPolicy<ObjectPolicy<0>, ConvertToStringPolicy<1> >::Data
 {
   protected:
-    MGetDynamicName(MDefinition* scopeChain, MDefinition* name)
+    MGetDynamicName(MDefinition* envChain, MDefinition* name)
     {
-        initOperand(0, scopeChain);
+        initOperand(0, envChain);
         initOperand(1, name);
         setResultType(MIRType::Value);
     }
@@ -4333,11 +4333,11 @@ class MGetDynamicName
     INSTRUCTION_HEADER(GetDynamicName)
 
     static MGetDynamicName*
-    New(TempAllocator& alloc, MDefinition* scopeChain, MDefinition* name) {
-        return new(alloc) MGetDynamicName(scopeChain, name);
+    New(TempAllocator& alloc, MDefinition* envChain, MDefinition* name) {
+        return new(alloc) MGetDynamicName(envChain, name);
     }
 
-    MDefinition* getScopeChain() const {
+    MDefinition* getEnvironmentChain() const {
         return getOperand(0);
     }
     MDefinition* getName() const {
@@ -4355,11 +4355,11 @@ class MCallDirectEval
                       BoxPolicy<2> >::Data
 {
   protected:
-    MCallDirectEval(MDefinition* scopeChain, MDefinition* string,
+    MCallDirectEval(MDefinition* envChain, MDefinition* string,
                     MDefinition* newTargetValue, jsbytecode* pc)
         : pc_(pc)
     {
-        initOperand(0, scopeChain);
+        initOperand(0, envChain);
         initOperand(1, string);
         initOperand(2, newTargetValue);
         setResultType(MIRType::Value);
@@ -4369,13 +4369,13 @@ class MCallDirectEval
     INSTRUCTION_HEADER(CallDirectEval)
 
     static MCallDirectEval*
-    New(TempAllocator& alloc, MDefinition* scopeChain, MDefinition* string,
+    New(TempAllocator& alloc, MDefinition* envChain, MDefinition* string,
         MDefinition* newTargetValue, jsbytecode* pc)
     {
-        return new(alloc) MCallDirectEval(scopeChain, string, newTargetValue, pc);
+        return new(alloc) MCallDirectEval(envChain, string, newTargetValue, pc);
     }
 
-    MDefinition* getScopeChain() const {
+    MDefinition* getEnvironmentChain() const {
         return getOperand(0);
     }
     MDefinition* getString() const {
@@ -7629,21 +7629,21 @@ class MOsrValue
 
 // MIR representation of a JSObject scope chain pointer on the OSR BaselineFrame.
 // The pointer is indexed off of OsrFrameReg.
-class MOsrScopeChain
+class MOsrEnvironmentChain
   : public MUnaryInstruction,
     public NoTypePolicy::Data
 {
   private:
-    explicit MOsrScopeChain(MOsrEntry* entry)
+    explicit MOsrEnvironmentChain(MOsrEntry* entry)
       : MUnaryInstruction(entry)
     {
         setResultType(MIRType::Object);
     }
 
   public:
-    INSTRUCTION_HEADER(OsrScopeChain)
-    static MOsrScopeChain* New(TempAllocator& alloc, MOsrEntry* entry) {
-        return new(alloc) MOsrScopeChain(entry);
+    INSTRUCTION_HEADER(OsrEnvironmentChain)
+    static MOsrEnvironmentChain* New(TempAllocator& alloc, MOsrEntry* entry) {
+        return new(alloc) MOsrEnvironmentChain(entry);
     }
 
     MOsrEntry* entry() {
@@ -7913,8 +7913,8 @@ class MDefVar
     unsigned attrs_; // Attributes to be set.
 
   private:
-    MDefVar(PropertyName* name, unsigned attrs, MDefinition* scopeChain)
-      : MUnaryInstruction(scopeChain),
+    MDefVar(PropertyName* name, unsigned attrs, MDefinition* envChain)
+      : MUnaryInstruction(envChain),
         name_(name),
         attrs_(attrs)
     {
@@ -7924,9 +7924,9 @@ class MDefVar
     INSTRUCTION_HEADER(DefVar)
 
     static MDefVar* New(TempAllocator& alloc, PropertyName* name, unsigned attrs,
-                        MDefinition* scopeChain)
+                        MDefinition* envChain)
     {
-        return new(alloc) MDefVar(name, attrs, scopeChain);
+        return new(alloc) MDefVar(name, attrs, envChain);
     }
 
     PropertyName* name() const {
@@ -7935,7 +7935,7 @@ class MDefVar
     unsigned attrs() const {
         return attrs_;
     }
-    MDefinition* scopeChain() const {
+    MDefinition* environmentChain() const {
         return getOperand(0);
     }
     bool possiblyCalls() const override {
@@ -7977,22 +7977,22 @@ class MDefFun
     CompilerFunction fun_;
 
   private:
-    MDefFun(JSFunction* fun, MDefinition* scopeChain)
-      : MUnaryInstruction(scopeChain),
+    MDefFun(JSFunction* fun, MDefinition* envChain)
+      : MUnaryInstruction(envChain),
         fun_(fun)
     {}
 
   public:
     INSTRUCTION_HEADER(DefFun)
 
-    static MDefFun* New(TempAllocator& alloc, JSFunction* fun, MDefinition* scopeChain) {
-        return new(alloc) MDefFun(fun, scopeChain);
+    static MDefFun* New(TempAllocator& alloc, JSFunction* fun, MDefinition* envChain) {
+        return new(alloc) MDefFun(fun, envChain);
     }
 
     JSFunction* fun() const {
         return fun_;
     }
-    MDefinition* scopeChain() const {
+    MDefinition* environmentChain() const {
         return getOperand(0);
     }
     bool possiblyCalls() const override {
@@ -8402,8 +8402,8 @@ class MLambda
 {
     const LambdaFunctionInfo info_;
 
-    MLambda(CompilerConstraintList* constraints, MDefinition* scopeChain, MConstant* cst)
-      : MBinaryInstruction(scopeChain, cst), info_(&cst->toObject().as<JSFunction>())
+    MLambda(CompilerConstraintList* constraints, MDefinition* envChain, MConstant* cst)
+      : MBinaryInstruction(envChain, cst), info_(&cst->toObject().as<JSFunction>())
     {
         setResultType(MIRType::Object);
         if (!info().fun->isSingleton() && !ObjectGroup::useSingletonForClone(info().fun))
@@ -8414,11 +8414,11 @@ class MLambda
     INSTRUCTION_HEADER(Lambda)
 
     static MLambda* New(TempAllocator& alloc, CompilerConstraintList* constraints,
-                        MDefinition* scopeChain, MConstant* fun)
+                        MDefinition* envChain, MConstant* fun)
     {
-        return new(alloc) MLambda(constraints, scopeChain, fun);
+        return new(alloc) MLambda(constraints, envChain, fun);
     }
-    MDefinition* scopeChain() const {
+    MDefinition* environmentChain() const {
         return getOperand(0);
     }
     MConstant* functionOperand() const {
@@ -8439,9 +8439,9 @@ class MLambdaArrow
 {
     const LambdaFunctionInfo info_;
 
-    MLambdaArrow(CompilerConstraintList* constraints, MDefinition* scopeChain,
+    MLambdaArrow(CompilerConstraintList* constraints, MDefinition* envChain,
                  MDefinition* newTarget_, JSFunction* fun)
-      : MBinaryInstruction(scopeChain, newTarget_), info_(fun)
+      : MBinaryInstruction(envChain, newTarget_), info_(fun)
     {
         setResultType(MIRType::Object);
         MOZ_ASSERT(!ObjectGroup::useSingletonForClone(fun));
@@ -8453,11 +8453,11 @@ class MLambdaArrow
     INSTRUCTION_HEADER(LambdaArrow)
 
     static MLambdaArrow* New(TempAllocator& alloc, CompilerConstraintList* constraints,
-                             MDefinition* scopeChain, MDefinition* newTarget_, JSFunction* fun)
+                             MDefinition* envChain, MDefinition* newTarget_, JSFunction* fun)
     {
-        return new(alloc) MLambdaArrow(constraints, scopeChain, newTarget_, fun);
+        return new(alloc) MLambdaArrow(constraints, envChain, newTarget_, fun);
     }
-    MDefinition* scopeChain() const {
+    MDefinition* environmentChain() const {
         return getOperand(0);
     }
     MDefinition* newTargetDef() const {
@@ -11407,8 +11407,8 @@ class MBindNameCache
     CompilerScript script_;
     jsbytecode* pc_;
 
-    MBindNameCache(MDefinition* scopeChain, PropertyName* name, JSScript* script, jsbytecode* pc)
-      : MUnaryInstruction(scopeChain), name_(name), script_(script), pc_(pc)
+    MBindNameCache(MDefinition* envChain, PropertyName* name, JSScript* script, jsbytecode* pc)
+      : MUnaryInstruction(envChain), name_(name), script_(script), pc_(pc)
     {
         setResultType(MIRType::Object);
     }
@@ -11416,13 +11416,13 @@ class MBindNameCache
   public:
     INSTRUCTION_HEADER(BindNameCache)
 
-    static MBindNameCache* New(TempAllocator& alloc, MDefinition* scopeChain, PropertyName* name,
+    static MBindNameCache* New(TempAllocator& alloc, MDefinition* envChain, PropertyName* name,
                                JSScript* script, jsbytecode* pc)
     {
-        return new(alloc) MBindNameCache(scopeChain, name, script, pc);
+        return new(alloc) MBindNameCache(envChain, name, script, pc);
     }
 
-    MDefinition* scopeChain() const {
+    MDefinition* environmentChain() const {
         return getOperand(0);
     }
     PropertyName* name() const {
@@ -11440,8 +11440,8 @@ class MCallBindVar
   : public MUnaryInstruction,
     public SingleObjectPolicy::Data
 {
-    explicit MCallBindVar(MDefinition* scopeChain)
-      : MUnaryInstruction(scopeChain)
+    explicit MCallBindVar(MDefinition* envChain)
+      : MUnaryInstruction(envChain)
     {
         setResultType(MIRType::Object);
         setMovable();
@@ -11450,11 +11450,11 @@ class MCallBindVar
   public:
     INSTRUCTION_HEADER(CallBindVar)
 
-    static MCallBindVar* New(TempAllocator& alloc, MDefinition* scopeChain) {
-        return new(alloc) MCallBindVar(scopeChain);
+    static MCallBindVar* New(TempAllocator& alloc, MDefinition* envChain) {
+        return new(alloc) MCallBindVar(envChain);
     }
 
-    MDefinition* scopeChain() const {
+    MDefinition* environmentChain() const {
         return getOperand(0);
     }
 
@@ -11969,7 +11969,7 @@ class MGetNameCache
     {
         return new(alloc) MGetNameCache(obj, name, kind);
     }
-    MDefinition* scopeObj() const {
+    MDefinition* envObj() const {
         return getOperand(0);
     }
     PropertyName* name() const {
@@ -13457,17 +13457,17 @@ class MNewStringObject :
 };
 
 // This is an alias for MLoadFixedSlot.
-class MEnclosingScope : public MLoadFixedSlot
+class MEnclosingEnvironment : public MLoadFixedSlot
 {
-    explicit MEnclosingScope(MDefinition* obj)
+    explicit MEnclosingEnvironment(MDefinition* obj)
       : MLoadFixedSlot(obj, ScopeObject::enclosingScopeSlot())
     {
         setResultType(MIRType::Object);
     }
 
   public:
-    static MEnclosingScope* New(TempAllocator& alloc, MDefinition* obj) {
-        return new(alloc) MEnclosingScope(obj);
+    static MEnclosingEnvironment* New(TempAllocator& alloc, MDefinition* obj) {
+        return new(alloc) MEnclosingEnvironment(obj);
     }
 
     AliasSet getAliasSet() const override {

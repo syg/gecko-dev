@@ -1099,8 +1099,8 @@ GenerateCallGetter(JSContext* cx, IonScript* ion, MacroAssembler& masm,
     Label* maybePopAndFail = failures;
 
     // If we're calling a getter on the global, inline the logic for the
-    // 'this' hook on the global lexical scope and manually push the global.
-    if (IsGlobalLexicalScope(obj))
+    // 'this' hook on the global lexical env and manually push the global.
+    if (IsGlobalLexicalEnvironment(obj))
         masm.extractObject(Address(object, ScopeObject::offsetOfEnclosingScope()), object);
 
     // Save off the object register if it aliases the scratchReg
@@ -4652,17 +4652,17 @@ SetPropertyIC::tryAttachTypedArrayElement(JSContext* cx, HandleScript outerScrip
 
 bool
 BindNameIC::attachGlobal(JSContext* cx, HandleScript outerScript, IonScript* ion,
-                         HandleObject scopeChain)
+                         HandleObject envChain)
 {
-    MOZ_ASSERT(scopeChain->is<GlobalObject>());
+    MOZ_ASSERT(envChain->is<GlobalObject>());
 
     MacroAssembler masm(cx, ion, outerScript, profilerLeavePc_);
     StubAttacher attacher(*this);
 
-    // Guard on the scope chain.
-    attacher.branchNextStub(masm, Assembler::NotEqual, scopeChainReg(),
-                            ImmGCPtr(scopeChain));
-    masm.movePtr(ImmGCPtr(scopeChain), outputReg());
+    // Guard on the env chain.
+    attacher.branchNextStub(masm, Assembler::NotEqual, environmentChainReg(),
+                            ImmGCPtr(envChain));
+    masm.movePtr(ImmGCPtr(envChain), outputReg());
 
     attacher.jumpRejoin(masm);
 
@@ -4670,14 +4670,14 @@ BindNameIC::attachGlobal(JSContext* cx, HandleScript outerScript, IonScript* ion
 }
 
 static inline void
-GenerateScopeChainGuard(MacroAssembler& masm, JSObject* scopeObj,
-                        Register scopeObjReg, Shape* shape, Label* failures)
+GenerateEnvironmentChainGuard(MacroAssembler& masm, JSObject* envObj,
+                              Register envObjReg, Shape* shape, Label* failures)
 {
-    if (scopeObj->is<CallObject>()) {
+    if (envObj->is<CallObject>()) {
         // We can skip a guard on the call object if the script's bindings are
         // guaranteed to be immutable (and thus cannot introduce shadowing
         // variables).
-        CallObject* callObj = &scopeObj->as<CallObject>();
+        CallObject* callObj = &envObj->as<CallObject>();
         if (!callObj->isForEval()) {
             JSFunction* fun = &callObj->callee();
             // The function might have been relazified under rare conditions.
@@ -4689,7 +4689,7 @@ GenerateScopeChainGuard(MacroAssembler& masm, JSObject* scopeObj,
                     return;
             }
         }
-    } else if (scopeObj->is<GlobalObject>()) {
+    } else if (envObj->is<GlobalObject>()) {
         // If this is the last object on the scope walk, and the property we've
         // found is not configurable, then we don't need a shape guard because
         // the shape cannot be removed.
@@ -4697,26 +4697,26 @@ GenerateScopeChainGuard(MacroAssembler& masm, JSObject* scopeObj,
             return;
     }
 
-    Address shapeAddr(scopeObjReg, JSObject::offsetOfShape());
+    Address shapeAddr(envObjReg, JSObject::offsetOfShape());
     masm.branchPtr(Assembler::NotEqual, shapeAddr,
-                   ImmGCPtr(scopeObj->as<NativeObject>().lastProperty()), failures);
+                   ImmGCPtr(envObj->as<NativeObject>().lastProperty()), failures);
 }
 
 static void
-GenerateScopeChainGuards(MacroAssembler& masm, JSObject* scopeChain, JSObject* holder,
-                         Register outputReg, Label* failures, bool skipLastGuard = false)
+GenerateEnvironmentChainGuards(MacroAssembler& masm, JSObject* envChain, JSObject* holder,
+                               Register outputReg, Label* failures, bool skipLastGuard = false)
 {
-    JSObject* tobj = scopeChain;
+    JSObject* tobj = envChain;
 
-    // Walk up the scope chain. Note that IsCacheableScopeChain guarantees the
+    // Walk up the env chain. Note that IsCacheableEnvironmentChain guarantees the
     // |tobj == holder| condition terminates the loop.
     while (true) {
-        MOZ_ASSERT(IsCacheableNonGlobalScope(tobj) || tobj->is<GlobalObject>());
+        MOZ_ASSERT(IsCacheableNonGlobalEnvironment(tobj) || tobj->is<GlobalObject>());
 
         if (skipLastGuard && tobj == holder)
             break;
 
-        GenerateScopeChainGuard(masm, tobj, outputReg, nullptr, failures);
+        GenerateEnvironmentChainGuard(masm, tobj, outputReg, nullptr, failures);
 
         if (tobj == holder)
             break;
@@ -4729,27 +4729,28 @@ GenerateScopeChainGuards(MacroAssembler& masm, JSObject* scopeChain, JSObject* h
 
 bool
 BindNameIC::attachNonGlobal(JSContext* cx, HandleScript outerScript, IonScript* ion,
-                            HandleObject scopeChain, HandleObject holder)
+                            HandleObject envChain, HandleObject holder)
 {
-    MOZ_ASSERT(IsCacheableNonGlobalScope(scopeChain));
+    MOZ_ASSERT(IsCacheableNonGlobalEnvironment(envChain));
 
     MacroAssembler masm(cx, ion, outerScript, profilerLeavePc_);
     StubAttacher attacher(*this);
 
-    // Guard on the shape of the scope chain.
+    // Guard on the shape of the env chain.
     Label failures;
     attacher.branchNextStubOrLabel(masm, Assembler::NotEqual,
-                                   Address(scopeChainReg(), JSObject::offsetOfShape()),
-                                   ImmGCPtr(scopeChain->as<NativeObject>().lastProperty()),
-                                   holder != scopeChain ? &failures : nullptr);
+                                   Address(environmentChainReg(), JSObject::offsetOfShape()),
+                                   ImmGCPtr(envChain->as<NativeObject>().lastProperty()),
+                                   holder != envChain ? &failures : nullptr);
 
-    if (holder != scopeChain) {
-        JSObject* parent = &scopeChain->as<ScopeObject>().enclosingScope();
-        masm.extractObject(Address(scopeChainReg(), ScopeObject::offsetOfEnclosingScope()), outputReg());
+    if (holder != envChain) {
+        JSObject* parent = &envChain->as<ScopeObject>().enclosingScope();
+        masm.extractObject(Address(environmentChainReg(), ScopeObject::offsetOfEnclosingScope()),
+                           outputReg());
 
-        GenerateScopeChainGuards(masm, parent, holder, outputReg(), &failures);
+        GenerateEnvironmentChainGuards(masm, parent, holder, outputReg(), &failures);
     } else {
-        masm.movePtr(scopeChainReg(), outputReg());
+        masm.movePtr(environmentChainReg(), outputReg());
     }
 
     // At this point outputReg holds the object on which the property
@@ -4757,7 +4758,7 @@ BindNameIC::attachNonGlobal(JSContext* cx, HandleScript outerScript, IonScript* 
     attacher.jumpRejoin(masm);
 
     // All failures flow to here, so there is a common point to patch.
-    if (holder != scopeChain) {
+    if (holder != envChain) {
         masm.bind(&failures);
         attacher.jumpNextStub(masm);
     }
@@ -4766,50 +4767,50 @@ BindNameIC::attachNonGlobal(JSContext* cx, HandleScript outerScript, IonScript* 
 }
 
 static bool
-IsCacheableNonGlobalScopeChain(JSObject* scopeChain, JSObject* holder)
+IsCacheableNonGlobalEnvironmentChain(JSObject* envChain, JSObject* holder)
 {
     while (true) {
-        if (!IsCacheableNonGlobalScope(scopeChain)) {
-            JitSpew(JitSpew_IonIC, "Non-cacheable object on scope chain");
+        if (!IsCacheableNonGlobalEnvironment(envChain)) {
+            JitSpew(JitSpew_IonIC, "Non-cacheable object on env chain");
             return false;
         }
 
-        if (scopeChain == holder)
+        if (envChain == holder)
             return true;
 
-        scopeChain = &scopeChain->as<ScopeObject>().enclosingScope();
-        if (!scopeChain) {
-            JitSpew(JitSpew_IonIC, "Scope chain indirect hit");
+        envChain = &envChain->as<ScopeObject>().enclosingScope();
+        if (!envChain) {
+            JitSpew(JitSpew_IonIC, "env chain indirect hit");
             return false;
         }
     }
 
-    MOZ_CRASH("Invalid scope chain");
+    MOZ_CRASH("Invalid env chain");
 }
 
 JSObject*
 BindNameIC::update(JSContext* cx, HandleScript outerScript, size_t cacheIndex,
-                   HandleObject scopeChain)
+                   HandleObject envChain)
 {
     IonScript* ion = outerScript->ionScript();
     BindNameIC& cache = ion->getCache(cacheIndex).toBindName();
     HandlePropertyName name = cache.name();
 
     RootedObject holder(cx);
-    if (!LookupNameUnqualified(cx, name, scopeChain, &holder))
+    if (!LookupNameUnqualified(cx, name, envChain, &holder))
         return nullptr;
 
     // Stop generating new stubs once we hit the stub count limit, see
     // GetPropertyCache.
     if (cache.canAttachStub()) {
-        if (scopeChain->is<GlobalObject>()) {
-            if (!cache.attachGlobal(cx, outerScript, ion, scopeChain))
+        if (envChain->is<GlobalObject>()) {
+            if (!cache.attachGlobal(cx, outerScript, ion, envChain))
                 return nullptr;
-        } else if (IsCacheableNonGlobalScopeChain(scopeChain, holder)) {
-            if (!cache.attachNonGlobal(cx, outerScript, ion, scopeChain, holder))
+        } else if (IsCacheableNonGlobalEnvironmentChain(envChain, holder)) {
+            if (!cache.attachNonGlobal(cx, outerScript, ion, envChain, holder))
                 return nullptr;
         } else {
-            JitSpew(JitSpew_IonIC, "BINDNAME uncacheable scope chain");
+            JitSpew(JitSpew_IonIC, "BINDNAME uncacheable env chain");
         }
     }
 
@@ -4818,7 +4819,7 @@ BindNameIC::update(JSContext* cx, HandleScript outerScript, size_t cacheIndex,
 
 bool
 NameIC::attachReadSlot(JSContext* cx, HandleScript outerScript, IonScript* ion,
-                       HandleObject scopeChain, HandleObject holderBase,
+                       HandleObject envChain, HandleObject holderBase,
                        HandleNativeObject holder, HandleShape shape)
 {
     MacroAssembler masm(cx, ion, outerScript, profilerLeavePc_);
@@ -4829,11 +4830,11 @@ NameIC::attachReadSlot(JSContext* cx, HandleScript outerScript, IonScript* ion,
 
     // Don't guard the base of the proto chain the name was found on. It will be guarded
     // by GenerateReadSlot().
-    masm.mov(scopeChainReg(), scratchReg);
-    GenerateScopeChainGuards(masm, scopeChain, holderBase, scratchReg, &failures,
+    masm.mov(environmentChainReg(), scratchReg);
+    GenerateEnvironmentChainGuards(masm, envChain, holderBase, scratchReg, &failures,
                              /* skipLastGuard = */true);
 
-    // GenerateScopeChain leaves the last scope chain in scratchReg, even though it
+    // GenerateEnvironmentChain leaves the last env chain in scratchReg, even though it
     // doesn't generate the extra guard.
     //
     // NAME ops must do their own TDZ checks.
@@ -4845,11 +4846,11 @@ NameIC::attachReadSlot(JSContext* cx, HandleScript outerScript, IonScript* ion,
 }
 
 static bool
-IsCacheableScopeChain(JSObject* scopeChain, JSObject* obj)
+IsCacheableEnvironmentChain(JSObject* envChain, JSObject* obj)
 {
-    JSObject* obj2 = scopeChain;
+    JSObject* obj2 = envChain;
     while (obj2) {
-        if (!IsCacheableNonGlobalScope(obj2) && !obj2->is<GlobalObject>())
+        if (!IsCacheableNonGlobalEnvironment(obj2) && !obj2->is<GlobalObject>())
             return false;
 
         // Stop once we hit the global or target obj.
@@ -4863,7 +4864,7 @@ IsCacheableScopeChain(JSObject* scopeChain, JSObject* obj)
 }
 
 static bool
-IsCacheableNameReadSlot(HandleObject scopeChain, HandleObject obj,
+IsCacheableNameReadSlot(HandleObject envChain, HandleObject obj,
                         HandleObject holder, HandleShape shape, jsbytecode* pc,
                         const TypedOrValueRegister& output)
 {
@@ -4889,12 +4890,12 @@ IsCacheableNameReadSlot(HandleObject scopeChain, HandleObject obj,
         return false;
     }
 
-    return IsCacheableScopeChain(scopeChain, obj);
+    return IsCacheableEnvironmentChain(envChain, obj);
 }
 
 bool
 NameIC::attachCallGetter(JSContext* cx, HandleScript outerScript, IonScript* ion,
-                         HandleObject scopeChain, HandleObject obj, HandleObject holder,
+                         HandleObject envChain, HandleObject obj, HandleObject holder,
                          HandleShape shape, void* returnAddr)
 {
     MacroAssembler masm(cx, ion, outerScript, profilerLeavePc_);
@@ -4905,11 +4906,11 @@ NameIC::attachCallGetter(JSContext* cx, HandleScript outerScript, IonScript* ion
 
     // Don't guard the base of the proto chain the name was found on. It will be guarded
     // by GenerateCallGetter().
-    masm.mov(scopeChainReg(), scratchReg);
-    GenerateScopeChainGuards(masm, scopeChain, obj, scratchReg, &failures,
+    masm.mov(environmentChainReg(), scratchReg);
+    GenerateEnvironmentChainGuards(masm, envChain, obj, scratchReg, &failures,
                              /* skipLastGuard = */true);
 
-    // GenerateScopeChain leaves the last scope chain in scratchReg, even though it
+    // GenerateEnvironmentChain leaves the last env chain in scratchReg, even though it
     // doesn't generate the extra guard.
     if (!GenerateCallGetter(cx, ion, masm, attacher, obj, holder, shape, liveRegs_,
                             scratchReg, outputReg(), returnAddr,
@@ -4924,7 +4925,7 @@ NameIC::attachCallGetter(JSContext* cx, HandleScript outerScript, IonScript* ion
 }
 
 static bool
-IsCacheableNameCallGetter(HandleObject scopeChain, HandleObject obj, HandleObject holder,
+IsCacheableNameCallGetter(HandleObject envChain, HandleObject obj, HandleObject holder,
                           HandleShape shape)
 {
     if (!shape)
@@ -4932,7 +4933,7 @@ IsCacheableNameCallGetter(HandleObject scopeChain, HandleObject obj, HandleObjec
     if (!obj->is<GlobalObject>())
         return false;
 
-    if (!IsCacheableScopeChain(scopeChain, obj))
+    if (!IsCacheableEnvironmentChain(envChain, obj))
         return false;
 
     return IsCacheableGetPropCallNative(obj, holder, shape) ||
@@ -4942,7 +4943,7 @@ IsCacheableNameCallGetter(HandleObject scopeChain, HandleObject obj, HandleObjec
 
 bool
 NameIC::attachTypeOfNoProperty(JSContext* cx, HandleScript outerScript, IonScript* ion,
-                               HandleObject scopeChain)
+                               HandleObject envChain)
 {
     MacroAssembler masm(cx, ion, outerScript, profilerLeavePc_);
     Label failures;
@@ -4950,13 +4951,13 @@ NameIC::attachTypeOfNoProperty(JSContext* cx, HandleScript outerScript, IonScrip
 
     Register scratchReg = outputReg().valueReg().scratchReg();
 
-    masm.movePtr(scopeChainReg(), scratchReg);
+    masm.movePtr(environmentChainReg(), scratchReg);
 
-    // Generate scope chain guards.
+    // Generate env chain guards.
     // Since the property was not defined on any object, iterate until reaching the global.
-    JSObject* tobj = scopeChain;
+    JSObject* tobj = envChain;
     while (true) {
-        GenerateScopeChainGuard(masm, tobj, scratchReg, nullptr, &failures);
+        GenerateEnvironmentChainGuard(masm, tobj, scratchReg, nullptr, &failures);
 
         if (tobj->is<GlobalObject>())
             break;
@@ -4977,14 +4978,14 @@ NameIC::attachTypeOfNoProperty(JSContext* cx, HandleScript outerScript, IonScrip
 }
 
 static bool
-IsCacheableNameNoProperty(HandleObject scopeChain, HandleObject obj,
+IsCacheableNameNoProperty(HandleObject envChain, HandleObject obj,
                           HandleObject holder, HandleShape shape, jsbytecode* pc,
                           NameIC& cache)
 {
     if (cache.isTypeOf() && !shape) {
         MOZ_ASSERT(!obj);
         MOZ_ASSERT(!holder);
-        MOZ_ASSERT(scopeChain);
+        MOZ_ASSERT(envChain);
 
         // Assert those extra things checked by IsCacheableNoProperty().
         MOZ_ASSERT(cache.outputReg().hasValue());
@@ -4997,7 +4998,7 @@ IsCacheableNameNoProperty(HandleObject scopeChain, HandleObject obj,
 }
 
 bool
-NameIC::update(JSContext* cx, HandleScript outerScript, size_t cacheIndex, HandleObject scopeChain,
+NameIC::update(JSContext* cx, HandleScript outerScript, size_t cacheIndex, HandleObject envChain,
                MutableHandleValue vp)
 {
     IonScript* ion = outerScript->ionScript();
@@ -5012,7 +5013,7 @@ NameIC::update(JSContext* cx, HandleScript outerScript, size_t cacheIndex, Handl
     RootedObject obj(cx);
     RootedObject holder(cx);
     RootedShape shape(cx);
-    if (!LookupName(cx, name, scopeChain, &obj, &holder, &shape))
+    if (!LookupName(cx, name, envChain, &obj, &holder, &shape))
         return false;
 
     // Look first. Don't generate cache entries if the lookup fails.
@@ -5025,21 +5026,21 @@ NameIC::update(JSContext* cx, HandleScript outerScript, size_t cacheIndex, Handl
     }
 
     if (cache.canAttachStub()) {
-        if (IsCacheableNameReadSlot(scopeChain, obj, holder, shape, pc, cache.outputReg())) {
-            if (!cache.attachReadSlot(cx, outerScript, ion, scopeChain, obj,
+        if (IsCacheableNameReadSlot(envChain, obj, holder, shape, pc, cache.outputReg())) {
+            if (!cache.attachReadSlot(cx, outerScript, ion, envChain, obj,
                                       holder.as<NativeObject>(), shape))
             {
                 return false;
             }
-        } else if (IsCacheableNameCallGetter(scopeChain, obj, holder, shape)) {
+        } else if (IsCacheableNameCallGetter(envChain, obj, holder, shape)) {
             void* returnAddr = GetReturnAddressToIonCode(cx);
-            if (!cache.attachCallGetter(cx, outerScript, ion, scopeChain, obj, holder, shape,
+            if (!cache.attachCallGetter(cx, outerScript, ion, envChain, obj, holder, shape,
                                         returnAddr))
             {
                 return false;
             }
-        } else if (IsCacheableNameNoProperty(scopeChain, obj, holder, shape, pc, cache)) {
-            if (!cache.attachTypeOfNoProperty(cx, outerScript, ion, scopeChain))
+        } else if (IsCacheableNameNoProperty(envChain, obj, holder, shape, pc, cache)) {
+            if (!cache.attachTypeOfNoProperty(cx, outerScript, ion, envChain))
                 return false;
         }
     }

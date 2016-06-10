@@ -17,11 +17,11 @@
 namespace js {
 
 inline ClonedBlockObject&
-NearestEnclosingExtensibleLexicalScope(JSObject* scope)
+NearestEnclosingExtensibleLexicalEnvironment(JSObject* env)
 {
-    while (!IsExtensibleLexicalScope(scope))
-        scope = scope->enclosingScope();
-    return scope->as<ClonedBlockObject>();
+    while (!IsExtensibleLexicalEnvironment(env))
+        env = env->enclosingScope();
+    return env->as<ClonedBlockObject>();
 }
 
 inline void
@@ -45,6 +45,39 @@ ScopeObject::setAliasedVar(JSContext* cx, ScopeCoordinate sc, PropertyName* name
     }
 
     setSlot(sc.slot(), v);
+}
+
+inline void
+EnvironmentObject::setAliasedName(JSContext* cx, uint32_t slot, PropertyName* name,
+                                     const Value& v)
+{
+    if (isSingleton()) {
+        MOZ_ASSERT(name);
+        AddTypePropertyId(cx, this, NameToId(name), v);
+
+        // Keep track of properties which have ever been overwritten.
+        if (!getSlot(slot).isUndefined()) {
+            Shape* shape = lookup(cx, name);
+            shape->setOverwritten();
+        }
+    }
+
+    setSlot(slot, v);
+}
+
+inline void
+EnvironmentObject::setAliasedName(JSContext* cx, ScopeCoordinate sc, PropertyName* name,
+                                     const Value& v)
+{
+    setAliasedName(cx, sc.slot(), name, v);
+}
+
+inline void
+EnvironmentObject::setAliasedName(JSContext* cx, const BindingIter& bi, PropertyName* name,
+                                     const Value& v)
+{
+    MOZ_ASSERT(bi.location().kind() == BindingLocation::Kind::Environment);
+    setAliasedName(cx, bi.location().slot(), name, v);
 }
 
 inline void

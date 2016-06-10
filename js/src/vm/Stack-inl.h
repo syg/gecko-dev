@@ -33,7 +33,7 @@ namespace js {
  * see bug 462734 and bug 487039.
  */
 static inline bool
-IsCacheableNonGlobalScope(JSObject* obj)
+IsCacheableNonGlobalEnvironment(JSObject* obj)
 {
     bool cacheable =
         obj->is<CallObject>() || obj->is<ClonedBlockObject>() || obj->is<DeclEnvObject>();
@@ -43,30 +43,30 @@ IsCacheableNonGlobalScope(JSObject* obj)
 }
 
 inline HandleObject
-InterpreterFrame::scopeChain() const
+InterpreterFrame::environmentChain() const
 {
-    return HandleObject::fromMarkedLocation(&scopeChain_);
+    return HandleObject::fromMarkedLocation(&envChain_);
 }
 
 inline GlobalObject&
 InterpreterFrame::global() const
 {
-    return scopeChain()->global();
+    return environmentChain()->global();
 }
 
 inline JSObject&
 InterpreterFrame::varObj() const
 {
-    JSObject* obj = scopeChain();
+    JSObject* obj = environmentChain();
     while (!obj->isQualifiedVarObj())
         obj = obj->enclosingScope();
     return *obj;
 }
 
 inline ClonedBlockObject&
-InterpreterFrame::extensibleLexicalScope() const
+InterpreterFrame::extensibleLexicalEnvironment() const
 {
-    return NearestEnclosingExtensibleLexicalScope(scopeChain());
+    return NearestEnclosingExtensibleLexicalEnvironment(environmentChain());
 }
 
 inline void
@@ -83,7 +83,7 @@ InterpreterFrame::initCallFrame(JSContext* cx, InterpreterFrame* prev, jsbytecod
     argv_ = argv;
     script_ = script;
     nactual_ = nactual;
-    scopeChain_ = callee.environment();
+    envChain_ = callee.environment();
     prev_ = prev;
     prevpc_ = prevpc;
     prevsp_ = prevsp;
@@ -180,33 +180,32 @@ InterpreterFrame::initArgsObj(ArgumentsObject& argsobj)
 }
 
 inline ScopeObject&
-InterpreterFrame::aliasedVarScope(ScopeCoordinate sc) const
+InterpreterFrame::aliasedEnvironment(ScopeCoordinate sc) const
 {
-    JSObject* scope = &scopeChain()->as<ScopeObject>();
+    JSObject* env = &environmentChain()->as<ScopeObject>();
     for (unsigned i = sc.hops(); i; i--)
-        scope = &scope->as<ScopeObject>().enclosingScope();
-    return scope->as<ScopeObject>();
+        env = &env->as<ScopeObject>().enclosingScope();
+    return env->as<ScopeObject>();
 }
 
 inline void
-InterpreterFrame::pushOnScopeChain(ScopeObject& scope)
+InterpreterFrame::pushOnEnvironmentChain(ScopeObject& env)
 {
-    MOZ_ASSERT(*scopeChain() == scope.enclosingScope() ||
-               *scopeChain() == scope.as<CallObject>().enclosingScope().as<DeclEnvObject>().enclosingScope());
-    scopeChain_ = &scope;
+    MOZ_ASSERT(*environmentChain() == env.enclosingScope());
+    envChain_ = &env;
 }
 
 inline void
-InterpreterFrame::popOffScopeChain()
+InterpreterFrame::popOffEnvironmentChain()
 {
-    scopeChain_ = &scopeChain_->as<ScopeObject>().enclosingScope();
+    envChain_ = &envChain_->as<ScopeObject>().enclosingScope();
 }
 
 inline void
-InterpreterFrame::replaceInnermostScope(ScopeObject& scope)
+InterpreterFrame::replaceInnermostEnvironment(ScopeObject& env)
 {
-    MOZ_ASSERT(scope.enclosingScope() == scopeChain_->as<ScopeObject>().enclosingScope());
-    scopeChain_ = &scope;
+    MOZ_ASSERT(env.enclosingScope() == envChain_->as<ScopeObject>().enclosingScope());
+    envChain_ = &env;
 }
 
 bool
@@ -221,7 +220,7 @@ InterpreterFrame::callObj() const
 {
     MOZ_ASSERT(callee().needsCallObject());
 
-    JSObject* pobj = scopeChain();
+    JSObject* pobj = environmentChain();
     while (MOZ_UNLIKELY(!pobj->is<CallObject>()))
         pobj = pobj->enclosingScope();
     return pobj->as<CallObject>();
@@ -340,7 +339,7 @@ InterpreterStack::pushInlineFrame(JSContext* cx, InterpreterRegs& regs, const Ca
 MOZ_ALWAYS_INLINE bool
 InterpreterStack::resumeGeneratorCallFrame(JSContext* cx, InterpreterRegs& regs,
                                            HandleFunction callee, HandleValue newTarget,
-                                           HandleObject scopeChain)
+                                           HandleObject envChain)
 {
     MOZ_ASSERT(callee->isGenerator());
     RootedScript script(cx, callee->getOrCreateScript(cx));
@@ -373,7 +372,7 @@ InterpreterStack::resumeGeneratorCallFrame(JSContext* cx, InterpreterRegs& regs,
     InterpreterFrame* fp = reinterpret_cast<InterpreterFrame*>(argv + nformal + constructing);
     fp->mark_ = mark;
     fp->initCallFrame(cx, prev, prevpc, prevsp, *callee, script, argv, 0, constructing);
-    fp->resumeGeneratorFrame(scopeChain);
+    fp->resumeGeneratorFrame(envChain);
 
     regs.prepareToRun(*fp, script);
     return true;
@@ -441,23 +440,23 @@ AbstractFramePtr::setReturnValue(const Value& rval) const
 }
 
 inline JSObject*
-AbstractFramePtr::scopeChain() const
+AbstractFramePtr::environmentChain() const
 {
     if (isInterpreterFrame())
-        return asInterpreterFrame()->scopeChain();
+        return asInterpreterFrame()->environmentChain();
     if (isBaselineFrame())
-        return asBaselineFrame()->scopeChain();
-    return asRematerializedFrame()->scopeChain();
+        return asBaselineFrame()->environmentChain();
+    return asRematerializedFrame()->environmentChain();
 }
 
 inline void
-AbstractFramePtr::pushOnScopeChain(ScopeObject& scope)
+AbstractFramePtr::pushOnEnvironmentChain(ScopeObject& env)
 {
     if (isInterpreterFrame()) {
-        asInterpreterFrame()->pushOnScopeChain(scope);
+        asInterpreterFrame()->pushOnEnvironmentChain(env);
         return;
     }
-    asBaselineFrame()->pushOnScopeChain(scope);
+    asBaselineFrame()->pushOnEnvironmentChain(env);
 }
 
 inline CallObject&
@@ -471,19 +470,19 @@ AbstractFramePtr::callObj() const
 }
 
 inline bool
-AbstractFramePtr::initFunctionScopeObjects(JSContext* cx)
+AbstractFramePtr::initFunctionEnvironmentObjects(JSContext* cx)
 {
     if (isInterpreterFrame())
-        return asInterpreterFrame()->initFunctionScopeObjects(cx);
+        return asInterpreterFrame()->initFunctionEnvironmentObjects(cx);
     if (isBaselineFrame())
-        return asBaselineFrame()->initFunctionScopeObjects(cx);
-    return asRematerializedFrame()->initFunctionScopeObjects(cx);
+        return asBaselineFrame()->initFunctionEnvironmentObjects(cx);
+    return asRematerializedFrame()->initFunctionEnvironmentObjects(cx);
 }
 
 inline JSCompartment*
 AbstractFramePtr::compartment() const
 {
-    return scopeChain()->compartment();
+    return environmentChain()->compartment();
 }
 
 inline unsigned
@@ -970,10 +969,10 @@ InterpreterActivation::popInlineFrame(InterpreterFrame* frame)
 
 inline bool
 InterpreterActivation::resumeGeneratorFrame(HandleFunction callee, HandleValue newTarget,
-                                            HandleObject scopeChain)
+                                            HandleObject envChain)
 {
     InterpreterStack& stack = cx_->runtime()->interpreterStack();
-    if (!stack.resumeGeneratorCallFrame(cx_, regs_, callee, newTarget, scopeChain))
+    if (!stack.resumeGeneratorCallFrame(cx_, regs_, callee, newTarget, envChain))
         return false;
 
     MOZ_ASSERT(regs_.fp()->script()->compartment() == compartment_);

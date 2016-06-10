@@ -207,7 +207,7 @@
     _(Start)                        \
     _(OsrEntry)                     \
     _(OsrValue)                     \
-    _(OsrScopeChain)                \
+    _(OsrEnvironmentChain)          \
     _(OsrReturnValue)               \
     _(OsrArgumentsObject)           \
     _(RegExp)                       \

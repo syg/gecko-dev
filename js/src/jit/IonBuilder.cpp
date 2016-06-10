@@ -49,14 +49,14 @@ class jit::BaselineFrameInspector
 {
   public:
     TypeSet::Type thisType;
-    JSObject* singletonScopeChain;
+    JSObject* singletonEnvChain;
 
     Vector<TypeSet::Type, 4, JitAllocPolicy> argTypes;
     Vector<TypeSet::Type, 4, JitAllocPolicy> varTypes;
 
     explicit BaselineFrameInspector(TempAllocator* temp)
       : thisType(TypeSet::UndefinedType()),
-        singletonScopeChain(nullptr),
+        singletonEnvChain(nullptr),
         argTypes(*temp),
         varTypes(*temp)
     {}
@@ -78,8 +78,8 @@ jit::NewBaselineFrameInspector(TempAllocator* temp, BaselineFrame* frame, Compil
     if (frame->isFunctionFrame())
         inspector->thisType = TypeSet::GetMaybeUntrackedValueType(frame->thisArgument());
 
-    if (frame->scopeChain()->isSingleton())
-        inspector->singletonScopeChain = frame->scopeChain();
+    if (frame->environmentChain()->isSingleton())
+        inspector->singletonEnvChain = frame->environmentChain();
 
     JSScript* script = frame->script();
 
@@ -820,13 +820,13 @@ IonBuilder::build()
     initParameters();
     initLocals();
 
-    // Initialize something for the scope chain. We can bail out before the
+    // Initialize something for the env chain. We can bail out before the
     // start instruction, but the snapshot is encoded *at* the start
     // instruction, which means generating any code that could load into
     // registers is illegal.
-    MInstruction* scope = MConstant::New(alloc(), UndefinedValue());
-    current->add(scope);
-    current->initSlot(info().scopeChainSlot(), scope);
+    MInstruction* env = MConstant::New(alloc(), UndefinedValue());
+    current->add(env);
+    current->initSlot(info().environmentChainSlot(), env);
 
     // Initialize the return value.
     MInstruction* returnValue = MConstant::New(alloc(), UndefinedValue());
@@ -871,8 +871,8 @@ IonBuilder::build()
         redeclCheck->setResumePoint(entryRpCopy);
     }
 
-    // It's safe to start emitting actual IR, so now build the scope chain.
-    if (!initScopeChain())
+    // It's safe to start emitting actual IR, so now build the env chain.
+    if (!initEnvironmentChain())
         return false;
 
     if (info().needsArgsObj() && !initArgumentsObject())
@@ -1021,10 +1021,11 @@ IonBuilder::buildInline(IonBuilder* callerBuilder, MResumePoint* callerResumePoi
     if (!current->addPredecessorWithoutPhis(predecessor))
         return false;
 
-    // Initialize scope chain slot to Undefined.  It's set later by |initScopeChain|.
-    MInstruction* scope = MConstant::New(alloc(), UndefinedValue());
-    current->add(scope);
-    current->initSlot(info().scopeChainSlot(), scope);
+    // Initialize env chain slot to Undefined.  It's set later by
+    // |initEnvironmentChain|.
+    MInstruction* env = MConstant::New(alloc(), UndefinedValue());
+    current->add(env);
+    current->initSlot(info().environmentChainSlot(), env);
 
     // Initialize |return value| slot.
     MInstruction* returnValue = MConstant::New(alloc(), UndefinedValue());
@@ -1069,7 +1070,7 @@ IonBuilder::buildInline(IonBuilder* callerBuilder, MResumePoint* callerResumePoi
     JitSpew(JitSpew_Inlining, "Inline entry block MResumePoint %p, %u stack slots",
             (void*) current->entryResumePoint(), current->entryResumePoint()->stackDepth());
 
-    // +2 for the scope chain and |this|, maybe another +1 for arguments object slot.
+    // +2 for the env chain and |this|, maybe another +1 for arguments object slot.
     MOZ_ASSERT(current->entryResumePoint()->stackDepth() == info().totalSlots());
 
     if (script_->argumentsHasVarBinding()) {
@@ -1079,9 +1080,9 @@ IonBuilder::buildInline(IonBuilder* callerBuilder, MResumePoint* callerResumePoi
 
     insertRecompileCheck();
 
-    // Initialize the scope chain now that all resume points operands are
+    // Initialize the env chain now that all resume points operands are
     // initialized.
-    if (!initScopeChain(callInfo.fun()))
+    if (!initEnvironmentChain(callInfo.fun()))
         return false;
 
     if (!traverseBytecode())
@@ -1133,7 +1134,7 @@ IonBuilder::rewriteParameter(uint32_t slotIdx, MDefinition* param, int32_t argIn
 void
 IonBuilder::rewriteParameters()
 {
-    MOZ_ASSERT(info().scopeChainSlot() == 0);
+    MOZ_ASSERT(info().environmentChainSlot() == 0);
 
     if (!info().funMaybeLazy())
         return;
@@ -1208,19 +1209,19 @@ IonBuilder::initLocals()
 }
 
 bool
-IonBuilder::initScopeChain(MDefinition* callee)
+IonBuilder::initEnvironmentChain(MDefinition* callee)
 {
-    MInstruction* scope = nullptr;
+    MInstruction* env = nullptr;
 
-    // If the script doesn't use the scopechain, then it's already initialized
-    // from earlier.  However, always make a scope chain when |needsArgsObj| is true
-    // for the script, since arguments object construction requires the scope chain
+    // If the script doesn't use the envchain, then it's already initialized
+    // from earlier.  However, always make a env chain when |needsArgsObj| is true
+    // for the script, since arguments object construction requires the env chain
     // to be passed in.
-    if (!info().needsArgsObj() && !analysis().usesScopeChain())
+    if (!info().needsArgsObj() && !analysis().usesEnvironmentChain())
         return true;
 
-    // The scope chain is only tracked in scripts that have NAME opcodes which
-    // will try to access the scope. For other scripts, the scope instructions
+    // The env chain is only tracked in scripts that have NAME opcodes which
+    // will try to access the env. For other scripts, the env instructions
     // will be held live by resume points and code will still be generated for
     // them, so just use a constant undefined value.
 
@@ -1230,35 +1231,35 @@ IonBuilder::initScopeChain(MDefinition* callee)
             current->add(calleeIns);
             callee = calleeIns;
         }
-        scope = MFunctionEnvironment::New(alloc(), callee);
-        current->add(scope);
+        env = MFunctionEnvironment::New(alloc(), callee);
+        current->add(env);
 
         // This reproduce what is done in CallObject::createForFunction. Skip
         // this for analyses, as the script might not have a baseline script
         // with template objects yet.
         if (fun->needsCallObject() && !info().isAnalysis()) {
             if (fun->isNamedLambda()) {
-                scope = createDeclEnvObject(callee, scope);
-                if (!scope)
+                env = createDeclEnvObject(callee, env);
+                if (!env)
                     return false;
             }
 
-            scope = createCallObject(callee, scope);
-            if (!scope)
+            env = createCallObject(callee, env);
+            if (!env)
                 return false;
         }
     } else if (ModuleObject* module = info().module()) {
-        // Modules use a pre-created scope object.
-        scope = constant(ObjectValue(module->initialEnvironment()));
+        // Modules use a pre-created env object.
+        env = constant(ObjectValue(module->initialEnvironment()));
     } else {
-        // For global scripts without a non-syntactic global scope, the scope
-        // chain is the global lexical scope.
+        // For global scripts without a non-syntactic global scope, the env
+        // chain is the global lexical env.
         MOZ_ASSERT(!script()->isForEval());
         MOZ_ASSERT(!script()->hasNonSyntacticScope());
-        scope = constant(ObjectValue(script()->global().lexicalScope()));
+        env = constant(ObjectValue(script()->global().lexicalScope()));
     }
 
-    current->setScopeChain(scope);
+    current->setEnvironmentChain(env);
     return true;
 }
 
@@ -1268,7 +1269,8 @@ IonBuilder::initArgumentsObject()
     JitSpew(JitSpew_IonMIR, "%s:%" PRIuSIZE " - Emitting code to initialize arguments object! block=%p",
                               script()->filename(), script()->lineno(), current);
     MOZ_ASSERT(info().needsArgsObj());
-    MCreateArgumentsObject* argsObj = MCreateArgumentsObject::New(alloc(), current->scopeChain());
+    MDefinition* env = current->environmentChain();
+    MCreateArgumentsObject* argsObj = MCreateArgumentsObject::New(alloc(), env);
     current->add(argsObj);
     current->setArgumentsObject(argsObj);
     return true;
@@ -1813,7 +1815,7 @@ IonBuilder::inspectOpcode(JSOp op)
       }
 
       case JSOP_CHECKALIASEDLEXICAL:
-        return jsop_checkaliasedlet(ScopeCoordinate(pc));
+        return jsop_checkaliasedlexical(ScopeCoordinate(pc));
 
       case JSOP_INITALIASEDLEXICAL:
         return jsop_setaliasedvar(ScopeCoordinate(pc));
@@ -1957,8 +1959,8 @@ IonBuilder::inspectOpcode(JSOp op)
 
       case JSOP_BINDGNAME:
         if (!script()->hasNonSyntacticScope()) {
-            if (JSObject* scope = testGlobalLexicalBinding(info().getName(pc))) {
-                pushConstant(ObjectValue(*scope));
+            if (JSObject* env = testGlobalLexicalBinding(info().getName(pc))) {
+                pushConstant(ObjectValue(*env));
                 return true;
             }
         }
@@ -2150,8 +2152,8 @@ IonBuilder::inspectOpcode(JSOp op)
       case JSOP_POPBLOCKSCOPE:
         // These opcodes are currently unhandled by Ion, but in principle
         // there's no reason they couldn't be.  Whenever this happens, OSR will
-        // have to consider that JSOP_FRESHENBLOCK mutates the scope chain --
-        // right now it caches the scope chain in MBasicBlock::scopeChain().
+        // have to consider that JSOP_FRESHENBLOCK mutates the env chain --
+        // right now it caches the env chain in MBasicBlock::environmentChain().
         // That stale value will have to be updated when JSOP_FRESHENBLOCK is
         // encountered.
 #endif
@@ -5992,7 +5994,7 @@ IonBuilder::inlineCalls(CallInfo& callInfo, const ObjectVector& targets, BoolVec
 
         // Create a function MConstant to use in the entry ResumePoint. If we
         // can't use a constant, add a no-op MPolyInlineGuard, to prevent
-        // hoisting scope chain gets above the dispatch instruction.
+        // hoisting env chain gets above the dispatch instruction.
         MInstruction* funcDef;
         if (target->isSingleton())
             funcDef = MConstant::New(alloc(), ObjectValue(*target), constraints());
@@ -6170,7 +6172,7 @@ IonBuilder::inlineCalls(CallInfo& callInfo, const ObjectVector& targets, BoolVec
 }
 
 MInstruction*
-IonBuilder::createDeclEnvObject(MDefinition* callee, MDefinition* scope)
+IonBuilder::createDeclEnvObject(MDefinition* callee, MDefinition* env)
 {
     // Get a template CallObject that we'll use to generate inline object
     // creation.
@@ -6189,15 +6191,15 @@ IonBuilder::createDeclEnvObject(MDefinition* callee, MDefinition* scope)
     // Initialize the object's reserved slots. No post barrier is needed here:
     // the object will be allocated in the nursery if possible, and if the
     // tenured heap is used instead, a minor collection will have been performed
-    // that moved scope/callee to the tenured heap.
-    current->add(MStoreFixedSlot::New(alloc(), declEnvObj, DeclEnvObject::enclosingScopeSlot(), scope));
+    // that moved env/callee to the tenured heap.
+    current->add(MStoreFixedSlot::New(alloc(), declEnvObj, DeclEnvObject::enclosingScopeSlot(), env));
     current->add(MStoreFixedSlot::New(alloc(), declEnvObj, DeclEnvObject::lambdaSlot(), callee));
 
     return declEnvObj;
 }
 
 MInstruction*
-IonBuilder::createCallObject(MDefinition* callee, MDefinition* scope)
+IonBuilder::createCallObject(MDefinition* callee, MDefinition* env)
 {
     // Get a template CallObject that we'll use to generate inline object
     // creation.
@@ -6214,7 +6216,7 @@ IonBuilder::createCallObject(MDefinition* callee, MDefinition* scope)
 
     // Initialize the object's reserved slots. No post barrier is needed here,
     // for the same reason as in createDeclEnvObject.
-    current->add(MStoreFixedSlot::New(alloc(), callObj, CallObject::enclosingScopeSlot(), scope));
+    current->add(MStoreFixedSlot::New(alloc(), callObj, CallObject::enclosingScopeSlot(), env));
     current->add(MStoreFixedSlot::New(alloc(), callObj, CallObject::calleeSlot(), callee));
 
     // Initialize argument slots.
@@ -6955,7 +6957,7 @@ IonBuilder::jsop_eval(uint32_t argc)
 
         callInfo.fun()->setImplicitlyUsedUnchecked();
 
-        MDefinition* scopeChain = current->scopeChain();
+        MDefinition* envChain = current->environmentChain();
         MDefinition* string = callInfo.getArg(0);
 
         // Direct eval acts as identity on non-string types according to
@@ -6971,8 +6973,8 @@ IonBuilder::jsop_eval(uint32_t argc)
         MDefinition* newTargetValue = current->pop();
 
         // Try to pattern match 'eval(v + "()")'. In this case v is likely a
-        // name on the scope chain and the eval is performing a call on that
-        // value. Use a dynamic scope chain lookup rather than a full eval.
+        // name on the env chain and the eval is performing a call on that
+        // value. Use an env chain lookup rather than a full eval.
         if (string->isConcat() &&
             string->getOperand(1)->type() == MIRType::String &&
             string->getOperand(1)->maybeConstantValue())
@@ -6981,7 +6983,7 @@ IonBuilder::jsop_eval(uint32_t argc)
 
             if (StringEqualsAscii(atom, "()")) {
                 MDefinition* name = string->getOperand(0);
-                MInstruction* dynamicName = MGetDynamicName::New(alloc(), scopeChain, name);
+                MInstruction* dynamicName = MGetDynamicName::New(alloc(), envChain, name);
                 current->add(dynamicName);
 
                 current->push(dynamicName);
@@ -6995,7 +6997,7 @@ IonBuilder::jsop_eval(uint32_t argc)
             }
         }
 
-        MInstruction* ins = MCallDirectEval::New(alloc(), scopeChain, string,
+        MInstruction* ins = MCallDirectEval::New(alloc(), envChain, string,
                                                  newTargetValue, pc);
         current->add(ins);
         current->push(ins);
@@ -7748,22 +7750,22 @@ IonBuilder::newOsrPreheader(MBasicBlock* predecessor, jsbytecode* loopEntry, jsb
     MOsrEntry* entry = MOsrEntry::New(alloc());
     osrBlock->add(entry);
 
-    // Initialize |scopeChain|.
+    // Initialize |envChain|.
     {
-        uint32_t slot = info().scopeChainSlot();
+        uint32_t slot = info().environmentChainSlot();
 
-        MInstruction* scopev;
-        if (analysis().usesScopeChain()) {
-            scopev = MOsrScopeChain::New(alloc(), entry);
+        MInstruction* envv;
+        if (analysis().usesEnvironmentChain()) {
+            envv = MOsrEnvironmentChain::New(alloc(), entry);
         } else {
-            // Use an undefined value if the script does not need its scope
+            // Use an undefined value if the script does not need its env
             // chain, to match the type that is already being tracked for the
             // slot.
-            scopev = MConstant::New(alloc(), UndefinedValue());
+            envv = MConstant::New(alloc(), UndefinedValue());
         }
 
-        osrBlock->add(scopev);
-        osrBlock->initSlot(slot, scopev);
+        osrBlock->add(envv);
+        osrBlock->initSlot(slot, envv);
     }
     // Initialize |return value|
     {
@@ -7866,7 +7868,7 @@ IonBuilder::newOsrPreheader(MBasicBlock* predecessor, jsbytecode* loopEntry, jsb
     // such as pre-header phi's won't discard specialized type of the
     // predecessor.
     MOZ_ASSERT(predecessor->stackDepth() == osrBlock->stackDepth());
-    MOZ_ASSERT(info().scopeChainSlot() == 0);
+    MOZ_ASSERT(info().environmentChainSlot() == 0);
 
     // Treat the OSR values as having the same type as the existing values
     // coming in to the loop. These will be fixed up with appropriate
@@ -8638,10 +8640,9 @@ IonBuilder::testGlobalLexicalBinding(PropertyName* name)
                JSOp(*pc) == JSOP_SETGNAME ||
                JSOp(*pc) == JSOP_STRICTSETGNAME);
 
-    // The global isn't the global lexical scope's prototype, but its
-    // enclosing scope. Test for the existence of |name| manually on the
-    // global lexical scope. If it is not found, look for it on the global
-    // itself.
+    // The global isn't the global lexical env's prototype, but its enclosing
+    // env. Test for the existence of |name| manually on the global lexical
+    // env. If it is not found, look for it on the global itself.
 
     NativeObject* obj = &script()->global().lexicalScope();
     TypeSet::ObjectKey* lexicalKey = TypeSet::ObjectKey::get(obj);
@@ -8649,7 +8650,7 @@ IonBuilder::testGlobalLexicalBinding(PropertyName* name)
     if (analysisContext)
         lexicalKey->ensureTrackedProperty(analysisContext, id);
 
-    // If the property is not found on the global lexical scope but it is found
+    // If the property is not found on the global lexical env but it is found
     // on the global and is configurable, try to freeze the typeset for its
     // non-existence.  If we don't have type information then fail.
     //
@@ -8723,7 +8724,7 @@ IonBuilder::jsop_getname(PropertyName* name)
         MInstruction* global = constant(ObjectValue(script()->global().lexicalScope()));
         object = global;
     } else {
-        current->push(current->scopeChain());
+        current->push(current->environmentChain());
         object = current->pop();
     }
 
@@ -8815,16 +8816,16 @@ IonBuilder::jsop_getimport(PropertyName* name)
 bool
 IonBuilder::jsop_bindname(PropertyName* name)
 {
-    MDefinition* scopeChain;
-    if (analysis().usesScopeChain()) {
-        scopeChain = current->scopeChain();
+    MDefinition* envChain;
+    if (analysis().usesEnvironmentChain()) {
+        envChain = current->environmentChain();
     } else {
         // We take the slow path when trying to BINDGNAME a name that resolves
         // to a 'const' or an uninitialized binding.
         MOZ_ASSERT(JSOp(*pc) == JSOP_BINDGNAME);
-        scopeChain = constant(ObjectValue(script()->global().lexicalScope()));
+        envChain = constant(ObjectValue(script()->global().lexicalScope()));
     }
-    MBindNameCache* ins = MBindNameCache::New(alloc(), scopeChain, name, script(), pc);
+    MBindNameCache* ins = MBindNameCache::New(alloc(), envChain, name, script(), pc);
 
     current->add(ins);
     current->push(ins);
@@ -8835,8 +8836,8 @@ IonBuilder::jsop_bindname(PropertyName* name)
 bool
 IonBuilder::jsop_bindvar()
 {
-    MOZ_ASSERT(analysis().usesScopeChain());
-    MCallBindVar* ins = MCallBindVar::New(alloc(), current->scopeChain());
+    MOZ_ASSERT(analysis().usesEnvironmentChain());
+    MCallBindVar* ins = MCallBindVar::New(alloc(), current->environmentChain());
     current->add(ins);
     current->push(ins);
     return true;
@@ -13182,7 +13183,7 @@ IonBuilder::jsop_object(JSObject* obj)
 bool
 IonBuilder::jsop_lambda(JSFunction* fun)
 {
-    MOZ_ASSERT(analysis().usesScopeChain());
+    MOZ_ASSERT(analysis().usesEnvironmentChain());
     MOZ_ASSERT(!fun->isArrow());
 
     if (IsAsmJSModule(fun))
@@ -13190,7 +13191,7 @@ IonBuilder::jsop_lambda(JSFunction* fun)
 
     MConstant* cst = MConstant::NewConstraintlessObject(alloc(), fun);
     current->add(cst);
-    MLambda* ins = MLambda::New(alloc(), constraints(), current->scopeChain(), cst);
+    MLambda* ins = MLambda::New(alloc(), constraints(), current->environmentChain(), cst);
     current->add(ins);
     current->push(ins);
 
@@ -13200,12 +13201,12 @@ IonBuilder::jsop_lambda(JSFunction* fun)
 bool
 IonBuilder::jsop_lambda_arrow(JSFunction* fun)
 {
-    MOZ_ASSERT(analysis().usesScopeChain());
+    MOZ_ASSERT(analysis().usesEnvironmentChain());
     MOZ_ASSERT(fun->isArrow());
     MOZ_ASSERT(!fun->isNative());
 
     MDefinition* newTargetDef = current->pop();
-    MLambdaArrow* ins = MLambdaArrow::New(alloc(), constraints(), current->scopeChain(),
+    MLambdaArrow* ins = MLambdaArrow::New(alloc(), constraints(), current->environmentChain(),
                                           newTargetDef, fun);
     current->add(ins);
     current->push(ins);
@@ -13306,11 +13307,11 @@ IonBuilder::jsop_defvar(uint32_t index)
     unsigned attrs = JSPROP_ENUMERATE | JSPROP_PERMANENT;
     MOZ_ASSERT(!script()->isForEval());
 
-    // Pass the ScopeChain.
-    MOZ_ASSERT(analysis().usesScopeChain());
+    // Pass the EnvironmentChain.
+    MOZ_ASSERT(analysis().usesEnvironmentChain());
 
     // Bake the name pointer into the MDefVar.
-    MDefVar* defvar = MDefVar::New(alloc(), name, attrs, current->scopeChain());
+    MDefVar* defvar = MDefVar::New(alloc(), name, attrs, current->environmentChain());
     current->add(defvar);
 
     return resumeAfter(defvar);
@@ -13340,9 +13341,9 @@ IonBuilder::jsop_deffun(uint32_t index)
     if (IsAsmJSModule(fun))
         return abort("asm.js module function");
 
-    MOZ_ASSERT(analysis().usesScopeChain());
+    MOZ_ASSERT(analysis().usesEnvironmentChain());
 
-    MDefFun* deffun = MDefFun::New(alloc(), fun, current->scopeChain());
+    MDefFun* deffun = MDefFun::New(alloc(), fun, current->environmentChain());
     current->add(deffun);
 
     return resumeAfter(deffun);
@@ -13369,7 +13370,7 @@ IonBuilder::jsop_checklexical()
 }
 
 bool
-IonBuilder::jsop_checkaliasedlet(ScopeCoordinate sc)
+IonBuilder::jsop_checkaliasedlexical(ScopeCoordinate sc)
 {
     MDefinition* let = addLexicalCheck(getAliasedVar(sc));
     if (!let)
@@ -13538,17 +13539,17 @@ IonBuilder::jsop_iterend()
 }
 
 MDefinition*
-IonBuilder::walkScopeChain(unsigned hops)
+IonBuilder::walkEnvironmentChain(unsigned hops)
 {
-    MDefinition* scope = current->getSlot(info().scopeChainSlot());
+    MDefinition* env = current->getSlot(info().environmentChainSlot());
 
     for (unsigned i = 0; i < hops; i++) {
-        MInstruction* ins = MEnclosingScope::New(alloc(), scope);
+        MInstruction* ins = MEnclosingEnvironment::New(alloc(), env);
         current->add(ins);
-        scope = ins;
+        env = ins;
     }
 
-    return scope;
+    return env;
 }
 
 bool
@@ -13568,12 +13569,12 @@ IonBuilder::hasStaticScopeObject(ScopeCoordinate sc, JSObject** pcall)
     // compiled in the same manner as a global access. We still need to find
     // the call object though.
 
-    // Look for the call object on the current script's function's scope chain.
+    // Look for the call object on the current script's function's env chain.
     // If the current script is inner to the outer script and the function has
     // singleton type then it should show up here.
 
-    MDefinition* scope = current->getSlot(info().scopeChainSlot());
-    scope->setImplicitlyUsedUnchecked();
+    MDefinition* envDef = current->getSlot(info().environmentChainSlot());
+    envDef->setImplicitlyUsedUnchecked();
 
     JSObject* environment = script()->functionNonDelazifying()->environment();
     while (environment && !environment->is<GlobalObject>()) {
@@ -13594,7 +13595,7 @@ IonBuilder::hasStaticScopeObject(ScopeCoordinate sc, JSObject** pcall)
     // entering the Ion code a different call object will be created.
 
     if (script() == outerScript && baselineFrame_ && info().osrPc()) {
-        JSObject* singletonScope = baselineFrame_->singletonScopeChain;
+        JSObject* singletonScope = baselineFrame_->singletonEnvChain;
         if (singletonScope &&
             singletonScope->is<CallObject>() &&
             singletonScope->as<CallObject>().callee().nonLazyScript() == outerScript)
@@ -13611,7 +13612,7 @@ IonBuilder::hasStaticScopeObject(ScopeCoordinate sc, JSObject** pcall)
 MDefinition*
 IonBuilder::getAliasedVar(ScopeCoordinate sc)
 {
-    MDefinition* obj = walkScopeChain(sc.hops());
+    MDefinition* obj = walkEnvironmentChain(sc.hops());
 
     Shape* shape = ScopeCoordinateToStaticScopeShape(script(), pc);
 
@@ -13640,7 +13641,7 @@ IonBuilder::jsop_getaliasedvar(ScopeCoordinate sc)
             return emitted;
     }
 
-    // See jsop_checkaliasedlet.
+    // See jsop_checkaliasedlexical.
     MDefinition* load = takeLexicalCheck();
     if (!load)
         load = getAliasedVar(sc);
@@ -13673,14 +13674,14 @@ IonBuilder::jsop_setaliasedvar(ScopeCoordinate sc)
 
         // The call object has type information we need to respect but we
         // couldn't find it. Just do a normal property assign.
-        MDefinition* obj = walkScopeChain(sc.hops());
+        MDefinition* obj = walkEnvironmentChain(sc.hops());
         current->push(obj);
         current->push(value);
         return jsop_setprop(name);
     }
 
     MDefinition* rval = current->peek(-1);
-    MDefinition* obj = walkScopeChain(sc.hops());
+    MDefinition* obj = walkEnvironmentChain(sc.hops());
 
     Shape* shape = ScopeCoordinateToStaticScopeShape(script(), pc);
 

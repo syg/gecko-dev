@@ -137,7 +137,7 @@ CheckOverRecursed(JSContext* cx)
 }
 
 // This function can get called in two contexts.  In the usual context, it's
-// called with ealyCheck=false, after the scope chain has been initialized on
+// called with earlyCheck=false, after the env chain has been initialized on
 // a baseline frame.  In this case, it's ok to throw an exception, so a failed
 // stack check returns false, and a successful stack check promps a check for
 // an interrupt from the runtime, which may also cause a false return.
@@ -182,9 +182,9 @@ CheckOverRecursedWithExtra(JSContext* cx, BaselineFrame* frame,
 }
 
 JSObject*
-BindVar(JSContext* cx, HandleObject scopeChain)
+BindVar(JSContext* cx, HandleObject envChain)
 {
-    JSObject* obj = scopeChain;
+    JSObject* obj = envChain;
     while (!obj->isQualifiedVarObj())
         obj = obj->enclosingScope();
     MOZ_ASSERT(obj);
@@ -192,22 +192,23 @@ BindVar(JSContext* cx, HandleObject scopeChain)
 }
 
 bool
-DefVar(JSContext* cx, HandlePropertyName dn, unsigned attrs, HandleObject scopeChain)
+DefVar(JSContext* cx, HandlePropertyName dn, unsigned attrs, HandleObject envChain)
 {
     // Given the ScopeChain, extract the VarObj.
-    RootedObject obj(cx, BindVar(cx, scopeChain));
+    RootedObject obj(cx, BindVar(cx, envChain));
     return DefVarOperation(cx, obj, dn, attrs);
 }
 
 bool
-DefLexical(JSContext* cx, HandlePropertyName dn, unsigned attrs, HandleObject scopeChain)
+DefLexical(JSContext* cx, HandlePropertyName dn, unsigned attrs, HandleObject envChain)
 {
     // Find the extensible lexical scope.
-    Rooted<ClonedBlockObject*> lexical(cx, &NearestEnclosingExtensibleLexicalScope(scopeChain));
+    Rooted<ClonedBlockObject*> lexicalEnv(cx,
+        &NearestEnclosingExtensibleLexicalEnvironment(envChain));
 
     // Find the variables object.
-    RootedObject varObj(cx, BindVar(cx, scopeChain));
-    return DefLexicalOperation(cx, lexical, varObj, dn, attrs);
+    RootedObject varObj(cx, BindVar(cx, envChain));
+    return DefLexicalOperation(cx, lexicalEnv, varObj, dn, attrs);
 }
 
 bool
@@ -564,9 +565,9 @@ CreateThis(JSContext* cx, HandleObject callee, HandleObject newTarget, MutableHa
 }
 
 void
-GetDynamicName(JSContext* cx, JSObject* scopeChain, JSString* str, Value* vp)
+GetDynamicName(JSContext* cx, JSObject* envChain, JSString* str, Value* vp)
 {
-    // Lookup a string on the scope chain, returning either the value found or
+    // Lookup a string on the env chain, returning either the value found or
     // undefined through rval. This function is infallible, and cannot GC or
     // invalidate.
 
@@ -589,7 +590,7 @@ GetDynamicName(JSContext* cx, JSObject* scopeChain, JSString* str, Value* vp)
     Shape* shape = nullptr;
     JSObject* scope = nullptr;
     JSObject* pobj = nullptr;
-    if (LookupNameNoGC(cx, atom->asPropertyName(), scopeChain, &scope, &pobj, &shape)) {
+    if (LookupNameNoGC(cx, atom->asPropertyName(), envChain, &scope, &pobj, &shape)) {
         if (FetchNameNoGC(pobj, shape, MutableHandleValue::fromMarkedLocation(vp)))
             return;
     }
@@ -713,7 +714,7 @@ DebugEpilogue(JSContext* cx, BaselineFrame* frame, jsbytecode* pc, bool ok)
         MOZ_ASSERT_IF(ok, frame->hasReturnValue());
         DebugScopes::onPopCall(frame, cx);
     } else if (frame->isStrictEvalFrame()) {
-        MOZ_ASSERT_IF(frame->hasCallObj(), frame->scopeChain()->as<CallObject>().isForEval());
+        MOZ_ASSERT_IF(frame->hasCallObj(), frame->environmentChain()->as<CallObject>().isForEval());
         DebugScopes::onPopStrictEvalScope(frame);
     }
 
@@ -835,11 +836,11 @@ GeneratorThrowOrClose(JSContext* cx, BaselineFrame* frame, Handle<GeneratorObjec
 }
 
 bool
-InitGlobalOrEvalScopeObjects(JSContext* cx, BaselineFrame* frame)
+InitGlobalOrEvalEnvironmentObjects(JSContext* cx, BaselineFrame* frame)
 {
     RootedScript script(cx, frame->script());
-    RootedObject scopeChain(cx, frame->scopeChain());
-    RootedObject varObj(cx, BindVar(cx, scopeChain));
+    RootedObject envChain(cx, frame->environmentChain());
+    RootedObject varObj(cx, BindVar(cx, envChain));
 
     if (script->isForEval()) {
         // Strict eval needs its own call object.
@@ -847,16 +848,16 @@ InitGlobalOrEvalScopeObjects(JSContext* cx, BaselineFrame* frame)
         // Non-strict eval may introduce 'var' bindings that conflict with
         // lexical bindings in an enclosing lexical scope.
         if (script->strict()) {
-            if (!frame->initStrictEvalScopeObjects(cx))
+            if (!frame->initStrictEvalEnvironmentObjects(cx))
                 return false;
         } else {
-            if (!CheckEvalDeclarationConflicts(cx, script, scopeChain, varObj))
+            if (!CheckEvalDeclarationConflicts(cx, script, envChain, varObj))
                 return false;
         }
     } else {
-        Rooted<ClonedBlockObject*> lexicalScope(cx,
-            &NearestEnclosingExtensibleLexicalScope(scopeChain));
-        if (!CheckGlobalDeclarationConflicts(cx, script, lexicalScope, varObj))
+        Rooted<ClonedBlockObject*> lexicalEnv(cx,
+            &NearestEnclosingExtensibleLexicalEnvironment(envChain));
+        if (!CheckGlobalDeclarationConflicts(cx, script, lexicalEnv, varObj))
             return false;
     }
 
@@ -871,9 +872,9 @@ GlobalNameConflictsCheckFromIon(JSContext* cx, HandleScript script)
 }
 
 bool
-InitFunctionScopeObjects(JSContext* cx, BaselineFrame* frame)
+InitFunctionEnvironmentObjects(JSContext* cx, BaselineFrame* frame)
 {
-    return frame->initFunctionScopeObjects(cx);
+    return frame->initFunctionEnvironmentObjects(cx);
 }
 
 bool

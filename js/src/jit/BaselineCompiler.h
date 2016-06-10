@@ -299,7 +299,7 @@ class BaselineCompiler : public BaselineCompilerSpecific
     void emitProfilerEnterFrame();
     void emitProfilerExitFrame();
 
-    MOZ_MUST_USE bool initScopeChain();
+    MOZ_MUST_USE bool initEnvironmentChain();
 
     void storeValue(const StackValue* source, const Address& dest,
                     const ValueOperand& scratch);

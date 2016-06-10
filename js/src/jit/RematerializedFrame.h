@@ -50,7 +50,7 @@ class RematerializedFrame
     unsigned numActualArgs_;
 
     JSScript* script_;
-    JSObject* scopeChain_;
+    JSObject* envChain_;
     JSFunction* callee_;
     ArgumentsObject* argsObj_;
 
@@ -117,11 +117,11 @@ class RematerializedFrame
         return frameNo_ > 0;
     }
 
-    JSObject* scopeChain() const {
-        return scopeChain_;
+    JSObject* environmentChain() const {
+        return envChain_;
     }
-    void pushOnScopeChain(ScopeObject& scope);
-    bool initFunctionScopeObjects(JSContext* cx);
+    void pushOnEnvironmentChain(ScopeObject& env);
+    bool initFunctionEnvironmentObjects(JSContext* cx);
 
     bool hasCallObj() const {
         MOZ_ASSERT(callee()->needsCallObject());

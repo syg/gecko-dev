@@ -340,7 +340,7 @@ class IonBuilder
     void initLocals();
     void rewriteParameter(uint32_t slotIdx, MDefinition* param, int32_t argIndex);
     void rewriteParameters();
-    MOZ_MUST_USE bool initScopeChain(MDefinition* callee = nullptr);
+    MOZ_MUST_USE bool initEnvironmentChain(MDefinition* callee = nullptr);
     MOZ_MUST_USE bool initArgumentsObject();
     void pushConstant(const Value& v);
 
@@ -391,10 +391,10 @@ class IonBuilder
     MDefinition* createThisScriptedSingleton(JSFunction* target, MDefinition* callee);
     MDefinition* createThisScriptedBaseline(MDefinition* callee);
     MDefinition* createThis(JSFunction* target, MDefinition* callee, MDefinition* newTarget);
-    MInstruction* createDeclEnvObject(MDefinition* callee, MDefinition* scopeObj);
-    MInstruction* createCallObject(MDefinition* callee, MDefinition* scopeObj);
+    MInstruction* createDeclEnvObject(MDefinition* callee, MDefinition* envObj);
+    MInstruction* createCallObject(MDefinition* callee, MDefinition* envObj);
 
-    MDefinition* walkScopeChain(unsigned hops);
+    MDefinition* walkEnvironmentChain(unsigned hops);
 
     MInstruction* addConvertElementsToDoubles(MDefinition* elements);
     MDefinition* addMaybeCopyElementsForWrite(MDefinition* object, bool checkNative);
@@ -701,7 +701,7 @@ class IonBuilder
     MOZ_MUST_USE bool jsop_notearg();
     MOZ_MUST_USE bool jsop_throwsetconst();
     MOZ_MUST_USE bool jsop_checklexical();
-    MOZ_MUST_USE bool jsop_checkaliasedlet(ScopeCoordinate sc);
+    MOZ_MUST_USE bool jsop_checkaliasedlexical(ScopeCoordinate sc);
     MOZ_MUST_USE bool jsop_funcall(uint32_t argc);
     MOZ_MUST_USE bool jsop_funapply(uint32_t argc);
     MOZ_MUST_USE bool jsop_funapplyarguments(uint32_t argc);

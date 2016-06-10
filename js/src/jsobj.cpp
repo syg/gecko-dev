@@ -2157,16 +2157,16 @@ js::LookupProperty(JSContext* cx, HandleObject obj, js::HandleId id,
 }
 
 bool
-js::LookupName(JSContext* cx, HandlePropertyName name, HandleObject scopeChain,
+js::LookupName(JSContext* cx, HandlePropertyName name, HandleObject envChain,
                MutableHandleObject objp, MutableHandleObject pobjp, MutableHandleShape propp)
 {
     RootedId id(cx, NameToId(name));
 
-    for (RootedObject scope(cx, scopeChain); scope; scope = scope->enclosingScope()) {
-        if (!LookupProperty(cx, scope, id, pobjp, propp))
+    for (RootedObject env(cx, envChain); env; env = env->enclosingScope()) {
+        if (!LookupProperty(cx, env, id, pobjp, propp))
             return false;
         if (propp) {
-            objp.set(scope);
+            objp.set(env);
             return true;
         }
     }
@@ -2178,20 +2178,20 @@ js::LookupName(JSContext* cx, HandlePropertyName name, HandleObject scopeChain,
 }
 
 bool
-js::LookupNameNoGC(JSContext* cx, PropertyName* name, JSObject* scopeChain,
+js::LookupNameNoGC(JSContext* cx, PropertyName* name, JSObject* envChain,
                    JSObject** objp, JSObject** pobjp, Shape** propp)
 {
     AutoAssertNoException nogc(cx);
 
     MOZ_ASSERT(!*objp && !*pobjp && !*propp);
 
-    for (JSObject* scope = scopeChain; scope; scope = scope->enclosingScope()) {
-        if (scope->getOpsLookupProperty())
+    for (JSObject* env = envChain; env; env = env->enclosingScope()) {
+        if (env->getOpsLookupProperty())
             return false;
-        if (!LookupPropertyInline<NoGC>(cx, &scope->as<NativeObject>(), NameToId(name), pobjp, propp))
+        if (!LookupPropertyInline<NoGC>(cx, &env->as<NativeObject>(), NameToId(name), pobjp, propp))
             return false;
         if (*propp) {
-            *objp = scope;
+            *objp = env;
             return true;
         }
     }
@@ -2200,7 +2200,7 @@ js::LookupNameNoGC(JSContext* cx, PropertyName* name, JSObject* scopeChain,
 }
 
 bool
-js::LookupNameWithGlobalDefault(JSContext* cx, HandlePropertyName name, HandleObject scopeChain,
+js::LookupNameWithGlobalDefault(JSContext* cx, HandlePropertyName name, HandleObject envChain,
                                 MutableHandleObject objp)
 {
     RootedId id(cx, NameToId(name));
@@ -2208,20 +2208,20 @@ js::LookupNameWithGlobalDefault(JSContext* cx, HandlePropertyName name, HandleOb
     RootedObject pobj(cx);
     RootedShape shape(cx);
 
-    RootedObject scope(cx, scopeChain);
-    for (; !scope->is<GlobalObject>(); scope = scope->enclosingScope()) {
-        if (!LookupProperty(cx, scope, id, &pobj, &shape))
+    RootedObject env(cx, envChain);
+    for (; !env->is<GlobalObject>(); env = env->enclosingScope()) {
+        if (!LookupProperty(cx, env, id, &pobj, &shape))
             return false;
         if (shape)
             break;
     }
 
-    objp.set(scope);
+    objp.set(env);
     return true;
 }
 
 bool
-js::LookupNameUnqualified(JSContext* cx, HandlePropertyName name, HandleObject scopeChain,
+js::LookupNameUnqualified(JSContext* cx, HandlePropertyName name, HandleObject envChain,
                           MutableHandleObject objp)
 {
     RootedId id(cx, NameToId(name));
@@ -2229,29 +2229,29 @@ js::LookupNameUnqualified(JSContext* cx, HandlePropertyName name, HandleObject s
     RootedObject pobj(cx);
     RootedShape shape(cx);
 
-    RootedObject scope(cx, scopeChain);
-    for (; !scope->isUnqualifiedVarObj(); scope = scope->enclosingScope()) {
-        if (!LookupProperty(cx, scope, id, &pobj, &shape))
+    RootedObject env(cx, envChain);
+    for (; !env->isUnqualifiedVarObj(); env = env->enclosingScope()) {
+        if (!LookupProperty(cx, env, id, &pobj, &shape))
             return false;
         if (shape)
             break;
     }
 
     // See note above RuntimeLexicalErrorObject.
-    if (pobj == scope) {
-        if (name != cx->names().dotThis && IsUninitializedLexicalSlot(scope, shape)) {
-            scope = RuntimeLexicalErrorObject::create(cx, scope, JSMSG_UNINITIALIZED_LEXICAL);
-            if (!scope)
+    if (pobj == env) {
+        if (name != cx->names().dotThis && IsUninitializedLexicalSlot(env, shape)) {
+            env = RuntimeLexicalErrorObject::create(cx, env, JSMSG_UNINITIALIZED_LEXICAL);
+            if (!env)
                 return false;
-        } else if (scope->is<ScopeObject>() && !scope->is<DeclEnvObject>() && !shape->writable()) {
+        } else if (env->is<ScopeObject>() && !env->is<DeclEnvObject>() && !shape->writable()) {
             MOZ_ASSERT(name != cx->names().dotThis);
-            scope = RuntimeLexicalErrorObject::create(cx, scope, JSMSG_BAD_CONST_ASSIGN);
-            if (!scope)
+            env = RuntimeLexicalErrorObject::create(cx, env, JSMSG_BAD_CONST_ASSIGN);
+            if (!env)
                 return false;
         }
     }
 
-    objp.set(scope);
+    objp.set(env);
     return true;
 }
 
@@ -3624,7 +3624,7 @@ js::DumpInterpreterFrame(JSContext* cx, InterpreterFrame* start)
             fprintf(stderr, " eval");
         fputc('\n', stderr);
 
-        fprintf(stderr, "  scopeChain: (JSObject*) %p\n", (void*) i.scopeChain(cx));
+        fprintf(stderr, "  envChain: (JSObject*) %p\n", (void*) i.environmentChain(cx));
 
         fputc('\n', stderr);
     }

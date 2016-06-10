@@ -659,8 +659,8 @@ bool GeneratorThrowOrClose(JSContext* cx, BaselineFrame* frame, Handle<Generator
                            HandleValue arg, uint32_t resumeKind);
 
 bool GlobalNameConflictsCheckFromIon(JSContext* cx, HandleScript script);
-bool InitGlobalOrEvalScopeObjects(JSContext* cx, BaselineFrame* frame);
-bool InitFunctionScopeObjects(JSContext* cx, BaselineFrame* frame);
+bool InitGlobalOrEvalEnvironmentObjects(JSContext* cx, BaselineFrame* frame);
+bool InitFunctionEnvironmentObjects(JSContext* cx, BaselineFrame* frame);
 
 bool NewArgumentsObject(JSContext* cx, BaselineFrame* frame, MutableHandleValue res);
 
