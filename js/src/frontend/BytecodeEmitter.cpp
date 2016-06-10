@@ -5249,6 +5249,20 @@ BytecodeEmitter::emitHoistedFunctionsInList(ParseNode* list)
     return true;
 }
 
+bool
+BytecodeEmitter::emitLexicalScopeBody(ParseNode* body)
+{
+    if (body->isKind(PNK_STATEMENTLIST) && body->pn_xflags & PNX_FUNCDEFS) {
+        // This block contains function statements whose definitions are
+        // hoisted to the top of the block. Emit these as a separate pass
+        // before the rest of the block.
+        if (!emitHoistedFunctionsInList(body))
+            return false;
+    }
+
+    return emitTree(body);
+}
+
 // Using MOZ_NEVER_INLINE in here is a workaround for llvm.org/pr14047. See
 // the comment on emitSwitch.
 MOZ_NEVER_INLINE bool
@@ -5260,28 +5274,17 @@ BytecodeEmitter::emitLexicalScope(ParseNode* pn)
 
     ParseNode* body = pn->scopeBody();
     if (pn->isEmptyScope())
-        return emitTree(body);
+        return emitLexicalScopeBody(body);
 
     EmitterScope emitterScope(this);
     ScopeKind kind = body->isKind(PNK_CATCH) ? ScopeKind::Catch : ScopeKind::Lexical;
     if (!emitterScope.enterLexical(this, kind, pn->scopeBindings()))
         return false;
 
-    if (body->isKind(PNK_STATEMENTLIST) && body->pn_xflags & PNX_FUNCDEFS) {
-        // This block contains function statements whose definitions are
-        // hoisted to the top of the block. Emit these as a separate pass
-        // before the rest of the block.
-        if (!emitHoistedFunctionsInList(body))
-            return false;
-    }
-
-    if (!emitTree(body))
+    if (!emitLexicalScopeBody(body))
         return false;
 
-    if (!emitterScope.leave(this))
-        return false;
-
-    return true;
+    return emitterScope.leave(this);
 }
 
 bool
@@ -5297,10 +5300,7 @@ BytecodeEmitter::emitWith(ParseNode* pn)
     if (!emitTree(pn->pn_right))
         return false;
 
-    if (!emitterScope.leave(this))
-        return false;
-
-    return true;
+    return emitterScope.leave(this);
 }
 
 bool
