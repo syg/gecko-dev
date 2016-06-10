@@ -12,6 +12,7 @@ VM:
     - WithObject
   - hook new scopes in
   - use scope notes to find param defaults scope when direct evaling
+  - fix decompiling
 
 XDR
 Debugger scopes
