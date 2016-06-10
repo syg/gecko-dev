@@ -7197,7 +7197,7 @@ DebuggerArguments_getArg(JSContext* cx, unsigned argc, Value* vp)
         if (unsigned(i) < frame.numFormalArgs()) {
             for (ClosedOverArgumentSlotIter fi(script); fi; fi++) {
                 if (fi.argumentSlot() == unsigned(i)) {
-                    arg = frame.callObj().aliasedVar(fi);
+                    arg = frame.callObj().aliasedBinding(fi);
                     break;
                 }
             }

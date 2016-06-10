@@ -6216,7 +6216,7 @@ IonBuilder::createCallObject(MDefinition* callee, MDefinition* env)
 
     // Initialize the object's reserved slots. No post barrier is needed here,
     // for the same reason as in createDeclEnvObject.
-    current->add(MStoreFixedSlot::New(alloc(), callObj, CallObject::enclosingScopeSlot(), env));
+    current->add(MStoreFixedSlot::New(alloc(), callObj, CallObject::enclosingEnvironmentSlot(), env));
     current->add(MStoreFixedSlot::New(alloc(), callObj, CallObject::calleeSlot(), callee));
 
     // Initialize argument slots.

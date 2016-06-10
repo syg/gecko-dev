@@ -127,6 +127,7 @@ class BaselineFrame
     }
 
     inline void pushOnEnvironmentChain(ScopeObject& env);
+    inline void pushOnEnvironmentChain(EnvironmentObject& env);
     inline void popOffEnvironmentChain();
     inline void replaceInnermostEnvironment(ScopeObject& env);
 

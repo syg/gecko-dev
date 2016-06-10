@@ -196,6 +196,13 @@ InterpreterFrame::pushOnEnvironmentChain(ScopeObject& env)
 }
 
 inline void
+InterpreterFrame::pushOnEnvironmentChain(EnvironmentObject& env)
+{
+    MOZ_ASSERT(*environmentChain() == env.enclosingEnvironment());
+    envChain_ = &env;
+}
+
+inline void
 InterpreterFrame::popOffEnvironmentChain()
 {
     envChain_ = &envChain_->as<ScopeObject>().enclosingScope();
@@ -451,6 +458,16 @@ AbstractFramePtr::environmentChain() const
 
 inline void
 AbstractFramePtr::pushOnEnvironmentChain(ScopeObject& env)
+{
+    if (isInterpreterFrame()) {
+        asInterpreterFrame()->pushOnEnvironmentChain(env);
+        return;
+    }
+    asBaselineFrame()->pushOnEnvironmentChain(env);
+}
+
+inline void
+AbstractFramePtr::pushOnEnvironmentChain(EnvironmentObject& env)
 {
     if (isInterpreterFrame()) {
         asInterpreterFrame()->pushOnEnvironmentChain(env);

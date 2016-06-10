@@ -48,7 +48,7 @@ ScopeObject::setAliasedVar(JSContext* cx, ScopeCoordinate sc, PropertyName* name
 }
 
 inline void
-EnvironmentObject::setAliasedName(JSContext* cx, uint32_t slot, PropertyName* name,
+EnvironmentObject::setAliasedBinding(JSContext* cx, uint32_t slot, PropertyName* name,
                                      const Value& v)
 {
     if (isSingleton()) {
@@ -66,18 +66,17 @@ EnvironmentObject::setAliasedName(JSContext* cx, uint32_t slot, PropertyName* na
 }
 
 inline void
-EnvironmentObject::setAliasedName(JSContext* cx, ScopeCoordinate sc, PropertyName* name,
+EnvironmentObject::setAliasedBinding(JSContext* cx, ScopeCoordinate sc, PropertyName* name,
                                      const Value& v)
 {
-    setAliasedName(cx, sc.slot(), name, v);
+    setAliasedBinding(cx, sc.slot(), name, v);
 }
 
 inline void
-EnvironmentObject::setAliasedName(JSContext* cx, const BindingIter& bi, PropertyName* name,
-                                     const Value& v)
+EnvironmentObject::setAliasedBinding(JSContext* cx, const BindingIter& bi, const Value& v)
 {
     MOZ_ASSERT(bi.location().kind() == BindingLocation::Kind::Environment);
-    setAliasedName(cx, bi.location().slot(), name, v);
+    setAliasedBinding(cx, bi.location().slot(), bi.name()->asPropertyName(), v);
 }
 
 inline void
@@ -92,6 +91,15 @@ LexicalScopeBase::setAliasedVar(JSContext* cx, const BindingIter& bi, const Valu
 inline void
 LexicalScopeBase::setAliasedVarFromArguments(JSContext* cx, const Value& argsValue, jsid id,
                                              const Value& v)
+{
+    setSlot(ArgumentsObject::SlotFromMagicScopeSlotValue(argsValue), v);
+    if (isSingleton())
+        AddTypePropertyId(cx, this, id, v);
+}
+
+inline void
+CallObject::setAliasedFormalFromArguments(JSContext* cx, const Value& argsValue, jsid id,
+                                          const Value& v)
 {
     setSlot(ArgumentsObject::SlotFromMagicScopeSlotValue(argsValue), v);
     if (isSingleton())

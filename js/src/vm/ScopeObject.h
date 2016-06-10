@@ -653,49 +653,52 @@ class ScopeObject : public NativeObject
 class EnvironmentObject : public NativeObject
 {
   protected:
-    void init(Scope* scope, JSObject* enclosing);
-
-    inline void setAliasedName(JSContext* cx, uint32_t slot, PropertyName* name,
-                               const Value& v);
-
-  public:
     // The enclosing environment. Either another EnvironmentObject, a
     // GlobalObject, or a non-syntactic environment object.
     static const uint32_t ENCLOSING_ENV_SLOT = 0;
 
-    // Since every scope chain terminates with a global object, whether
+    inline void setAliasedBinding(JSContext* cx, uint32_t slot, PropertyName* name,
+                               const Value& v);
+
+  public:
+    // Since every env chain terminates with a global object, whether
     // GlobalObject or a non-syntactic one, and since those objects do not
-    // derive ScopeObject (they have completely different layouts), the
+    // derive EnvironmentObject (they have completely different layouts), the
     // enclosing environment of an EnvironmentObject is necessarily non-null.
     JSObject& enclosingEnvironment() const {
         return getFixedSlot(ENCLOSING_ENV_SLOT).toObject();
     }
 
-    Scope& scope() const {
-        return *static_cast<Scope*>(getPrivate());
+    void initEnclosingEnvironment(JSObject* enclosing) {
+        initFixedSlot(ENCLOSING_ENV_SLOT, ObjectOrNullValue(enclosing));
     }
 
     // Get or set a name contained in this environment.
-    const Value& closedOverName(ScopeCoordinate sc) {
+    const Value& aliasedBinding(ScopeCoordinate sc) {
         return getSlot(sc.slot());
     }
 
-    const Value& closedOverName(const BindingIter& bi) {
+    const Value& aliasedBinding(const BindingIter& bi) {
         MOZ_ASSERT(bi.location().kind() == BindingLocation::Kind::Environment);
         return getSlot(bi.location().slot());
     }
 
-    inline void setAliasedName(JSContext* cx, ScopeCoordinate sc, PropertyName* name,
-                               const Value& v);
+    inline void setAliasedBinding(JSContext* cx, ScopeCoordinate sc, PropertyName* name,
+                                  const Value& v);
 
-    inline void setAliasedName(JSContext* cx, const BindingIter& bi, PropertyName* name,
-                               const Value& v);
+    inline void setAliasedBinding(JSContext* cx, const BindingIter& bi, const Value& v);
 
     // For JITs.
     static size_t offsetOfEnclosingEnvironment() {
         return getFixedSlotOffset(ENCLOSING_ENV_SLOT);
     }
+
+    static uint32_t enclosingEnvironmentSlot() {
+        return ENCLOSING_ENV_SLOT;
+    }
 };
+
+class VarEnvironmentObject : public EnvironmentObject { };
 
 class LexicalScopeBase : public ScopeObject
 {
@@ -722,13 +725,13 @@ class LexicalScopeBase : public ScopeObject
                                            const Value& v);
 };
 
-class CallObject : public LexicalScopeBase
+class CallObject : public VarEnvironmentObject
 {
   protected:
     static const uint32_t CALLEE_SLOT = 1;
 
-    static CallObject*
-    create(JSContext* cx, HandleScript script, HandleObject enclosing, HandleFunction callee);
+    static CallObject* create(JSContext* cx, HandleScript script, HandleObject enclosing,
+                              HandleFunction callee);
 
   public:
     static const Class class_;
@@ -739,22 +742,21 @@ class CallObject : public LexicalScopeBase
      * Construct a bare-bones call object given a shape and a non-singleton
      * group.  The call object must be further initialized to be usable.
      */
-    static CallObject*
-    create(JSContext* cx, HandleShape shape, HandleObjectGroup group);
+    static CallObject* create(JSContext* cx, HandleShape shape, HandleObjectGroup group);
 
     /*
      * Construct a bare-bones call object given a shape and make it into
      * a singleton.  The call object must be initialized to be usable.
      */
-    static CallObject*
-    createSingleton(JSContext* cx, HandleShape shape);
+    static CallObject* createSingleton(JSContext* cx, HandleShape shape);
 
-    static CallObject*
-    createTemplateObject(JSContext* cx, HandleScript script, gc::InitialHeap heap);
+    static CallObject* createTemplateObject(JSContext* cx, HandleScript script,
+                                            gc::InitialHeap heap);
 
     static const uint32_t RESERVED_SLOTS = 2;
 
-    static CallObject* createForFunction(JSContext* cx, HandleObject enclosing, HandleFunction callee);
+    static CallObject* createForFunction(JSContext* cx, HandleObject enclosing,
+                                         HandleFunction callee);
 
     static CallObject* createForFunction(JSContext* cx, AbstractFramePtr frame);
     static CallObject* createForStrictEval(JSContext* cx, AbstractFramePtr frame);
@@ -769,6 +771,20 @@ class CallObject : public LexicalScopeBase
                       getFixedSlot(CALLEE_SLOT).toObject().is<JSFunction>());
         return getFixedSlot(CALLEE_SLOT).isNull();
     }
+
+    /*
+     * When an aliased formal (var accessed by nested closures) is also
+     * aliased by the arguments object, it must of course exist in one
+     * canonical location and that location is always the CallObject. For this
+     * to work, the ArgumentsObject stores special MagicValue in its array for
+     * forwarded-to- CallObject variables. This MagicValue's payload is the
+     * slot of the CallObject to access.
+     */
+    const Value& aliasedFormalFromArguments(const Value& argsValue) {
+        return getSlot(ArgumentsObject::SlotFromMagicScopeSlotValue(argsValue));
+    }
+    inline void setAliasedFormalFromArguments(JSContext* cx, const Value& argsValue, jsid id,
+                                              const Value& v);
 
     /*
      * Returns the function for which this CallObject was created. (This may
@@ -1260,6 +1276,7 @@ class DebugScopeObject : public ProxyObject
 
   public:
     static DebugScopeObject* create(JSContext* cx, ScopeObject& scope, HandleObject enclosing);
+    static DebugScopeObject* create(JSContext* cx, EnvironmentObject& env, HandleObject enclosing);
 
     ScopeObject& scope() const;
     JSObject& enclosingScope() const;
@@ -1307,9 +1324,10 @@ class DebugScopes
      * removes scopes as they are popped). Thus, two consecutive debugger lazy
      * updates of liveScopes need only fill in the new scopes.
      */
-    typedef GCHashMap<ReadBarriered<ScopeObject*>,
+    // TODOshu switch to EnvironmentObject
+    typedef GCHashMap<ReadBarriered<JSObject*>,
                       LiveScopeVal,
-                      MovableCellHasher<ReadBarriered<ScopeObject*>>,
+                      MovableCellHasher<ReadBarriered<JSObject*>>,
                       RuntimeAllocPolicy> LiveScopeMap;
     LiveScopeMap liveScopes;
     static MOZ_ALWAYS_INLINE void liveScopesPostWriteBarrier(JSRuntime* rt, LiveScopeMap* map,
@@ -1415,6 +1433,20 @@ JSObject::is<js::ScopeObject>() const
            is<js::NestedScopeObject>() ||
            is<js::RuntimeLexicalErrorObject>() ||
            is<js::NonSyntacticVariablesObject>();
+}
+
+template <>
+inline bool
+JSObject::is<js::VarEnvironmentObject>() const
+{
+    return is<js::CallObject>();
+}
+
+template <>
+inline bool
+JSObject::is<js::EnvironmentObject>() const
+{
+    return is<js::VarEnvironmentObject>();
 }
 
 template<>

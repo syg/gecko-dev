@@ -255,19 +255,13 @@ ScopeObject::setEnclosingScope(HandleObject obj)
     setFixedSlot(SCOPE_CHAIN_SLOT, ObjectValue(*obj));
 }
 
-void
-EnvironmentObject::init(Scope* scope, JSObject* enclosing)
-{
-    setPrivate(scope);
-    initFixedSlot(ENCLOSING_ENV_SLOT, ObjectOrNullValue(enclosing));
-}
-
 CallObject*
 CallObject::create(JSContext* cx, HandleShape shape, HandleObjectGroup group)
 {
     MOZ_ASSERT(!group->singleton(),
                "passed a singleton group to create() (use createSingleton() "
                "instead)");
+
     gc::AllocKind kind = gc::GetGCObjectKind(shape->numFixedSlots());
     MOZ_ASSERT(CanBeFinalizedInBackground(kind, &CallObject::class_));
     kind = gc::GetBackgroundAllocKind(kind);
@@ -307,7 +301,9 @@ CallObject::createSingleton(JSContext* cx, HandleShape shape)
 CallObject*
 CallObject::createTemplateObject(JSContext* cx, HandleScript script, gc::InitialHeap heap)
 {
-    RootedShape shape(cx, script->callObjShape());
+    RootedScope scope(cx, script->callObjScope());
+    MOZ_ASSERT(scope);
+    RootedShape shape(cx, scope->environmentShape());
     MOZ_ASSERT(shape->getObjectClass() == &class_);
 
     RootedObjectGroup group(cx, ObjectGroup::defaultNewGroup(cx, &class_, TaggedProto(nullptr)));
@@ -339,7 +335,7 @@ CallObject::create(JSContext* cx, HandleScript script, HandleObject enclosing, H
     if (!callobj)
         return nullptr;
 
-    callobj->setEnclosingScope(enclosing);
+    callobj->initEnclosingEnvironment(enclosing);
     callobj->initFixedSlot(CALLEE_SLOT, ObjectOrNullValue(callee));
 
     if (script->treatAsRunOnce()) {
@@ -355,21 +351,20 @@ CallObject::create(JSContext* cx, HandleScript script, HandleObject enclosing, H
 CallObject*
 CallObject::createForFunction(JSContext* cx, HandleObject enclosing, HandleFunction callee)
 {
-    RootedObject scopeChain(cx, enclosing);
-    MOZ_ASSERT(scopeChain);
+    RootedObject envChain(cx, enclosing);
+    MOZ_ASSERT(envChain);
 
     /*
      * For a named function expression Call's parent points to an environment
      * object holding function's name.
      */
+    RootedScript script(cx, callee->nonLazyScript());
     if (callee->isNamedLambda()) {
-        scopeChain = DeclEnvObject::create(cx, scopeChain, callee);
-        if (!scopeChain)
-            return nullptr;
+        RootedScope declEnvScope(cx, script->outermostScope());
+        // TODOshu make the block env.
     }
 
-    RootedScript script(cx, callee->nonLazyScript());
-    return create(cx, script, scopeChain, callee);
+    return create(cx, script, envChain, callee);
 }
 
 CallObject*
@@ -378,17 +373,23 @@ CallObject::createForFunction(JSContext* cx, AbstractFramePtr frame)
     MOZ_ASSERT(frame.isFunctionFrame());
     assertSameCompartment(cx, frame);
 
-    RootedObject scopeChain(cx, frame.environmentChain());
+    RootedObject envChain(cx, frame.environmentChain());
     RootedFunction callee(cx, frame.callee());
 
-    CallObject* callobj = createForFunction(cx, scopeChain, callee);
+    CallObject* callobj = createForFunction(cx, envChain, callee);
     if (!callobj)
         return nullptr;
 
-    /* Copy in the closed-over formal arguments. */
-    for (ClosedOverArgumentSlotIter fi(frame.script()); fi; fi++) {
-        callobj->setAliasedVar(cx, fi,
-                               frame.unaliasedFormal(fi.argumentSlot(), DONT_CHECK_ALIASING));
+    if (frame.script()->hasDefaults()) {
+        // TODOshu make the defaults env.
+    } else {
+        // If there are no defaults, copy the aliased arguments into the call
+        // object manually.
+
+        for (ClosedOverArgumentSlotIter fi(frame.script()); fi; fi++) {
+            callobj->setAliasedBinding(cx, fi, frame.unaliasedFormal(fi.argumentSlot(),
+                                                                     DONT_CHECK_ALIASING));
+        }
     }
 
     return callobj;
@@ -403,8 +404,8 @@ CallObject::createForStrictEval(JSContext* cx, AbstractFramePtr frame)
 
     RootedFunction callee(cx);
     RootedScript script(cx, frame.script());
-    RootedObject scopeChain(cx, frame.environmentChain());
-    return create(cx, script, scopeChain, callee);
+    RootedObject envChain(cx, frame.environmentChain());
+    return create(cx, script, envChain, callee);
 }
 
 CallObject*
@@ -2410,6 +2411,25 @@ DebugScopeObject::create(JSContext* cx, ScopeObject& scope, HandleObject enclosi
     return debugScope;
 }
 
+/* static */ DebugScopeObject*
+DebugScopeObject::create(JSContext* cx, EnvironmentObject& env, HandleObject enclosing)
+{
+    MOZ_ASSERT(env.compartment() == cx->compartment());
+    MOZ_ASSERT(!enclosing->is<EnvironmentObject>());
+
+    RootedValue priv(cx, ObjectValue(env));
+    JSObject* obj = NewProxyObject(cx, &DebugScopeProxy::singleton, priv,
+                                   nullptr /* proto */);
+    if (!obj)
+        return nullptr;
+
+    DebugScopeObject* debugScope = &obj->as<DebugScopeObject>();
+    debugScope->setExtra(ENCLOSING_EXTRA, ObjectValue(*enclosing));
+    debugScope->setExtra(SNAPSHOT_EXTRA, NullValue());
+
+    return debugScope;
+}
+
 ScopeObject&
 DebugScopeObject::scope() const
 {
@@ -3020,6 +3040,7 @@ GetDebugScopeForMissing(JSContext* cx, const EnvironmentIter& ei)
         if (!callobj)
             return nullptr;
 
+        /* TODOshu
         if (callobj->enclosingScope().is<DeclEnvObject>()) {
             MOZ_ASSERT(CallObjectLambdaName(callobj->callee()));
             DeclEnvObject& declenv = callobj->enclosingScope().as<DeclEnvObject>();
@@ -3027,6 +3048,7 @@ GetDebugScopeForMissing(JSContext* cx, const EnvironmentIter& ei)
             if (!enclosingDebug)
                 return nullptr;
         }
+        */
 
         debugScope = DebugScopeObject::create(cx, *callobj, enclosingDebug);
         break;

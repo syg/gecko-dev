@@ -135,9 +135,15 @@ CopyBindingData(ExclusiveContext* cx, BindingIter& bi, ScopeData* data, size_t d
         bi++;
     data->nextFrameSlot = bi.nextFrameSlot();
 
-    *envShape = CreateEnvironmentShape(cx, freshBi, cls, bi.nextEnvironmentSlot(), baseShapeFlags);
-    if (!*envShape)
-        return nullptr;
+    // Make a new environment shape if any environment slots were used.
+    if (bi.nextEnvironmentSlot() == JSSLOT_FREE(cls)) {
+        *envShape = nullptr;
+    } else {
+        *envShape = CreateEnvironmentShape(cx, freshBi, cls, bi.nextEnvironmentSlot(),
+                                           baseShapeFlags);
+        if (!*envShape)
+            return nullptr;
+    }
 
     return CopyBindingData(cx, data, dataSize);
 }

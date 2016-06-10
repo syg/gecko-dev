@@ -29,6 +29,13 @@ BaselineFrame::pushOnEnvironmentChain(ScopeObject& env)
 }
 
 inline void
+BaselineFrame::pushOnEnvironmentChain(EnvironmentObject& env)
+{
+    MOZ_ASSERT(*environmentChain() == env.enclosingEnvironment());
+    envChain_ = &env;
+}
+
+inline void
 BaselineFrame::popOffEnvironmentChain()
 {
     envChain_ = &envChain_->as<ScopeObject>().enclosingScope();

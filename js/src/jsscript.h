@@ -1006,15 +1006,24 @@ class JSScript : public js::gc::TenuredCell
         return 0;
     }
 
-    inline js::Shape* callObjShape() const {
-        if (bodyScope()->is<js::FunctionScope>())
-            return bodyScope()->as<js::FunctionScope>().environmentShape();
-        if (bodyScope()->is<js::EvalScope>())
-            return bodyScope()->as<js::EvalScope>().environmentShape();
+    js::Shape* callObjShape() const {
+        if (js::Scope* scope = callObjScope())
+            return scope->environmentShape();
         return nullptr;
     }
 
-    inline bool hasAnyAliasedBindings() const {
+    js::Scope* callObjScope() const {
+        js::Scope* scope = bodyScope();
+        if (scope->is<js::FunctionScope>() || scope->is<js::EvalScope>())
+            return scope;
+        return nullptr;
+    }
+
+    bool hasDefaults() const {
+        return bodyScope()->enclosing()->kind() == js::ScopeKind::ParameterDefaults;
+    }
+
+    bool hasAnyAliasedBindings() const {
         return !!callObjShape();
     }
 

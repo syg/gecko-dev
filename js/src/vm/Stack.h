@@ -40,6 +40,7 @@ class InterpreterRegs;
 class CallObject;
 class FrameIter;
 class ScopeObject;
+class EnvironmentObject;
 class ScriptFrameIter;
 class SPSProfiler;
 class InterpreterFrame;
@@ -197,7 +198,8 @@ class AbstractFramePtr
     inline JSObject* environmentChain() const;
     inline CallObject& callObj() const;
     inline bool initFunctionEnvironmentObjects(JSContext* cx);
-    inline void pushOnEnvironmentChain(ScopeObject& environment);
+    inline void pushOnEnvironmentChain(ScopeObject& env);
+    inline void pushOnEnvironmentChain(EnvironmentObject& env);
 
     inline JSCompartment* compartment() const;
 
@@ -550,6 +552,7 @@ class InterpreterFrame
     inline ClonedBlockObject& extensibleLexicalEnvironment() const;
 
     inline void pushOnEnvironmentChain(ScopeObject& env);
+    inline void pushOnEnvironmentChain(EnvironmentObject& env);
     inline void popOffEnvironmentChain();
     inline void replaceInnermostEnvironment(ScopeObject& env);
 
