@@ -81,7 +81,7 @@ IsUninitializedLexical(const Value& val)
 static inline bool
 IsUninitializedLexicalSlot(HandleObject obj, HandleShape shape)
 {
-    if (obj->is<DynamicWithObject>())
+    if (obj->is<WithEnvironmentObject>())
         return false;
     // We check for IsImplicitDenseOrTypedArrayElement even though the shape
     // is always a non-indexed property because proxy hooks may return a
@@ -192,8 +192,8 @@ FetchName(JSContext* cx, HandleObject obj, HandleObject obj2, HandlePropertyName
             return false;
     } else {
         RootedObject normalized(cx, obj);
-        if (normalized->is<DynamicWithObject>() && !shape->hasDefaultGetter())
-            normalized = &normalized->as<DynamicWithObject>().object();
+        if (normalized->is<WithEnvironmentObject>() && !shape->hasDefaultGetter())
+            normalized = &normalized->as<WithEnvironmentObject>().object();
         if (shape->isDataDescriptor() && shape->hasDefaultGetter()) {
             /* Fast path for Object instance properties. */
             MOZ_ASSERT(shape->hasSlot());

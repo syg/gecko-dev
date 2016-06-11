@@ -109,7 +109,7 @@
     macro(JSOP_GETRVAL,   2,  "getrval",    NULL,         1,  0,  1, JOF_BYTE) \
     /*
      * Pops the top of stack value, converts it to an object, and adds a
-     * 'DynamicWithObject' wrapping that object to the scope chain.
+     * 'WithEnvironmentObject' wrapping that object to the scope chain.
      *
      * There is a matching JSOP_LEAVEWITH instruction later. All name
      * lookups between the two that may need to consult the With object

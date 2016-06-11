@@ -403,7 +403,7 @@ template <> struct TypeToRootType<Handle<PlainObject*> > {
 template <> struct TypeToRootType<Handle<LexicalScope*> > {
     static const uint32_t result = VMFunction::RootCell;
 };
-template <> struct TypeToRootType<Handle<StaticWithScope*> > {
+template <> struct TypeToRootType<Handle<WithScope*> > {
     static const uint32_t result = VMFunction::RootCell;
 };
 template <class T> struct TypeToRootType<Handle<T> > {
@@ -671,8 +671,7 @@ bool HandleDebugTrap(JSContext* cx, BaselineFrame* frame, uint8_t* retAddr, bool
 bool OnDebuggerStatement(JSContext* cx, BaselineFrame* frame, jsbytecode* pc, bool* mustReturn);
 bool GlobalHasLiveOnDebuggerStatement(JSContext* cx);
 
-bool EnterWith(JSContext* cx, BaselineFrame* frame, HandleValue val,
-               Handle<StaticWithScope*> templ);
+bool EnterWith(JSContext* cx, BaselineFrame* frame, HandleValue val, Handle<WithScope*> templ);
 bool LeaveWith(JSContext* cx, BaselineFrame* frame);
 
 bool PushBlockScope(JSContext* cx, BaselineFrame* frame, Handle<LexicalScope*> scope);

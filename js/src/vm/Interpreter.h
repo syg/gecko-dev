@@ -513,7 +513,8 @@ unsigned
 GetInitDataPropAttrs(JSOp op);
 
 bool
-EnterWithOperation(JSContext* cx, AbstractFramePtr frame, HandleValue val, HandleObject staticWith);
+EnterWithOperation(JSContext* cx, AbstractFramePtr frame, HandleValue val,
+                   Handle<WithScope*> scope);
 
 
 bool

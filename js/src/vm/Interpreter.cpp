@@ -924,9 +924,8 @@ js::TypeOfValue(const Value& v)
  */
 bool
 js::EnterWithOperation(JSContext* cx, AbstractFramePtr frame, HandleValue val,
-                       HandleObject staticWith)
+                       Handle<WithScope*> scope)
 {
-    MOZ_ASSERT(staticWith->is<StaticWithScope>());
     RootedObject obj(cx);
     if (val.isObject()) {
         obj = &val.toObject();
@@ -937,7 +936,7 @@ js::EnterWithOperation(JSContext* cx, AbstractFramePtr frame, HandleValue val,
     }
 
     RootedObject envChain(cx, frame.environmentChain());
-    DynamicWithObject* withobj = DynamicWithObject::create(cx, obj, envChain, staticWith);
+    WithEnvironmentObject* withobj = WithEnvironmentObject::create(cx, obj, envChain, scope);
     if (!withobj)
         return false;
 
@@ -1505,6 +1504,10 @@ template <>
 class ReservedRootedBase<Value> : public ValueOperations<ReservedRooted<Value>>
 {};
 
+template <>
+class ReservedRootedBase<Scope*> : public ScopeCastOperation<ReservedRooted<Scope*>>
+{};
+
 static MOZ_NEVER_INLINE bool
 Interpret(JSContext* cx, RunState& state)
 {
@@ -1695,7 +1698,7 @@ Interpret(JSContext* cx, RunState& state)
     RootedId rootId0(cx);
     RootedShape rootShape0(cx);
     RootedScript rootScript0(cx);
-    Rooted<LexicalScope*> rootLexicalScope0(cx);
+    Rooted<Scope*> rootScope0(cx);
     DebugOnly<uint32_t> blockDepth;
 
     /* State communicated between non-local jumps: */
@@ -1909,9 +1912,9 @@ CASE(JSOP_ENTERWITH)
 {
     ReservedRooted<Value> val(&rootValue0, REGS.sp[-1]);
     REGS.sp--;
-    ReservedRooted<JSObject*> staticWith(&rootObject0, script->getObject(REGS.pc));
+    ReservedRooted<Scope*> scope(&rootScope0, script->getScope(REGS.pc));
 
-    if (!EnterWithOperation(cx, REGS.fp(), val, staticWith))
+    if (!EnterWithOperation(cx, REGS.fp(), val, scope.as<WithScope>()))
         goto error;
 }
 END_CASE(JSOP_ENTERWITH)
@@ -3690,11 +3693,10 @@ END_CASE(JSOP_DEBUGGER)
 
 CASE(JSOP_PUSHBLOCKSCOPE)
 {
-    ReservedRooted<LexicalScope*> scope(&rootLexicalScope0);
-    scope = &script->getScope(REGS.pc)->as<LexicalScope>();
+    ReservedRooted<Scope*> scope(&rootScope0, script->getScope(REGS.pc));
 
-    // Clone block and push on scope chain.
-    if (!REGS.fp()->pushBlock(cx, scope))
+    // Create block environment and push on scope chain.
+    if (!REGS.fp()->pushBlock(cx, scope.as<LexicalScope>()))
         goto error;
 }
 END_CASE(JSOP_PUSHBLOCKSCOPE)

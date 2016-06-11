@@ -1004,29 +1004,24 @@ SPECIALIZE_ROOTING_CONTAINERS(ScopeIter);
 // Allow using is<T> and as<T> on Rooted<Scope*> and Handle<Scope*>.
 //
 
-template <>
-class RootedBase<Scope*>
+template <typename Outer>
+struct ScopeCastOperation
 {
-  public:
     template <class U>
     JS::Handle<U*> as() const {
-        const JS::Rooted<Scope*>& self = *static_cast<const JS::Rooted<Scope*>*>(this);
-        MOZ_ASSERT(self->is<U>());
+        const Outer& self = *static_cast<const Outer*>(this);
+        MOZ_ASSERT(self->template is<U>());
         return Handle<U*>::fromMarkedLocation(reinterpret_cast<U* const*>(self.address()));
     }
 };
 
 template <>
-class HandleBase<Scope*>
-{
-  public:
-    template <class U>
-    JS::Handle<U*> as() const {
-        const JS::Handle<Scope*>& self = *static_cast<const JS::Handle<Scope*>*>(this);
-        MOZ_ASSERT(self->is<U>());
-        return Handle<U*>::fromMarkedLocation(reinterpret_cast<U* const*>(self.address()));
-    }
-};
+class RootedBase<Scope*> : public ScopeCastOperation<JS::Rooted<Scope*>>
+{ };
+
+template <>
+class HandleBase<Scope*> : public ScopeCastOperation<JS::Handle<Scope*>>
+{ };
 
 } // namespace js
 

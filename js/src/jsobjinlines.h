@@ -248,7 +248,8 @@ JSObject::isQualifiedVarObj() const
                   is<js::CallObject>() ||
                   is<js::ModuleEnvironmentObject>() ||
                   is<js::NonSyntacticVariablesObject>() ||
-                  (is<js::DynamicWithObject>() && !as<js::DynamicWithObject>().isSyntactic()));
+                  (is<js::WithEnvironmentObject>() &&
+                   !as<js::WithEnvironmentObject>().isSyntactic()));
     return rv;
 }
 

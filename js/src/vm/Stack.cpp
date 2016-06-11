@@ -116,7 +116,7 @@ AssertDynamicScopeMatchesStaticScope(JSContext* cx, JSScript* script, JSObject* 
     RootedObject enclosingScope(cx, script->enclosingStaticScope());
     for (StaticScopeIter<NoGC> i(enclosingScope); !i.done(); i++) {
         if (i.type() == StaticScopeIter<NoGC>::NonSyntactic) {
-            while (scope->is<DynamicWithObject>() ||
+            while (scope->is<WithEnvironmentObject>() ||
                    scope->is<NonSyntacticVariablesObject>() ||
                    (scope->is<ClonedBlockObject>() &&
                     !scope->as<ClonedBlockObject>().isSyntactic()))
@@ -139,8 +139,8 @@ AssertDynamicScopeMatchesStaticScope(JSContext* cx, JSScript* script, JSObject* 
                 scope = &scope->as<ClonedBlockObject>().enclosingScope();
                 break;
               case StaticScopeIter<NoGC>::With:
-                MOZ_ASSERT(&i.staticWith() == scope->as<DynamicWithObject>().staticScope());
-                scope = &scope->as<DynamicWithObject>().enclosingScope();
+                MOZ_ASSERT(&i.staticWith() == scope->as<WithEnvironmentObject>().staticScope());
+                scope = &scope->as<WithEnvironmentObject>().enclosingScope();
                 break;
               case StaticScopeIter<NoGC>::NamedLambda:
                 scope = &scope->as<DeclEnvObject>().enclosingScope();
@@ -356,7 +356,7 @@ InterpreterFrame::popWith(JSContext* cx)
     if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
         DebugScopes::onPopWith(this);
 
-    MOZ_ASSERT(environmentChain()->is<DynamicWithObject>());
+    MOZ_ASSERT(environmentChain()->is<WithEnvironmentObject>());
     popOffEnvironmentChain();
 }
 

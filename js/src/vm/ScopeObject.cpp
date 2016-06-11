@@ -731,27 +731,34 @@ CloneStaticWithScope(JSContext* cx, HandleObject enclosingScope, Handle<StaticWi
     return clone;
 }
 
-DynamicWithObject*
-DynamicWithObject::create(JSContext* cx, HandleObject object, HandleObject enclosing,
-                          HandleObject staticWith, WithKind kind)
+WithEnvironmentObject*
+WithEnvironmentObject::create(JSContext* cx, HandleObject object, HandleObject enclosing,
+                              Handle<WithScope*> scope)
 {
-    MOZ_ASSERT(staticWith->is<StaticWithScope>());
-
-    Rooted<TaggedProto> proto(cx, TaggedProto(staticWith));
-    Rooted<DynamicWithObject*> obj(cx);
-    obj = NewObjectWithGivenTaggedProto<DynamicWithObject>(cx, proto, GenericObject,
-                                                           BaseShape::DELEGATE);
+    Rooted<WithEnvironmentObject*> obj(cx);
+    obj = NewObjectWithNullTaggedProto<WithEnvironmentObject>(cx, GenericObject,
+                                                              BaseShape::DELEGATE);
     if (!obj)
         return nullptr;
 
     Value thisv = GetThisValue(object);
 
-    obj->setEnclosingScope(enclosing);
-    obj->setFixedSlot(OBJECT_SLOT, ObjectValue(*object));
-    obj->setFixedSlot(THIS_SLOT, thisv);
-    obj->setFixedSlot(KIND_SLOT, Int32Value(kind));
+    obj->initEnclosingEnvironment(enclosing);
+    obj->initReservedSlot(OBJECT_SLOT, ObjectValue(*object));
+    obj->initReservedSlot(THIS_SLOT, thisv);
+    if (scope)
+        obj->initReservedSlot(SCOPE_SLOT, PrivateGCThingValue(scope));
+    else
+        obj->initReservedSlot(SCOPE_SLOT, NullValue());
 
     return obj;
+}
+
+WithEnvironmentObject*
+WithEnvironmentObject::createNonSyntactic(JSContext* cx, HandleObject object,
+                                          HandleObject enclosing)
+{
+    return create(cx, object, enclosing, nullptr);
 }
 
 /* Implements ES6 8.1.1.2.1 HasBinding steps 7-9. */
@@ -783,7 +790,7 @@ with_LookupProperty(JSContext* cx, HandleObject obj, HandleId id,
         propp.set(nullptr);
         return true;
     }
-    RootedObject actual(cx, &obj->as<DynamicWithObject>().object());
+    RootedObject actual(cx, &obj->as<WithEnvironmentObject>().object());
     if (!LookupProperty(cx, actual, id, objp, propp))
         return false;
 
@@ -804,7 +811,7 @@ with_DefineProperty(JSContext* cx, HandleObject obj, HandleId id, Handle<Propert
                     ObjectOpResult& result)
 {
     MOZ_ASSERT(!JSID_IS_ATOM(id, cx->names().dotThis));
-    RootedObject actual(cx, &obj->as<DynamicWithObject>().object());
+    RootedObject actual(cx, &obj->as<WithEnvironmentObject>().object());
     return DefineProperty(cx, actual, id, desc, result);
 }
 
@@ -812,7 +819,7 @@ static bool
 with_HasProperty(JSContext* cx, HandleObject obj, HandleId id, bool* foundp)
 {
     MOZ_ASSERT(!JSID_IS_ATOM(id, cx->names().dotThis));
-    RootedObject actual(cx, &obj->as<DynamicWithObject>().object());
+    RootedObject actual(cx, &obj->as<WithEnvironmentObject>().object());
 
     // ES 8.1.1.2.1 step 3-5.
     if (!HasProperty(cx, actual, id, foundp))
@@ -829,7 +836,7 @@ with_GetProperty(JSContext* cx, HandleObject obj, HandleValue receiver, HandleId
                  MutableHandleValue vp)
 {
     MOZ_ASSERT(!JSID_IS_ATOM(id, cx->names().dotThis));
-    RootedObject actual(cx, &obj->as<DynamicWithObject>().object());
+    RootedObject actual(cx, &obj->as<WithEnvironmentObject>().object());
     RootedValue actualReceiver(cx, receiver);
     if (receiver.isObject() && &receiver.toObject() == obj)
         actualReceiver.setObject(*actual);
@@ -841,7 +848,7 @@ with_SetProperty(JSContext* cx, HandleObject obj, HandleId id, HandleValue v,
                  HandleValue receiver, ObjectOpResult& result)
 {
     MOZ_ASSERT(!JSID_IS_ATOM(id, cx->names().dotThis));
-    RootedObject actual(cx, &obj->as<DynamicWithObject>().object());
+    RootedObject actual(cx, &obj->as<WithEnvironmentObject>().object());
     RootedValue actualReceiver(cx, receiver);
     if (receiver.isObject() && &receiver.toObject() == obj)
         actualReceiver.setObject(*actual);
@@ -853,7 +860,7 @@ with_GetOwnPropertyDescriptor(JSContext* cx, HandleObject obj, HandleId id,
                               MutableHandle<PropertyDescriptor> desc)
 {
     MOZ_ASSERT(!JSID_IS_ATOM(id, cx->names().dotThis));
-    RootedObject actual(cx, &obj->as<DynamicWithObject>().object());
+    RootedObject actual(cx, &obj->as<WithEnvironmentObject>().object());
     return GetOwnPropertyDescriptor(cx, actual, id, desc);
 }
 
@@ -861,11 +868,11 @@ static bool
 with_DeleteProperty(JSContext* cx, HandleObject obj, HandleId id, ObjectOpResult& result)
 {
     MOZ_ASSERT(!JSID_IS_ATOM(id, cx->names().dotThis));
-    RootedObject actual(cx, &obj->as<DynamicWithObject>().object());
+    RootedObject actual(cx, &obj->as<WithEnvironmentObject>().object());
     return DeleteProperty(cx, actual, id, result);
 }
 
-static const ObjectOps DynamicWithObjectObjectOps = {
+static const ObjectOps WithEnvironmentObjectOps = {
     with_LookupProperty,
     with_DefineProperty,
     with_HasProperty,
@@ -879,14 +886,14 @@ static const ObjectOps DynamicWithObjectObjectOps = {
     nullptr,
 };
 
-const Class DynamicWithObject::class_ = {
+const Class WithEnvironmentObject::class_ = {
     "With",
-    JSCLASS_HAS_RESERVED_SLOTS(DynamicWithObject::RESERVED_SLOTS) |
+    JSCLASS_HAS_RESERVED_SLOTS(WithEnvironmentObject::RESERVED_SLOTS) |
     JSCLASS_IS_ANONYMOUS,
     JS_NULL_CLASS_OPS,
     JS_NULL_CLASS_SPEC,
     JS_NULL_CLASS_EXT,
-    &DynamicWithObjectObjectOps
+    &WithEnvironmentObjectOps
 };
 
 /* static */ StaticEvalScope*
@@ -1676,7 +1683,8 @@ EnvironmentIter::settle()
             MOZ_ASSERT(scope_->as<ClonedBlockObject>().staticBlock() == staticBlock());
             break;
           case StaticScopeIter<CanGC>::With:
-            MOZ_ASSERT(scope_->as<DynamicWithObject>().staticScope() == &staticWith());
+            // TODOshu
+            //MOZ_ASSERT(scope_->as<WithEnvironmentObject>().staticScope() == &staticWith());
             break;
           case StaticScopeIter<CanGC>::Eval:
             MOZ_ASSERT(scope_->as<CallObject>().isForEval());
@@ -2014,7 +2022,7 @@ class DebugScopeProxy : public BaseProxyHandler
         /* The rest of the internal scopes do not have unaliased vars. */
         MOZ_ASSERT(!IsSyntacticEnvironment(scope) ||
                    scope->is<DeclEnvObject>() ||
-                   scope->is<DynamicWithObject>() ||
+                   scope->is<WithEnvironmentObject>() ||
                    scope->as<CallObject>().isForEval());
         return true;
     }
@@ -2103,7 +2111,7 @@ class DebugScopeProxy : public BaseProxyHandler
             if (isFunctionScope(scope)) {
                 callee = &scope.as<CallObject>().callee();
             } else {
-                // We will never have a DynamicWithObject here because no
+                // We will never have a WithEnvironmentObject here because no
                 // binding accesses on with scopes are unaliased.
                 for (StaticScopeIter<NoGC> ssi(&scope.as<ClonedBlockObject>().staticBlock());
                      !ssi.done();
@@ -2485,15 +2493,19 @@ class DebugScopeProxy : public BaseProxyHandler
                 return false;
         }
 
-        // DynamicWithObject isn't a very good proxy.  It doesn't have a
+        // WithEnvironmentObject isn't a very good proxy.  It doesn't have a
         // JSNewEnumerateOp implementation, because if it just delegated to the
         // target object, the object would indicate that native enumeration is
-        // the thing to do, but native enumeration over the DynamicWithObject
+        // the thing to do, but native enumeration over the WithEnvironmentObject
         // wrapper yields no properties.  So instead here we hack around the
         // issue: punch a hole through to the with object target, then manually
         // examine @@unscopables.
-        bool isWith = scope->is<DynamicWithObject>();
-        Rooted<JSObject*> target(cx, (isWith ? &scope->as<DynamicWithObject>().object() : scope));
+        RootedObject target(cx);
+        bool isWith = scope->is<WithEnvironmentObject>();
+        if (isWith)
+            target = &scope->as<WithEnvironmentObject>().object();
+        else
+            target = scope;
         if (!GetPropertyKeys(cx, target, JSITER_OWNONLY, &props))
             return false;
 
@@ -3013,7 +3025,7 @@ DebugScopes::onPopWith(AbstractFramePtr frame)
 {
     DebugScopes* scopes = frame.compartment()->debugScopes;
     if (scopes)
-        scopes->liveScopes.remove(&frame.environmentChain()->as<DynamicWithObject>());
+        scopes->liveScopes.remove(&frame.environmentChain()->as<WithEnvironmentObject>());
 }
 
 void
@@ -3357,19 +3369,18 @@ js::GetNearestEnclosingWithEnvironmentObjectForFunction(JSFunction* fun)
         return &fun->global();
 
     JSObject* env = fun->environment();
-    while (env && !env->is<DynamicWithObject>())
+    while (env && !env->is<WithEnvironmentObject>())
         env = env->enclosingScope();
 
     if (!env)
         return &fun->global();
 
-    return &env->as<DynamicWithObject>().object();
+    return &env->as<WithEnvironmentObject>().object();
 }
 
 bool
 js::CreateObjectsForEnvironmentChain(JSContext* cx, AutoObjectVector& chain,
-                                     HandleObject terminatingEnv,
-                                     MutableHandleObject envObj)
+                                     HandleObject terminatingEnv, MutableHandleObject envObj)
 {
 #ifdef DEBUG
     for (size_t i = 0; i < chain.length(); ++i) {
@@ -3380,12 +3391,10 @@ js::CreateObjectsForEnvironmentChain(JSContext* cx, AutoObjectVector& chain,
 
     // Construct With object wrappers for the things on this scope
     // chain and use the result as the thing to scope the function to.
-    Rooted<DynamicWithObject*> withEnv(cx);
+    Rooted<WithEnvironmentObject*> withEnv(cx);
     RootedObject enclosingEnv(cx, terminatingEnv);
     for (size_t i = chain.length(); i > 0; ) {
-        // TODOshu
-        withEnv = DynamicWithObject::create(cx, chain[--i], enclosingEnv,
-                                            nullptr, DynamicWithObject::NonSyntacticWith);
+        withEnv = WithEnvironmentObject::createNonSyntactic(cx, chain[--i], enclosingEnv);
         if (!withEnv)
             return false;
         enclosingEnv = withEnv;

@@ -3478,7 +3478,7 @@ BaselineCompiler::emit_JSOP_DEBUGLEAVEBLOCK()
     return callVM(DebugLeaveBlockInfo);
 }
 
-typedef bool (*EnterWithFn)(JSContext*, BaselineFrame*, HandleValue, Handle<StaticWithScope*>);
+typedef bool (*EnterWithFn)(JSContext*, BaselineFrame*, HandleValue, Handle<WithScope*>);
 static const VMFunction EnterWithInfo = FunctionInfo<EnterWithFn>(jit::EnterWith);
 
 bool

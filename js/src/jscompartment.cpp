@@ -536,9 +536,9 @@ JSCompartment::getOrCreateNonSyntacticLexicalEnvironment(JSContext* cx, HandleOb
     }
 
     // The key is the unwrapped dynamic scope, as we may be creating different
-    // DynamicWithObject wrappers each time.
-    MOZ_ASSERT(!enclosing->as<DynamicWithObject>().isSyntactic());
-    RootedObject key(cx, &enclosing->as<DynamicWithObject>().object());
+    // WithEnvironmentObject wrappers each time.
+    MOZ_ASSERT(!enclosing->as<WithEnvironmentObject>().isSyntactic());
+    RootedObject key(cx, &enclosing->as<WithEnvironmentObject>().object());
     RootedObject lexicalEnv(cx, nonSyntacticLexicalEnvironments_->lookup(key));
 
     if (!lexicalEnv) {
@@ -557,9 +557,9 @@ JSCompartment::getNonSyntacticLexicalEnvironment(JSObject* enclosing) const
 {
     if (!nonSyntacticLexicalEnvironments_)
         return nullptr;
-    if (!enclosing->is<DynamicWithObject>())
+    if (!enclosing->is<WithEnvironmentObject>())
         return nullptr;
-    JSObject* key = &enclosing->as<DynamicWithObject>().object();
+    JSObject* key = &enclosing->as<WithEnvironmentObject>().object();
     JSObject* lexicalEnv = nonSyntacticLexicalEnvironments_->lookup(key);
     if (!lexicalEnv)
         return nullptr;

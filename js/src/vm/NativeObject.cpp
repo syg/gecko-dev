@@ -2126,7 +2126,7 @@ NativeSetExistingDataProperty(JSContext* cx, HandleNativeObject obj, HandleShape
         return result.fail(JSMSG_GETTER_ONLY);
     }
 
-    MOZ_ASSERT(!obj->is<DynamicWithObject>());  // See bug 1128681.
+    MOZ_ASSERT(!obj->is<WithEnvironmentObject>());  // See bug 1128681.
 
     uint32_t sample = cx->runtime()->propertyRemovals;
     RootedId id(cx, shape->propid());

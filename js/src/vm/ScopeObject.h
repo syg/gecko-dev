@@ -961,28 +961,20 @@ class NestedScopeObject : public ScopeObject
 };
 
 // With scope objects on the run-time scope chain.
-class DynamicWithObject : public NestedScopeObject
+class WithEnvironmentObject : public EnvironmentObject
 {
     static const unsigned OBJECT_SLOT = 1;
     static const unsigned THIS_SLOT = 2;
-    static const unsigned KIND_SLOT = 3;
+    static const unsigned SCOPE_SLOT = 3;
 
   public:
     static const unsigned RESERVED_SLOTS = 4;
     static const Class class_;
 
-    enum WithKind {
-        SyntacticWith,
-        NonSyntacticWith
-    };
-
-    static DynamicWithObject*
-    create(JSContext* cx, HandleObject object, HandleObject enclosing, HandleObject staticWith,
-           WithKind kind = SyntacticWith);
-
-    StaticWithScope& staticWith() const {
-        return staticPrototype()->as<StaticWithScope>();
-    }
+    static WithEnvironmentObject* create(JSContext* cx, HandleObject object, HandleObject enclosing,
+                                         Handle<WithScope*> scope);
+    static WithEnvironmentObject* createNonSyntactic(JSContext* cx, HandleObject object,
+                                                     HandleObject enclosing);
 
     /* Return the 'o' in 'with (o)'. */
     JSObject& object() const {
@@ -1001,7 +993,15 @@ class DynamicWithObject : public NestedScopeObject
      * to CompileFunction or script evaluation.
      */
     bool isSyntactic() const {
-        return getReservedSlot(KIND_SLOT).toInt32() == SyntacticWith;
+        Value v = getReservedSlot(SCOPE_SLOT);
+        MOZ_ASSERT(v.isPrivateGCThing() || v.isNull());
+        return v.isPrivateGCThing();
+    }
+
+    // For syntactic with environment objects, the with scope.
+    WithScope& scope() const {
+        MOZ_ASSERT(isSyntactic());
+        return *static_cast<WithScope*>(getReservedSlot(SCOPE_SLOT).toGCThing());
     }
 
     static inline size_t objectSlot() {
@@ -1476,7 +1476,7 @@ inline bool
 JSObject::is<js::NestedScopeObject>() const
 {
     return is<js::ClonedBlockObject>() ||
-           is<js::DynamicWithObject>();
+           is<js::WithEnvironmentObject>();
 }
 
 template<>
@@ -1525,8 +1525,8 @@ IsSyntacticEnvironment(JSObject* scope)
     if (!scope->is<ScopeObject>() && !scope->is<EnvironmentObject>())
         return false;
 
-    if (scope->is<DynamicWithObject>())
-        return scope->as<DynamicWithObject>().isSyntactic();
+    if (scope->is<WithEnvironmentObject>())
+        return scope->as<WithEnvironmentObject>().isSyntactic();
 
     if (scope->is<ClonedBlockObject>())
         return scope->as<ClonedBlockObject>().isSyntactic();
@@ -1600,11 +1600,11 @@ inline bool
 EnvironmentIter::hasNonSyntacticScopeObject() const
 {
     // The case we're worrying about here is a NonSyntactic static scope which
-    // has 0+ corresponding non-syntactic DynamicWithObject scopes, a
+    // has 0+ corresponding non-syntactic WithEnvironmentObject scopes, a
     // NonSyntacticVariablesObject, or a non-syntactic ClonedBlockObject.
     if (ssi_.type() == StaticScopeIter<CanGC>::NonSyntactic) {
-        MOZ_ASSERT_IF(scope_->is<DynamicWithObject>(),
-                      !scope_->as<DynamicWithObject>().isSyntactic());
+        MOZ_ASSERT_IF(scope_->is<WithEnvironmentObject>(),
+                      !scope_->as<WithEnvironmentObject>().isSyntactic());
         return scope_->is<ScopeObject>() && !IsSyntacticEnvironment(scope_);
     }
     return false;

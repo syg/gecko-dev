@@ -1036,7 +1036,7 @@ DebugLeaveBlock(JSContext* cx, BaselineFrame* frame, jsbytecode* pc)
 }
 
 bool
-EnterWith(JSContext* cx, BaselineFrame* frame, HandleValue val, Handle<StaticWithScope*> templ)
+EnterWith(JSContext* cx, BaselineFrame* frame, HandleValue val, Handle<WithScope*> templ)
 {
     return EnterWithOperation(cx, frame, val, templ);
 }

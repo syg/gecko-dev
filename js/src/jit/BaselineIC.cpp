@@ -3855,7 +3855,7 @@ TryAttachEnvNameStub(JSContext* cx, HandleScript script, ICGetName_Fallback* stu
             return true;
         }
 
-        if (!envChain->is<ScopeObject>() || envChain->is<DynamicWithObject>())
+        if (!envChain->is<ScopeObject>() || envChain->is<WithEnvironmentObject>())
             return true;
 
         // Check for an 'own' property on the scope. There is no need to

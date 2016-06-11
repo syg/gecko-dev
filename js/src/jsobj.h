@@ -1060,9 +1060,9 @@ GetObjectClassName(JSContext* cx, HandleObject obj);
  * objects this just returns obj.
  *
  * Some JSObjects shouldn't be exposed directly to script. This includes (at
- * least) DynamicWithObjects and Window objects. However, since both of those
- * can be on scope chains, we sometimes would expose those as `this` if we
- * were not so vigilant about calling GetThisValue where appropriate.
+ * least) WithEnvironmentObjects and Window objects. However, since both of
+ * those can be on scope chains, we sometimes would expose those as `this` if
+ * we were not so vigilant about calling GetThisValue where appropriate.
  *
  * See comments at ComputeImplicitThis.
  */

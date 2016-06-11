@@ -9195,7 +9195,7 @@ DebuggerEnv_getType(JSContext* cx, unsigned argc, Value* vp)
     const char* s;
     if (IsDeclarative(env))
         s = "declarative";
-    else if (IsDebugScopeWrapper<DynamicWithObject>(env))
+    else if (IsDebugScopeWrapper<WithEnvironmentObject>(env))
         s = "with";
     else
         s = "object";
@@ -9232,8 +9232,8 @@ DebuggerEnv_getObject(JSContext* cx, unsigned argc, Value* vp)
     }
 
     JSObject* obj;
-    if (IsDebugScopeWrapper<DynamicWithObject>(env)) {
-        obj = &env->as<DebugScopeObject>().scope().as<DynamicWithObject>().object();
+    if (IsDebugScopeWrapper<WithEnvironmentObject>(env)) {
+        obj = &env->as<DebugScopeObject>().scope().as<WithEnvironmentObject>().object();
     } else if (IsDebugScopeWrapper<NonSyntacticVariablesObject>(env)) {
         obj = &env->as<DebugScopeObject>().scope().as<NonSyntacticVariablesObject>();
     } else {

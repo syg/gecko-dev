@@ -3218,8 +3218,8 @@ js::GetThisValue(JSObject* obj)
     if (obj->is<ModuleEnvironmentObject>())
         return UndefinedValue();
 
-    if (obj->is<DynamicWithObject>())
-        return ObjectValue(*obj->as<DynamicWithObject>().withThis());
+    if (obj->is<WithEnvironmentObject>())
+        return ObjectValue(*obj->as<WithEnvironmentObject>().withThis());
 
     if (obj->is<NonSyntacticVariablesObject>())
         return GetThisValue(obj->enclosingScope());
@@ -3269,16 +3269,22 @@ GetObjectSlotNameFunctor::operator()(JS::CallbackTracer* trc, char* buf, size_t 
                 if (obj->is<ScopeObject>()) {
                     if (slot == ScopeObject::enclosingScopeSlot()) {
                         slotname = "enclosing_environment";
-                    } else if (obj->is<CallObject>()) {
-                        if (slot == CallObject::calleeSlot())
-                            slotname = "callee_slot";
                     } else if (obj->is<DeclEnvObject>()) {
                         if (slot == DeclEnvObject::lambdaSlot())
                             slotname = "named_lambda";
-                    } else if (obj->is<DynamicWithObject>()) {
-                        if (slot == DynamicWithObject::objectSlot())
+                    }
+                }
+
+                if (obj->is<EnvironmentObject>()) {
+                    if (slot == EnvironmentObject::enclosingEnvironmentSlot()) {
+                        slotname = "enclosing_environment";
+                    } else if (obj->is<CallObject>()) {
+                        if (slot == CallObject::calleeSlot())
+                            slotname = "callee_slot";
+                    } else if (obj->is<WithEnvironmentObject>()) {
+                        if (slot == WithEnvironmentObject::objectSlot())
                             slotname = "with_object";
-                        else if (slot == DynamicWithObject::thisSlot())
+                        else if (slot == WithEnvironmentObject::thisSlot())
                             slotname = "with_this";
                     }
                 }
