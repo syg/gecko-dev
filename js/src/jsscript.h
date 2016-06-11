@@ -1416,7 +1416,8 @@ class JSScript : public js::gc::TenuredCell
     js::Scope* outermostScope() const {
         // The body scope may not be the outermost scope in the script, such
         // as when decl env or defaults scopes are present.
-        return getScope(0);
+        size_t index = 0;
+        return getScope(index);
     }
 
     js::Scope* enclosingScope() const {
@@ -1565,6 +1566,15 @@ class JSScript : public js::gc::TenuredCell
         return array->vector[index];
     }
 
+    js::Scope* getScope(jsbytecode* pc) const {
+        // This method is used to get a scope directly using a JSOp with an
+        // index. To search through ScopeNotes to look for a Scope using pc,
+        // use lookupScope.
+        MOZ_ASSERT(containsPC(pc) && containsPC(pc + sizeof(uint32_t)));
+        MOZ_ASSERT(JSOp(*pc) == JSOP_PUSHBLOCKSCOPE, "Did you mean to use lookupScope(pc)?");
+        return getScope(GET_UINT32_INDEX(pc));
+    }
+
     JSVersion getVersion() const {
         return JSVersion(version);
     }
@@ -1588,7 +1598,7 @@ class JSScript : public js::gc::TenuredCell
     // The following 3 functions find the static scope just before the
     // execution of the instruction pointed to by pc.
 
-    js::Scope* getScope(jsbytecode* pc);
+    js::Scope* lookupScope(jsbytecode* pc);
 
     js::Scope* innermostScope(jsbytecode* pc);
     js::Scope* innermostScope() { return innermostScope(main()); }

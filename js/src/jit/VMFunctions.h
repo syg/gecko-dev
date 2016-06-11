@@ -400,8 +400,8 @@ template <> struct TypeToRootType<Handle<GeneratorObject*> > {
 template <> struct TypeToRootType<Handle<PlainObject*> > {
     static const uint32_t result = VMFunction::RootObject;
 };
-template <> struct TypeToRootType<Handle<StaticBlockScope*> > {
-    static const uint32_t result = VMFunction::RootObject;
+template <> struct TypeToRootType<Handle<LexicalScope*> > {
+    static const uint32_t result = VMFunction::RootCell;
 };
 template <> struct TypeToRootType<Handle<StaticWithScope*> > {
     static const uint32_t result = VMFunction::RootCell;
@@ -675,7 +675,7 @@ bool EnterWith(JSContext* cx, BaselineFrame* frame, HandleValue val,
                Handle<StaticWithScope*> templ);
 bool LeaveWith(JSContext* cx, BaselineFrame* frame);
 
-bool PushBlockScope(JSContext* cx, BaselineFrame* frame, Handle<StaticBlockScope*> block);
+bool PushBlockScope(JSContext* cx, BaselineFrame* frame, Handle<LexicalScope*> scope);
 bool PopBlockScope(JSContext* cx, BaselineFrame* frame);
 bool DebugLeaveThenPopBlockScope(JSContext* cx, BaselineFrame* frame, jsbytecode* pc);
 bool FreshenBlockScope(JSContext* cx, BaselineFrame* frame);

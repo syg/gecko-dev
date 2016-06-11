@@ -993,9 +993,9 @@ GlobalHasLiveOnDebuggerStatement(JSContext* cx)
 }
 
 bool
-PushBlockScope(JSContext* cx, BaselineFrame* frame, Handle<StaticBlockScope*> block)
+PushBlockScope(JSContext* cx, BaselineFrame* frame, Handle<LexicalScope*> scope)
 {
-    return frame->pushBlock(cx, block);
+    return frame->pushBlock(cx, scope);
 }
 
 bool

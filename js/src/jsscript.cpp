@@ -3661,7 +3661,7 @@ JSScript::calculateLiveFixed(jsbytecode* pc)
 }
 
 Scope*
-JSScript::getScope(jsbytecode* pc)
+JSScript::lookupScope(jsbytecode* pc)
 {
     MOZ_ASSERT(containsPC(pc));
 
@@ -3715,7 +3715,7 @@ JSScript::getScope(jsbytecode* pc)
 Scope*
 JSScript::innermostScope(jsbytecode* pc)
 {
-    if (Scope* scope = getScope(pc))
+    if (Scope* scope = lookupScope(pc))
         return scope;
     return bodyScope();
 }

@@ -1695,6 +1695,7 @@ Interpret(JSContext* cx, RunState& state)
     RootedId rootId0(cx);
     RootedShape rootShape0(cx);
     RootedScript rootScript0(cx);
+    Rooted<LexicalScope*> rootLexicalScope0(cx);
     DebugOnly<uint32_t> blockDepth;
 
     /* State communicated between non-local jumps: */
@@ -3689,24 +3690,21 @@ END_CASE(JSOP_DEBUGGER)
 
 CASE(JSOP_PUSHBLOCKSCOPE)
 {
-    StaticBlockScope& blockScope = script->getObject(REGS.pc)->as<StaticBlockScope>();
+    ReservedRooted<LexicalScope*> scope(&rootLexicalScope0);
+    scope = &script->getScope(REGS.pc)->as<LexicalScope>();
 
-    MOZ_ASSERT(blockScope.needsClone());
     // Clone block and push on scope chain.
-    if (!REGS.fp()->pushBlock(cx, blockScope))
+    if (!REGS.fp()->pushBlock(cx, scope))
         goto error;
 }
 END_CASE(JSOP_PUSHBLOCKSCOPE)
 
 CASE(JSOP_POPBLOCKSCOPE)
 {
-#if 0
-    // TODOshu
+#ifdef DEBUG
     // Pop block from scope chain.
-    NestedStaticScope* scope = script->getStaticBlockScope(REGS.pc);
-    MOZ_ASSERT(scope && scope->is<StaticBlockScope>());
-    StaticBlockScope& blockScope = scope->as<StaticBlockScope>();
-    MOZ_ASSERT(blockScope.needsClone());
+    Scope* scope = script->lookupScope(REGS.pc);
+    MOZ_ASSERT(scope && scope->is<LexicalScope>() && scope->as<LexicalScope>().environmentShape());
 #endif
 
     if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
@@ -3719,9 +3717,9 @@ END_CASE(JSOP_POPBLOCKSCOPE)
 
 CASE(JSOP_DEBUGLEAVEBLOCK)
 {
-    MOZ_ASSERT(script->getScope(REGS.pc));
-    MOZ_ASSERT(script->getScope(REGS.pc)->is<LexicalScope>());
-    MOZ_ASSERT(!script->getScope(REGS.pc)->as<LexicalScope>().environmentShape());
+    MOZ_ASSERT(script->lookupScope(REGS.pc));
+    MOZ_ASSERT(script->lookupScope(REGS.pc)->is<LexicalScope>());
+    MOZ_ASSERT(!script->lookupScope(REGS.pc)->as<LexicalScope>().environmentShape());
 
     // FIXME: This opcode should not be necessary.  The debugger shouldn't need
     // help from bytecode to do its job.  See bug 927782.
@@ -4888,7 +4886,7 @@ js::ReportRuntimeLexicalError(JSContext* cx, unsigned errorNumber,
         // Failing that, it must be a block-local let.
         if (!name) {
             // Skip to the right scope.
-            RootedScope scope(cx, script->getScope(pc));
+            RootedScope scope(cx, script->lookupScope(pc));
             MOZ_ASSERT(scope && scope->is<LexicalScope>());
             Rooted<LexicalScope*> lexicalScope(cx, &scope->as<LexicalScope>());
             while (slot < lexicalScope->computeFirstFrameSlot())

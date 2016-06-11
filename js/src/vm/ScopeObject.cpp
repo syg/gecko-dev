@@ -1057,6 +1057,24 @@ LexicalEnvironmentObject::createHollowForDebug(JSContext* cx, Handle<LexicalScop
     return obj;
 }
 
+/* static */ LexicalEnvironmentObject*
+LexicalEnvironmentObject::clone(JSContext* cx, Handle<LexicalEnvironmentObject*> source)
+{
+    MOZ_ASSERT(!source->isExtensible());
+
+    RootedShape shape(cx, source->lastProperty());
+    RootedObject enclosing(cx, &source->enclosingEnvironment());
+
+    Rooted<LexicalEnvironmentObject*> copy(cx, create(cx, shape, enclosing));
+    if (!copy)
+        return nullptr;
+
+    for (uint32_t i = JSSLOT_FREE(&class_), count = shape->slot(); i < count; i++)
+        copy->setSlot(i, source->getSlot(i));
+
+    return copy;
+}
+
 Value
 LexicalEnvironmentObject::thisValue() const
 {

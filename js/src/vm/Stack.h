@@ -253,8 +253,6 @@ class AbstractFramePtr
     inline HandleValue returnValue() const;
     inline void setReturnValue(const Value& rval) const;
 
-    inline bool freshenBlock(JSContext* cx) const;
-
     inline void popBlock(JSContext* cx) const;
     inline void popWith(JSContext* cx) const;
 
@@ -554,7 +552,7 @@ class InterpreterFrame
     inline void pushOnEnvironmentChain(ScopeObject& env);
     inline void pushOnEnvironmentChain(EnvironmentObject& env);
     inline void popOffEnvironmentChain();
-    inline void replaceInnermostEnvironment(ScopeObject& env);
+    inline void replaceInnermostEnvironment(EnvironmentObject& env);
 
     /*
      * For blocks with aliased locals, these interfaces push and pop entries
@@ -563,7 +561,7 @@ class InterpreterFrame
      * distinct bindings per iteration of a for-loop.
      */
 
-    bool pushBlock(JSContext* cx, StaticBlockScope& block);
+    bool pushBlock(JSContext* cx, Handle<LexicalScope*> scope);
     void popBlock(JSContext* cx);
     bool freshenBlock(JSContext* cx);
 

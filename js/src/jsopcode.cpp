@@ -1309,7 +1309,7 @@ ExpressionDecompiler::getLocal(uint32_t local, jsbytecode* pc)
     }
 
     // Otherwise look for it in an inner lexical scope.
-    for (ScopeIter si(script->getScope(pc)); si; si++) {
+    for (ScopeIter si(script->lookupScope(pc)); si; si++) {
         if (!si.scope()->is<LexicalScope>())
             continue;
         LexicalScope& lexicalScope = si.scope()->as<LexicalScope>();

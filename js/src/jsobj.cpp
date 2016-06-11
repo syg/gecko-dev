@@ -3605,7 +3605,7 @@ js::DumpInterpreterFrame(JSContext* cx, InterpreterFrame* start)
         if (jsbytecode* pc = i.pc()) {
             fprintf(stderr, "  pc = %p\n", pc);
             fprintf(stderr, "  current op: %s\n", CodeName[*pc]);
-            MaybeDumpScope("scope", i.script()->getScope(pc));
+            MaybeDumpScope("scope", i.script()->lookupScope(pc));
         }
         if (i.isFunctionFrame())
             MaybeDumpValue("this", i.thisArgument(cx));

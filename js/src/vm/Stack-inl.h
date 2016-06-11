@@ -209,9 +209,10 @@ InterpreterFrame::popOffEnvironmentChain()
 }
 
 inline void
-InterpreterFrame::replaceInnermostEnvironment(ScopeObject& env)
+InterpreterFrame::replaceInnermostEnvironment(EnvironmentObject& env)
 {
-    MOZ_ASSERT(env.enclosingScope() == envChain_->as<ScopeObject>().enclosingScope());
+    MOZ_ASSERT(env.enclosingEnvironment() ==
+               envChain_->as<EnvironmentObject>().enclosingEnvironment());
     envChain_ = &env;
 }
 
@@ -836,14 +837,6 @@ AbstractFramePtr::newTarget() const
     if (isBaselineFrame())
         return asBaselineFrame()->newTarget();
     return asRematerializedFrame()->newTarget();
-}
-
-inline bool
-AbstractFramePtr::freshenBlock(JSContext* cx) const
-{
-    if (isInterpreterFrame())
-        return asInterpreterFrame()->freshenBlock(cx);
-    return asBaselineFrame()->freshenBlock(cx);
 }
 
 inline void

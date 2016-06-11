@@ -52,21 +52,20 @@ BaselineFrame::popWith(JSContext* cx)
 }
 
 inline void
-BaselineFrame::replaceInnermostEnvironment(ScopeObject& env)
+BaselineFrame::replaceInnermostEnvironment(EnvironmentObject& env)
 {
-    MOZ_ASSERT(env.enclosingScope() == envChain_->as<ScopeObject>().enclosingScope());
+    MOZ_ASSERT(env.enclosingEnvironment() ==
+               envChain_->as<EnvironmentObject>().enclosingEnvironment());
     envChain_ = &env;
 }
 
 inline bool
-BaselineFrame::pushBlock(JSContext* cx, Handle<StaticBlockScope*> block)
+BaselineFrame::pushBlock(JSContext* cx, Handle<LexicalScope*> scope)
 {
-    MOZ_ASSERT(block->needsClone());
-
-    ClonedBlockObject* clone = ClonedBlockObject::create(cx, block, this);
-    if (!clone)
+    LexicalEnvironmentObject* env = LexicalEnvironmentObject::create(cx, scope, this);
+    if (!env)
         return false;
-    pushOnEnvironmentChain(*clone);
+    pushOnEnvironmentChain(*env);
 
     return true;
 }
@@ -74,7 +73,7 @@ BaselineFrame::pushBlock(JSContext* cx, Handle<StaticBlockScope*> block)
 inline void
 BaselineFrame::popBlock(JSContext* cx)
 {
-    MOZ_ASSERT(envChain_->is<ClonedBlockObject>());
+    MOZ_ASSERT(envChain_->is<LexicalEnvironmentObject>());
 
     popOffEnvironmentChain();
 }
@@ -82,8 +81,8 @@ BaselineFrame::popBlock(JSContext* cx)
 inline bool
 BaselineFrame::freshenBlock(JSContext* cx)
 {
-    Rooted<ClonedBlockObject*> current(cx, &envChain_->as<ClonedBlockObject>());
-    ClonedBlockObject* clone = ClonedBlockObject::clone(cx, current);
+    Rooted<LexicalEnvironmentObject*> current(cx, &envChain_->as<LexicalEnvironmentObject>());
+    LexicalEnvironmentObject* clone = LexicalEnvironmentObject::clone(cx, current);
     if (!clone)
         return false;
 

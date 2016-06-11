@@ -321,24 +321,21 @@ InterpreterFrame::checkReturn(JSContext* cx, HandleValue thisv)
 }
 
 bool
-InterpreterFrame::pushBlock(JSContext* cx, StaticBlockScope& block)
+InterpreterFrame::pushBlock(JSContext* cx, Handle<LexicalScope*> scope)
 {
-    MOZ_ASSERT(block.needsClone());
-
-    Rooted<StaticBlockScope*> blockHandle(cx, &block);
-    ClonedBlockObject* clone = ClonedBlockObject::create(cx, blockHandle, this);
-    if (!clone)
+    LexicalEnvironmentObject* env = LexicalEnvironmentObject::create(cx, scope, this);
+    if (!env)
         return false;
 
-    pushOnEnvironmentChain(*clone);
+    pushOnEnvironmentChain(*env);
     return true;
 }
 
 bool
 InterpreterFrame::freshenBlock(JSContext* cx)
 {
-    Rooted<ClonedBlockObject*> block(cx, &envChain_->as<ClonedBlockObject>());
-    ClonedBlockObject* fresh = ClonedBlockObject::clone(cx, block);
+    Rooted<LexicalEnvironmentObject*> env(cx, &envChain_->as<LexicalEnvironmentObject>());
+    LexicalEnvironmentObject* fresh = LexicalEnvironmentObject::clone(cx, env);
     if (!fresh)
         return false;
 
@@ -349,7 +346,7 @@ InterpreterFrame::freshenBlock(JSContext* cx)
 void
 InterpreterFrame::popBlock(JSContext* cx)
 {
-    MOZ_ASSERT(envChain_->is<ClonedBlockObject>());
+    MOZ_ASSERT(envChain_->is<LexicalEnvironmentObject>());
     popOffEnvironmentChain();
 }
 

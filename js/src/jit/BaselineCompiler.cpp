@@ -3394,19 +3394,19 @@ BaselineCompiler::emit_JSOP_RETSUB()
     return emitOpIC(stubCompiler.getStub(&stubSpace_));
 }
 
-typedef bool (*PushBlockScopeFn)(JSContext*, BaselineFrame*, Handle<StaticBlockScope*>);
+typedef bool (*PushBlockScopeFn)(JSContext*, BaselineFrame*, Handle<LexicalScope*>);
 static const VMFunction PushBlockScopeInfo = FunctionInfo<PushBlockScopeFn>(jit::PushBlockScope);
 
 bool
 BaselineCompiler::emit_JSOP_PUSHBLOCKSCOPE()
 {
-    StaticBlockScope& blockScope = script->getObject(pc)->as<StaticBlockScope>();
+    LexicalScope& scope = script->getScope(pc)->as<LexicalScope>();
 
     // Call a stub to push the block on the block chain.
     prepareVMCall();
     masm.loadBaselineFramePtr(BaselineFrameReg, R0.scratchReg());
 
-    pushArg(ImmGCPtr(&blockScope));
+    pushArg(ImmGCPtr(&scope));
     pushArg(R0.scratchReg());
 
     return callVM(PushBlockScopeInfo);

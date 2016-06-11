@@ -129,7 +129,7 @@ class BaselineFrame
     inline void pushOnEnvironmentChain(ScopeObject& env);
     inline void pushOnEnvironmentChain(EnvironmentObject& env);
     inline void popOffEnvironmentChain();
-    inline void replaceInnermostEnvironment(ScopeObject& env);
+    inline void replaceInnermostEnvironment(EnvironmentObject& env);
 
     inline void popWith(JSContext* cx);
 
@@ -261,7 +261,7 @@ class BaselineFrame
         return &flags_;
     }
 
-    inline MOZ_MUST_USE bool pushBlock(JSContext* cx, Handle<StaticBlockScope*> block);
+    inline MOZ_MUST_USE bool pushBlock(JSContext* cx, Handle<LexicalScope*> scope);
     inline void popBlock(JSContext* cx);
     inline MOZ_MUST_USE bool freshenBlock(JSContext* cx);
 
