@@ -36,7 +36,7 @@ namespace wasm {
 class Module;
 } // namespace wasm
 
-class ClonedBlockObject;
+class LexicalEnvironmentObject;
 class ScriptSourceObject;
 class WasmModuleObject;
 struct NativeIterator;
@@ -524,10 +524,10 @@ struct JSCompartment
     mozilla::LinkedList<js::wasm::Module> wasmModuleWeakList;
 
   private:
-    // All non-syntactic lexical scopes in the compartment. These are kept in
-    // a map because when loading scripts into a non-syntactic scope, we need
-    // to use the same lexical scope to persist lexical bindings.
-    js::ObjectWeakMap* nonSyntacticLexicalScopes_;
+    // All non-syntactic lexical environments in the compartment. These are kept in
+    // a map because when loading scripts into a non-syntactic environment, we need
+    // to use the same lexical environment to persist lexical bindings.
+    js::ObjectWeakMap* nonSyntacticLexicalEnvironments_;
 
   public:
     /* During GC, stores the index of this compartment in rt->compartments. */
@@ -591,10 +591,9 @@ struct JSCompartment
         explicit WrapperEnum(JSCompartment* c) : js::WrapperMap::Enum(c->crossCompartmentWrappers) {}
     };
 
-    js::ClonedBlockObject* getOrCreateNonSyntacticLexicalScope(JSContext* cx,
-                                                               js::HandleObject enclosingStatic,
-                                                               js::HandleObject enclosingScope);
-    js::ClonedBlockObject* getNonSyntacticLexicalScope(JSObject* enclosingScope) const;
+    js::LexicalEnvironmentObject* getOrCreateNonSyntacticLexicalEnvironment(
+        JSContext* cx, js::HandleObject enclosing);
+    js::LexicalEnvironmentObject* getNonSyntacticLexicalEnvironment(JSObject* enclosing) const;
 
     /*
      * This method traces data that is live iff we know that this compartment's

@@ -72,7 +72,7 @@ JSCompartment::JSCompartment(Zone* zone, const JS::CompartmentOptions& options =
     selfHostingScriptSource(nullptr),
     objectMetadataTable(nullptr),
     lazyArrayBuffers(nullptr),
-    nonSyntacticLexicalScopes_(nullptr),
+    nonSyntacticLexicalEnvironments_(nullptr),
     gcIncomingGrayPointers(nullptr),
     debugModeBits(0),
     watchpointMap(nullptr),
@@ -110,7 +110,7 @@ JSCompartment::~JSCompartment()
     js_delete(debugScopes);
     js_delete(objectMetadataTable);
     js_delete(lazyArrayBuffers);
-    js_delete(nonSyntacticLexicalScopes_),
+    js_delete(nonSyntacticLexicalEnvironments_),
     js_free(enumerators);
 
     runtime_->numCompartments--;
@@ -526,46 +526,44 @@ JSCompartment::wrap(JSContext* cx, MutableHandle<GCVector<Value>> vec)
     return true;
 }
 
-ClonedBlockObject*
-JSCompartment::getOrCreateNonSyntacticLexicalScope(JSContext* cx,
-                                                   HandleObject enclosingStatic,
-                                                   HandleObject enclosingScope)
+LexicalEnvironmentObject*
+JSCompartment::getOrCreateNonSyntacticLexicalEnvironment(JSContext* cx, HandleObject enclosing)
 {
-    if (!nonSyntacticLexicalScopes_) {
-        nonSyntacticLexicalScopes_ = cx->new_<ObjectWeakMap>(cx);
-        if (!nonSyntacticLexicalScopes_ || !nonSyntacticLexicalScopes_->init())
+    if (!nonSyntacticLexicalEnvironments_) {
+        nonSyntacticLexicalEnvironments_ = cx->new_<ObjectWeakMap>(cx);
+        if (!nonSyntacticLexicalEnvironments_ || !nonSyntacticLexicalEnvironments_->init())
             return nullptr;
     }
 
     // The key is the unwrapped dynamic scope, as we may be creating different
     // DynamicWithObject wrappers each time.
-    MOZ_ASSERT(!enclosingScope->as<DynamicWithObject>().isSyntactic());
-    RootedObject key(cx, &enclosingScope->as<DynamicWithObject>().object());
-    RootedObject lexicalScope(cx, nonSyntacticLexicalScopes_->lookup(key));
+    MOZ_ASSERT(!enclosing->as<DynamicWithObject>().isSyntactic());
+    RootedObject key(cx, &enclosing->as<DynamicWithObject>().object());
+    RootedObject lexicalEnv(cx, nonSyntacticLexicalEnvironments_->lookup(key));
 
-    if (!lexicalScope) {
-        lexicalScope = ClonedBlockObject::createNonSyntactic(cx, enclosingStatic, enclosingScope);
-        if (!lexicalScope)
+    if (!lexicalEnv) {
+        lexicalEnv = LexicalEnvironmentObject::createNonSyntactic(cx, enclosing);
+        if (!lexicalEnv)
             return nullptr;
-        if (!nonSyntacticLexicalScopes_->add(cx, key, lexicalScope))
+        if (!nonSyntacticLexicalEnvironments_->add(cx, key, lexicalEnv))
             return nullptr;
     }
 
-    return &lexicalScope->as<ClonedBlockObject>();
+    return &lexicalEnv->as<LexicalEnvironmentObject>();
 }
 
-ClonedBlockObject*
-JSCompartment::getNonSyntacticLexicalScope(JSObject* enclosingScope) const
+LexicalEnvironmentObject*
+JSCompartment::getNonSyntacticLexicalEnvironment(JSObject* enclosing) const
 {
-    if (!nonSyntacticLexicalScopes_)
+    if (!nonSyntacticLexicalEnvironments_)
         return nullptr;
-    if (!enclosingScope->is<DynamicWithObject>())
+    if (!enclosing->is<DynamicWithObject>())
         return nullptr;
-    JSObject* key = &enclosingScope->as<DynamicWithObject>().object();
-    JSObject* lexicalScope = nonSyntacticLexicalScopes_->lookup(key);
-    if (!lexicalScope)
+    JSObject* key = &enclosing->as<DynamicWithObject>().object();
+    JSObject* lexicalEnv = nonSyntacticLexicalEnvironments_->lookup(key);
+    if (!lexicalEnv)
         return nullptr;
-    return &lexicalScope->as<ClonedBlockObject>();
+    return &lexicalEnv->as<LexicalEnvironmentObject>();
 }
 
 void
@@ -673,8 +671,8 @@ JSCompartment::traceRoots(JSTracer* trc, js::gc::GCRuntime::TraceOrMarkRuntime t
         }
     }
 
-    if (nonSyntacticLexicalScopes_)
-        nonSyntacticLexicalScopes_->trace(trc);
+    if (nonSyntacticLexicalEnvironments_)
+        nonSyntacticLexicalEnvironments_->trace(trc);
 }
 
 void
@@ -1177,7 +1175,7 @@ JSCompartment::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
                                       size_t* crossCompartmentWrappersArg,
                                       size_t* regexpCompartment,
                                       size_t* savedStacksSet,
-                                      size_t* nonSyntacticLexicalScopesArg,
+                                      size_t* nonSyntacticLexicalEnvironmentsArg,
                                       size_t* jitCompartment,
                                       size_t* privateData)
 {
@@ -1195,8 +1193,9 @@ JSCompartment::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
     *crossCompartmentWrappersArg += crossCompartmentWrappers.sizeOfExcludingThis(mallocSizeOf);
     *regexpCompartment += regExps.sizeOfExcludingThis(mallocSizeOf);
     *savedStacksSet += savedStacks_.sizeOfExcludingThis(mallocSizeOf);
-    if (nonSyntacticLexicalScopes_)
-        *nonSyntacticLexicalScopesArg += nonSyntacticLexicalScopes_->sizeOfIncludingThis(mallocSizeOf);
+    if (nonSyntacticLexicalEnvironments_)
+        *nonSyntacticLexicalEnvironmentsArg +=
+            nonSyntacticLexicalEnvironments_->sizeOfIncludingThis(mallocSizeOf);
     if (jitCompartment_)
         *jitCompartment += jitCompartment_->sizeOfIncludingThis(mallocSizeOf);
 

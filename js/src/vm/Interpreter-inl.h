@@ -355,10 +355,10 @@ DefVarOperation(JSContext* cx, HandleObject varobj, HandlePropertyName dn, unsig
 #ifdef DEBUG
     // Per spec, it is an error to redeclare a lexical binding. This should
     // have already been checked.
-    if (JS_HasExtensibleLexicalScope(varobj)) {
-        Rooted<ClonedBlockObject*> lexicalScope(cx);
-        lexicalScope = &JS_ExtensibleLexicalScope(varobj)->as<ClonedBlockObject>();
-        MOZ_ASSERT(CheckVarNameConflict(cx, lexicalScope, dn));
+    if (JS_HasExtensibleLexicalEnvironment(varobj)) {
+        Rooted<LexicalEnvironmentObject*> lexicalEnv(cx);
+        lexicalEnv = &JS_ExtensibleLexicalEnvironment(varobj)->as<LexicalEnvironmentObject>();
+        MOZ_ASSERT(CheckVarNameConflict(cx, lexicalEnv, dn));
     }
 #endif
 

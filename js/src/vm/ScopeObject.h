@@ -1643,6 +1643,8 @@ bool GetThisValueForDebuggerMaybeOptimizedOut(JSContext* cx, AbstractFramePtr fr
 
 bool CheckVarNameConflict(JSContext* cx, Handle<ClonedBlockObject*> lexicalScope,
                           HandlePropertyName name);
+bool CheckVarNameConflict(JSContext* cx, Handle<LexicalEnvironmentObject*> lexicalEnv,
+                          HandlePropertyName name);
 
 bool CheckLexicalNameConflict(JSContext* cx, Handle<ClonedBlockObject*> lexicalScope,
                               HandleObject varObj, HandlePropertyName name);

@@ -3488,6 +3488,18 @@ js::CheckVarNameConflict(JSContext* cx, Handle<ClonedBlockObject*> lexicalScope,
 }
 
 bool
+js::CheckVarNameConflict(JSContext* cx, Handle<LexicalEnvironmentObject*> lexicalEnv,
+                         HandlePropertyName name)
+{
+    if (Shape* shape = lexicalEnv->lookup(cx, name)) {
+        ReportRuntimeRedeclaration(cx, name, shape->writable() ? BindingKind::Let
+                                                               : BindingKind::Const);
+        return false;
+    }
+    return true;
+}
+
+bool
 js::CheckGlobalDeclarationConflicts(JSContext* cx, HandleScript script,
                                     Handle<ClonedBlockObject*> lexicalScope,
                                     HandleObject varObj)

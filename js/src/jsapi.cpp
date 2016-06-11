@@ -1263,25 +1263,25 @@ JS_IsGlobalObject(JSObject* obj)
 }
 
 extern JS_PUBLIC_API(JSObject*)
-JS_GlobalLexicalScope(JSObject* obj)
+JS_GlobalLexicalEnvironment(JSObject* obj)
 {
     return &obj->as<GlobalObject>().lexicalScope();
 }
 
 extern JS_PUBLIC_API(bool)
-JS_HasExtensibleLexicalScope(JSObject* obj)
+JS_HasExtensibleLexicalEnvironment(JSObject* obj)
 {
-    return obj->is<GlobalObject>() || obj->compartment()->getNonSyntacticLexicalScope(obj);
+    return obj->is<GlobalObject>() || obj->compartment()->getNonSyntacticLexicalEnvironment(obj);
 }
 
 extern JS_PUBLIC_API(JSObject*)
-JS_ExtensibleLexicalScope(JSObject* obj)
+JS_ExtensibleLexicalEnvironment(JSObject* obj)
 {
     JSObject* lexical = nullptr;
     if (obj->is<GlobalObject>())
-        lexical = JS_GlobalLexicalScope(obj);
+        lexical = JS_GlobalLexicalEnvironment(obj);
     else
-        lexical = obj->compartment()->getNonSyntacticLexicalScope(obj);
+        lexical = obj->compartment()->getNonSyntacticLexicalEnvironment(obj);
     MOZ_ASSERT(lexical);
     return lexical;
 }
@@ -3521,7 +3521,7 @@ CreateNonSyntacticEnvironmentChain(JSContext* cx, AutoObjectVector& envChain,
         // objects as dynamic scopes.
         //
         // TODOshu: fix static scope requirement?
-        env.set(cx->compartment()->getOrCreateNonSyntacticLexicalScope(cx, nullptr, env));
+        env.set(cx->compartment()->getOrCreateNonSyntacticLexicalEnvironment(cx, env));
         if (!env)
             return false;
     } else if (scope) {
