@@ -6914,45 +6914,11 @@ gc::MergeCompartments(JSCompartment* source, JSCompartment* target)
     // Fixup compartment pointers in source to refer to target, and make sure
     // type information generations are in sync.
 
-    // Get the static global lexical scope of the target compartment. Static
-    // scopes need to be fixed up below.
-    RootedObject targetStaticGlobalLexicalScope(rt);
-    targetStaticGlobalLexicalScope = &target->maybeGlobal()->lexicalScope().staticBlock();
-
     for (ZoneCellIter iter(source->zone(), AllocKind::SCRIPT); !iter.done(); iter.next()) {
         JSScript* script = iter.get<JSScript>();
         MOZ_ASSERT(script->compartment() == source);
         script->compartment_ = target;
         script->setTypesGeneration(target->zone()->types.generation);
-
-#if 0
-        // If the script failed to compile, no need to fix up.
-        if (!script->code())
-            continue;
-
-        // TODOshu see if we still need to fix static scope
-        // See warning in handleParseWorkload. If we start optimizing global
-        // lexicals, we would need to merge the contents of the static global
-        // lexical scope.
-        if (JSObject* enclosing = script->enclosingStaticScope()) {
-            if (IsStaticGlobalLexicalScope(enclosing))
-                script->fixEnclosingStaticGlobalLexicalScope();
-        }
-
-        if (script->hasScopeNotes()) {
-            ScopeNoteArray* notes = script->scopeNotes();
-            for (uint32_t i = 0; i < notes->length; i++) {
-                uint32_t scopeIndex = notes->vector[i].index;
-                if (scopeIndex != ScopeNote::NoScopeIndex) {
-                    StaticScope* scope = &script->getObject(scopeIndex)->as<StaticScope>();
-                    MOZ_ASSERT(!IsStaticGlobalLexicalScope(scope));
-                    JSObject* enclosing = scope->enclosingScope();
-                    if (IsStaticGlobalLexicalScope(enclosing))
-                        scope->setEnclosingScope(targetStaticGlobalLexicalScope);
-                }
-            }
-        }
-#endif
     }
 
     for (ZoneCellIter iter(source->zone(), AllocKind::BASE_SHAPE); !iter.done(); iter.next()) {
@@ -6981,24 +6947,6 @@ gc::MergeCompartments(JSCompartment* source, JSCompartment* target)
             arena->zone = target->zone();
         }
     }
-
-#if 0
-    TODOshu see if we still need to fix static scope
-    // After fixing JSFunctions' compartments, we can fix LazyScripts'
-    // enclosing scopes.
-    for (ZoneCellIter iter(source->zone(), AllocKind::LAZY_SCRIPT); !iter.done(); iter.next()) {
-        LazyScript* lazy = iter.get<LazyScript>();
-        MOZ_ASSERT(lazy->functionNonDelazifying()->compartment() == target);
-
-        // See warning in handleParseWorkload. If we start optimizing global
-        // lexicals, we would need to merge the contents of the static global
-        // lexical scope.
-        if (Scope* enclosing = lazy->enclosingScope()) {
-            if (IsStaticGlobalLexicalScope(enclosing))
-                lazy->fixEnclosingStaticGlobalLexicalScope();
-        }
-    }
-#endif
 
     // The source should be the only compartment in its zone.
     for (CompartmentsInZoneIter c(source->zone()); !c.done(); c.next())

@@ -411,7 +411,7 @@ js::IndirectEval(JSContext* cx, unsigned argc, Value* vp)
     CallArgs args = CallArgsFromVp(argc, vp);
 
     Rooted<GlobalObject*> global(cx, &args.callee().global());
-    RootedObject globalLexical(cx, &global->lexicalScope());
+    RootedObject globalLexical(cx, &global->lexicalEnvironment());
 
     // Note we'll just pass |undefined| here, then return it directly (or throw
     // if runtime codegen is disabled), if no argument is provided.
@@ -461,8 +461,7 @@ js::ExecuteInGlobalAndReturnScope(JSContext* cx, HandleObject global, HandleScri
         Debugger::onNewScript(cx, script);
     }
 
-    Rooted<ClonedBlockObject*> globalLexical(cx, &globalRoot->lexicalScope());
-    Rooted<ScopeObject*> env(cx, NonSyntacticVariablesObject::create(cx, globalLexical));
+    Rooted<ScopeObject*> env(cx, NonSyntacticVariablesObject::create(cx));
     if (!env)
         return false;
 

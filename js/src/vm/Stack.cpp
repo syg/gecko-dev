@@ -202,13 +202,13 @@ InterpreterFrame::prologue(JSContext* cx)
     }
 
     if (isGlobalFrame()) {
-        Rooted<ClonedBlockObject*> lexicalEnv(cx);
+        Rooted<LexicalEnvironmentObject*> lexicalEnv(cx);
         RootedObject varObjRoot(cx);
         if (script->hasNonSyntacticScope()) {
             lexicalEnv = &extensibleLexicalEnvironment();
             varObjRoot = &varObj();
         } else {
-            lexicalEnv = &cx->global()->lexicalScope();
+            lexicalEnv = &cx->global()->lexicalEnvironment();
             varObjRoot = cx->global();
         }
         if (!CheckGlobalDeclarationConflicts(cx, script, lexicalEnv, varObjRoot))

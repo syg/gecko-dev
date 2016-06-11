@@ -31,6 +31,9 @@ using namespace js;
 using namespace js::gc;
 
 using mozilla::PodZero;
+using mozilla::Maybe;
+using mozilla::Some;
+using mozilla::Nothing;
 
 typedef Rooted<ArgumentsObject*> RootedArgumentsObject;
 typedef MutableHandle<ArgumentsObject*> MutableHandleArgumentsObject;
@@ -500,7 +503,7 @@ ModuleEnvironmentObject::create(ExclusiveContext* cx, HandleModuleObject module)
 
     // Initialize this early so that we can manipulate the scope object without
     // causing assertions.
-    RootedObject globalLexical(cx, &cx->global()->lexicalScope());
+    RootedObject globalLexical(cx, &cx->global()->lexicalEnvironment());
     scope->setEnclosingScope(globalLexical);
 
     // It is not be possible to add or remove bindings from a module environment
@@ -925,10 +928,8 @@ const Class StaticNonSyntacticScope::class_ = {
 };
 
 /* static */ NonSyntacticVariablesObject*
-NonSyntacticVariablesObject::create(JSContext* cx, Handle<ClonedBlockObject*> globalLexical)
+NonSyntacticVariablesObject::create(JSContext* cx)
 {
-    MOZ_ASSERT(globalLexical->isGlobal());
-
     Rooted<NonSyntacticVariablesObject*> obj(cx,
         NewObjectWithNullTaggedProto<NonSyntacticVariablesObject>(cx, TenuredObject,
                                                                   BaseShape::DELEGATE));
@@ -939,6 +940,7 @@ NonSyntacticVariablesObject::create(JSContext* cx, Handle<ClonedBlockObject*> gl
     if (!obj->setQualifiedVarObj(cx))
         return nullptr;
 
+    RootedObject globalLexical(cx, &cx->global()->lexicalEnvironment());
     obj->setEnclosingScope(globalLexical);
     return obj;
 }
@@ -960,19 +962,18 @@ LexicalEnvironmentObject::isExtensible() const
 /* static */ LexicalEnvironmentObject*
 LexicalEnvironmentObject::create(JSContext* cx, HandleShape shape, HandleObject enclosing)
 {
-
     MOZ_ASSERT(shape->getObjectClass() == &LexicalEnvironmentObject::class_);
 
-    RootedObjectGroup group(cx, ObjectGroup::defaultNewGroup(cx, &LexicalEnvironmentObject::class_,
-                                                             TaggedProto(nullptr)));
+    RootedObjectGroup group(cx,
+        ObjectGroup::defaultNewGroup(cx, &LexicalEnvironmentObject::class_, TaggedProto(nullptr)));
     if (!group)
         return nullptr;
 
     gc::AllocKind allocKind = gc::GetGCObjectKind(&LexicalEnvironmentObject::class_);
-    if (CanBeFinalizedInBackground(allocKind, &LexicalEnvironmentObject::class_))
-        allocKind = GetBackgroundAllocKind(allocKind);
-    RootedNativeObject obj(cx, MaybeNativeObject(JSObject::create(cx, allocKind,
-                                                                  gc::TenuredHeap, shape, group)));
+    MOZ_ASSERT(CanBeFinalizedInBackground(allocKind, &LexicalEnvironmentObject::class_));
+    allocKind = GetBackgroundAllocKind(allocKind);
+    RootedNativeObject obj(cx,
+        MaybeNativeObject(JSObject::create(cx, allocKind, gc::TenuredHeap, shape, group)));
     if (!obj)
         return nullptr;
 
@@ -1179,7 +1180,7 @@ ClonedBlockObject::createHollowForDebug(JSContext* cx, Handle<StaticBlockScope*>
     // Debugger uses to construct the tree of Debugger.Environment objects. So
     // just parent this scope directly to the global lexical scope.
     Rooted<GlobalObject*> global(cx, &block->global());
-    RootedObject globalLexical(cx, &global->lexicalScope());
+    RootedObject globalLexical(cx, &global->lexicalEnvironment());
     Rooted<ClonedBlockObject*> obj(cx, create(cx, block, globalLexical));
     if (!obj)
         return nullptr;
@@ -3288,8 +3289,11 @@ js::GetDebugScopeForFrame(JSContext* cx, AbstractFramePtr frame, jsbytecode* pc)
 JSObject*
 js::GetDebugScopeForGlobalLexicalScope(JSContext* cx)
 {
+    /*
     EnvironmentIter ei(cx, &cx->global()->lexicalScope(), &cx->global()->lexicalScope().staticBlock());
     return GetDebugScope(cx, ei);
+    */
+    return nullptr;
 }
 
 // See declaration and documentation in jsfriendapi.h
@@ -3449,22 +3453,22 @@ js::GetThisValueForDebuggerMaybeOptimizedOut(JSContext* cx, AbstractFramePtr fra
 }
 
 bool
-js::CheckLexicalNameConflict(JSContext* cx, Handle<ClonedBlockObject*> lexicalScope,
+js::CheckLexicalNameConflict(JSContext* cx, Handle<LexicalEnvironmentObject*> lexicalEnv,
                              HandleObject varObj, HandlePropertyName name)
 {
-    mozilla::Maybe<BindingKind> redeclKind;
+    Maybe<BindingKind> redeclKind;
     RootedId id(cx, NameToId(name));
     RootedShape shape(cx);
-    if ((shape = lexicalScope->lookup(cx, name))) {
-        redeclKind = mozilla::Some(shape->writable() ? BindingKind::Let : BindingKind::Const);
+    if ((shape = lexicalEnv->lookup(cx, name))) {
+        redeclKind = Some(shape->writable() ? BindingKind::Let : BindingKind::Const);
     } else if (varObj->isNative() && (shape = varObj->as<NativeObject>().lookup(cx, name))) {
-        redeclKind = mozilla::Some(BindingKind::Var);
+        redeclKind = Some(BindingKind::Var);
     } else {
         Rooted<PropertyDescriptor> desc(cx);
         if (!GetOwnPropertyDescriptor(cx, varObj, id, &desc))
             return false;
         if (desc.object() && desc.hasConfigurable() && !desc.configurable())
-            redeclKind = mozilla::Some(BindingKind::Var);
+            redeclKind = Some(BindingKind::Var);
     }
 
     if (redeclKind) {
@@ -3472,18 +3476,6 @@ js::CheckLexicalNameConflict(JSContext* cx, Handle<ClonedBlockObject*> lexicalSc
         return false;
     }
 
-    return true;
-}
-
-bool
-js::CheckVarNameConflict(JSContext* cx, Handle<ClonedBlockObject*> lexicalScope,
-                         HandlePropertyName name)
-{
-    if (Shape* shape = lexicalScope->lookup(cx, name)) {
-        ReportRuntimeRedeclaration(cx, name, shape->writable() ? BindingKind::Let
-                                                               : BindingKind::Const);
-        return false;
-    }
     return true;
 }
 
@@ -3501,29 +3493,29 @@ js::CheckVarNameConflict(JSContext* cx, Handle<LexicalEnvironmentObject*> lexica
 
 bool
 js::CheckGlobalDeclarationConflicts(JSContext* cx, HandleScript script,
-                                    Handle<ClonedBlockObject*> lexicalScope,
+                                    Handle<LexicalEnvironmentObject*> lexicalEnv,
                                     HandleObject varObj)
 {
-    // Due to the extensibility of the global lexical scope, we must check for
-    // redeclaring a binding.
+    // Due to the extensibility of the global lexical environment, we must
+    // check for redeclaring a binding.
     //
-    // In the case of non-syntactic scope chains, we are checking
-    // redeclarations against the non-syntactic lexical scope and the
-    // variables object that the lexical scope corresponds to.
+    // In the case of non-syntactic environment chains, we are checking
+    // redeclarations against the non-syntactic lexical environment and the
+    // variables object that the lexical environment corresponds to.
     RootedPropertyName name(cx);
-    BindingIter bi(script);
+    Rooted<BindingIter> bi(cx, BindingIter(script));
 
     for (; bi; bi++) {
         if (bi.kind() != BindingKind::Var)
             break;
         name = bi.name()->asPropertyName();
-        if (!CheckVarNameConflict(cx, lexicalScope, name))
+        if (!CheckVarNameConflict(cx, lexicalEnv, name))
             return false;
     }
 
     for (; bi; bi++) {
         name = bi.name()->asPropertyName();
-        if (!CheckLexicalNameConflict(cx, lexicalScope, varObj, name))
+        if (!CheckLexicalNameConflict(cx, lexicalEnv, varObj, name))
             return false;
     }
 
@@ -3533,25 +3525,24 @@ js::CheckGlobalDeclarationConflicts(JSContext* cx, HandleScript script,
 static bool
 CheckVarNameConflictsInScope(JSContext* cx, HandleScript script, HandleObject obj)
 {
-    Rooted<ClonedBlockObject*> scope(cx);
+    Rooted<LexicalEnvironmentObject*> env(cx);
 
-    // We return true when the scope object is not ScopeT below, because
-    // ScopeT is either ClonedBlockObject or CallObject. No other scope
-    // objects can contain lexical bindings, and there are no other overloads
-    // for CheckVarNameConflict.
-
-    if (obj->is<ClonedBlockObject>())
-        scope = &obj->as<ClonedBlockObject>();
-    else if (obj->is<DebugScopeObject>() && obj->as<DebugScopeObject>().scope().is<ClonedBlockObject>())
-        scope = &obj->as<DebugScopeObject>().scope().as<ClonedBlockObject>();
-    else
+    if (obj->is<LexicalEnvironmentObject>()) {
+        env = &obj->as<LexicalEnvironmentObject>();
+    } else if (obj->is<DebugScopeObject>() &&
+               obj->as<DebugScopeObject>().scope().is<LexicalEnvironmentObject>())
+    {
+        env = &obj->as<DebugScopeObject>().scope().as<LexicalEnvironmentObject>();
+    } else {
+        // Environment cannot contain lexical bindings.
         return true;
+    }
 
     RootedPropertyName name(cx);
 
     for (BindingIter bi(script); bi; bi++) {
         name = bi.name()->asPropertyName();
-        if (!CheckVarNameConflict(cx, scope, name))
+        if (!CheckVarNameConflict(cx, env, name))
             return false;
     }
 

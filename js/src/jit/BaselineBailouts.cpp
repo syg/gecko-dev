@@ -712,7 +712,7 @@ InitFromBailout(JSContext* cx, HandleScript caller, jsbytecode* callerPC,
                 // for eval and global scripts.
                 MOZ_ASSERT(!script->isForEval());
                 MOZ_ASSERT(!script->hasNonSyntacticScope());
-                envChain = &(script->global().lexicalScope());
+                envChain = &(script->global().lexicalEnvironment());
             }
         }
 

@@ -1256,7 +1256,7 @@ IonBuilder::initEnvironmentChain(MDefinition* callee)
         // chain is the global lexical env.
         MOZ_ASSERT(!script()->isForEval());
         MOZ_ASSERT(!script()->hasNonSyntacticScope());
-        env = constant(ObjectValue(script()->global().lexicalScope()));
+        env = constant(ObjectValue(script()->global().lexicalEnvironment()));
     }
 
     current->setEnvironmentChain(env);
@@ -1267,7 +1267,7 @@ bool
 IonBuilder::initArgumentsObject()
 {
     JitSpew(JitSpew_IonMIR, "%s:%" PRIuSIZE " - Emitting code to initialize arguments object! block=%p",
-                              script()->filename(), script()->lineno(), current);
+            script()->filename(), script()->lineno(), current);
     MOZ_ASSERT(info().needsArgsObj());
     MDefinition* env = current->environmentChain();
     MCreateArgumentsObject* argsObj = MCreateArgumentsObject::New(alloc(), env);
@@ -1809,7 +1809,7 @@ IonBuilder::inspectOpcode(JSOp op)
       case JSOP_INITGLEXICAL: {
         MOZ_ASSERT(!script()->hasNonSyntacticScope());
         MDefinition* value = current->pop();
-        current->push(constant(ObjectValue(script()->global().lexicalScope())));
+        current->push(constant(ObjectValue(script()->global().lexicalEnvironment())));
         current->push(value);
         return jsop_setprop(info().getAtom(pc)->asPropertyName());
       }
@@ -8644,7 +8644,7 @@ IonBuilder::testGlobalLexicalBinding(PropertyName* name)
     // env. Test for the existence of |name| manually on the global lexical
     // env. If it is not found, look for it on the global itself.
 
-    NativeObject* obj = &script()->global().lexicalScope();
+    NativeObject* obj = &script()->global().lexicalEnvironment();
     TypeSet::ObjectKey* lexicalKey = TypeSet::ObjectKey::get(obj);
     jsid id = NameToId(name);
     if (analysisContext)
@@ -8721,7 +8721,7 @@ IonBuilder::jsop_getname(PropertyName* name)
 {
     MDefinition* object;
     if (IsGlobalOp(JSOp(*pc)) && !script()->hasNonSyntacticScope()) {
-        MInstruction* global = constant(ObjectValue(script()->global().lexicalScope()));
+        MInstruction* global = constant(ObjectValue(script()->global().lexicalEnvironment()));
         object = global;
     } else {
         current->push(current->environmentChain());
@@ -8823,7 +8823,7 @@ IonBuilder::jsop_bindname(PropertyName* name)
         // We take the slow path when trying to BINDGNAME a name that resolves
         // to a 'const' or an uninitialized binding.
         MOZ_ASSERT(JSOp(*pc) == JSOP_BINDGNAME);
-        envChain = constant(ObjectValue(script()->global().lexicalScope()));
+        envChain = constant(ObjectValue(script()->global().lexicalEnvironment()));
     }
     MBindNameCache* ins = MBindNameCache::New(alloc(), envChain, name, script(), pc);
 
@@ -13449,7 +13449,7 @@ IonBuilder::jsop_globalthis()
         return abort("JSOP_GLOBALTHIS in script with non-syntactic scope");
     }
 
-    ClonedBlockObject* globalLexical = &script()->global().lexicalScope();
+    LexicalEnvironmentObject* globalLexical = &script()->global().lexicalEnvironment();
     pushConstant(globalLexical->thisValue());
     return true;
 }

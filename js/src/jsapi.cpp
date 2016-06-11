@@ -1265,7 +1265,7 @@ JS_IsGlobalObject(JSObject* obj)
 extern JS_PUBLIC_API(JSObject*)
 JS_GlobalLexicalEnvironment(JSObject* obj)
 {
-    return &obj->as<GlobalObject>().lexicalScope();
+    return &obj->as<GlobalObject>().lexicalEnvironment();
 }
 
 extern JS_PUBLIC_API(bool)
@@ -3494,7 +3494,7 @@ static bool
 CreateNonSyntacticEnvironmentChain(JSContext* cx, AutoObjectVector& envChain,
                                    MutableHandleObject env, MutableHandleScope scope)
 {
-    Rooted<ClonedBlockObject*> globalLexical(cx, &cx->global()->lexicalScope());
+    RootedObject globalLexical(cx, &cx->global()->lexicalEnvironment());
     if (!js::CreateObjectsForEnvironmentChain(cx, envChain, globalLexical, env))
         return false;
 
@@ -3635,7 +3635,7 @@ CloneFunctionObject(JSContext* cx, HandleObject funobj, HandleObject dynamicScop
 JS_PUBLIC_API(JSObject*)
 JS::CloneFunctionObject(JSContext* cx, HandleObject funobj)
 {
-    Rooted<ClonedBlockObject*> globalLexical(cx, &cx->global()->lexicalScope());
+    RootedObject globalLexical(cx, &cx->global()->lexicalEnvironment());
     return CloneFunctionObject(cx, funobj, globalLexical, cx->emptyGlobalScope());
 }
 
@@ -4423,14 +4423,14 @@ ExecuteScript(JSContext* cx, AutoObjectVector& envChain, HandleScript scriptArg,
 MOZ_NEVER_INLINE JS_PUBLIC_API(bool)
 JS_ExecuteScript(JSContext* cx, HandleScript scriptArg, MutableHandleValue rval)
 {
-    RootedObject globalLexical(cx, &cx->global()->lexicalScope());
+    RootedObject globalLexical(cx, &cx->global()->lexicalEnvironment());
     return ExecuteScript(cx, globalLexical, scriptArg, rval.address());
 }
 
 MOZ_NEVER_INLINE JS_PUBLIC_API(bool)
 JS_ExecuteScript(JSContext* cx, HandleScript scriptArg)
 {
-    RootedObject globalLexical(cx, &cx->global()->lexicalScope());
+    RootedObject globalLexical(cx, &cx->global()->lexicalEnvironment());
     return ExecuteScript(cx, globalLexical, scriptArg, nullptr);
 }
 
@@ -4452,7 +4452,7 @@ JS::CloneAndExecuteScript(JSContext* cx, HandleScript scriptArg)
 {
     CHECK_REQUEST(cx);
     RootedScript script(cx, scriptArg);
-    Rooted<ClonedBlockObject*> globalLexical(cx, &cx->global()->lexicalScope());
+    RootedObject globalLexical(cx, &cx->global()->lexicalEnvironment());
     if (script->compartment() != cx->compartment()) {
         script = CloneGlobalScript(cx, ScopeKind::Global, script);
         if (!script)
@@ -4524,7 +4524,7 @@ Evaluate(JSContext* cx, const ReadOnlyCompileOptions& optionsArg,
          const char16_t* chars, size_t length, MutableHandleValue rval)
 {
   SourceBufferHolder srcBuf(chars, length, SourceBufferHolder::NoOwnership);
-  Rooted<ClonedBlockObject*> globalLexical(cx, &cx->global()->lexicalScope());
+  RootedObject globalLexical(cx, &cx->global()->lexicalEnvironment());
   return ::Evaluate(cx, ScopeKind::Global, globalLexical, optionsArg, srcBuf, rval);
 }
 
@@ -4541,7 +4541,7 @@ JS::Evaluate(JSContext* cx, const ReadOnlyCompileOptions& options,
         return false;
 
     SourceBufferHolder srcBuf(chars, length, SourceBufferHolder::GiveOwnership);
-    Rooted<ClonedBlockObject*> globalLexical(cx, &cx->global()->lexicalScope());
+    RootedObject globalLexical(cx, &cx->global()->lexicalEnvironment());
     bool ok = ::Evaluate(cx, ScopeKind::Global, globalLexical, options, srcBuf, rval);
     return ok;
 }
@@ -4566,7 +4566,7 @@ JS_PUBLIC_API(bool)
 JS::Evaluate(JSContext* cx, const ReadOnlyCompileOptions& optionsArg,
              SourceBufferHolder& srcBuf, MutableHandleValue rval)
 {
-    Rooted<ClonedBlockObject*> globalLexical(cx, &cx->global()->lexicalScope());
+    RootedObject globalLexical(cx, &cx->global()->lexicalEnvironment());
     return ::Evaluate(cx, ScopeKind::Global, globalLexical, optionsArg, srcBuf, rval);
 }
 

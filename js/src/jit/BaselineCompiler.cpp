@@ -1407,7 +1407,7 @@ BaselineCompiler::emit_JSOP_GLOBALTHIS()
     frame.syncStack(0);
 
     if (!script->hasNonSyntacticScope()) {
-        ClonedBlockObject* globalLexical = &script->global().lexicalScope();
+        LexicalEnvironmentObject* globalLexical = &script->global().lexicalEnvironment();
         masm.moveValue(globalLexical->thisValue(), R0);
         frame.push(R0);
         return true;
@@ -2234,7 +2234,7 @@ BaselineCompiler::emit_JSOP_GETGNAME()
 
     frame.syncStack(0);
 
-    masm.movePtr(ImmGCPtr(&script->global().lexicalScope()), R0.scratchReg());
+    masm.movePtr(ImmGCPtr(&script->global().lexicalEnvironment()), R0.scratchReg());
 
     // Call IC.
     ICGetName_Fallback::Compiler stubCompiler(cx);
@@ -2254,12 +2254,12 @@ BaselineCompiler::emit_JSOP_BINDGNAME()
         // exists, is initialized, and is writable (i.e., an initialized
         // 'let') at compile time.
         RootedPropertyName name(cx, script->getName(pc));
-        Rooted<ClonedBlockObject*> globalLexical(cx, &script->global().lexicalScope());
-        if (Shape* shape = globalLexical->lookup(cx, name)) {
+        Rooted<LexicalEnvironmentObject*> env(cx, &script->global().lexicalEnvironment());
+        if (Shape* shape = env->lookup(cx, name)) {
             if (shape->writable() &&
-                !globalLexical->getSlot(shape->slot()).isMagic(JS_UNINITIALIZED_LEXICAL))
+                !env->getSlot(shape->slot()).isMagic(JS_UNINITIALIZED_LEXICAL))
             {
-                frame.push(ObjectValue(*globalLexical));
+                frame.push(ObjectValue(*env));
                 return true;
             }
         } else if (Shape* shape = script->global().lookup(cx, name)) {
@@ -2538,7 +2538,7 @@ BaselineCompiler::emit_JSOP_BINDNAME()
     frame.syncStack(0);
 
     if (*pc == JSOP_BINDGNAME && !script->hasNonSyntacticScope())
-        masm.movePtr(ImmGCPtr(&script->global().lexicalScope()), R0.scratchReg());
+        masm.movePtr(ImmGCPtr(&script->global().lexicalEnvironment()), R0.scratchReg());
     else
         masm.loadPtr(frame.addressOfEnvironmentChain(), R0.scratchReg());
 
@@ -3069,7 +3069,7 @@ bool
 BaselineCompiler::emit_JSOP_INITGLEXICAL()
 {
     frame.popRegsAndSync(1);
-    frame.push(ObjectValue(script->global().lexicalScope()));
+    frame.push(ObjectValue(script->global().lexicalEnvironment()));
     frame.push(R0);
     return emit_JSOP_SETPROP();
 }

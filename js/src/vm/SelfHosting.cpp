@@ -2910,11 +2910,9 @@ CloneObject(JSContext* cx, HandleNativeObject selfHostedObject)
                                  ? gc::AllocKind::FUNCTION_EXTENDED
                                  : selfHostedFunction->getAllocKind();
         MOZ_ASSERT(!CanReuseScriptForClone(cx->compartment(), selfHostedFunction, cx->global()));
-        Rooted<ClonedBlockObject*> globalLexical(cx, &cx->global()->lexicalScope());
-        // TODOshu
-        RootedScope newScope(cx);
+        Rooted<LexicalEnvironmentObject*> globalLexical(cx, &cx->global()->lexicalEnvironment());
         clone = CloneFunctionAndScript(cx, selfHostedFunction, globalLexical,
-                                       newScope, kind);
+                                       cx->emptyGlobalScope(), kind);
         // To be able to re-lazify the cloned function, its name in the
         // self-hosting compartment has to be stored on the clone.
         if (clone && hasName) {

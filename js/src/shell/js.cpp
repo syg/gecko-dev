@@ -782,7 +782,7 @@ ReadEvalPrintLoop(JSContext* cx, FILE* in, bool compileOnly)
          */
         int startline = lineno;
         typedef Vector<char, 32> CharBuffer;
-        RootedObject globalLexical(cx, &cx->global()->lexicalScope());
+        RootedObject globalLexical(cx, &cx->global()->lexicalEnvironment());
         CharBuffer buffer(cx);
         do {
             ScheduleWatchdog(cx->runtime(), -1);

@@ -45,7 +45,7 @@ class ScriptFrameIter;
 class SPSProfiler;
 class InterpreterFrame;
 class StaticBlockScope;
-class ClonedBlockObject;
+class LexicalEnvironmentObject;
 
 class EnvironmentCoordinate;
 
@@ -549,7 +549,7 @@ class InterpreterFrame
     inline GlobalObject& global() const;
     inline CallObject& callObj() const;
     inline JSObject& varObj() const;
-    inline ClonedBlockObject& extensibleLexicalEnvironment() const;
+    inline LexicalEnvironmentObject& extensibleLexicalEnvironment() const;
 
     inline void pushOnEnvironmentChain(ScopeObject& env);
     inline void pushOnEnvironmentChain(EnvironmentObject& env);

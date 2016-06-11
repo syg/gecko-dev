@@ -8589,7 +8589,7 @@ DebuggerObject_forceLexicalInitializationByName(JSContext *cx, unsigned argc, Va
     if (!RequireGlobalObject(cx, args.thisv(), referent))
         return false;
 
-    RootedObject globalLexical(cx, &referent->as<GlobalObject>().lexicalScope());
+    RootedObject globalLexical(cx, &referent->as<GlobalObject>().lexicalEnvironment());
 
     if (!args[0].isString()) {
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
@@ -8628,7 +8628,7 @@ DebuggerObject_executeInGlobal(JSContext* cx, unsigned argc, Value* vp)
     if (!RequireGlobalObject(cx, args.thisv(), referent))
         return false;
 
-    RootedObject globalLexical(cx, &referent->as<GlobalObject>().lexicalScope());
+    RootedObject globalLexical(cx, &referent->as<GlobalObject>().lexicalEnvironment());
     return DebuggerGenericEval(cx, "Debugger.Object.prototype.executeInGlobal",
                                args[0], EvalWithDefaultBindings, JS::UndefinedHandleValue,
                                args.get(1), args.rval(), dbg, globalLexical, nullptr);
@@ -8644,7 +8644,7 @@ DebuggerObject_executeInGlobalWithBindings(JSContext* cx, unsigned argc, Value* 
     if (!RequireGlobalObject(cx, args.thisv(), referent))
         return false;
 
-    RootedObject globalLexical(cx, &referent->as<GlobalObject>().lexicalScope());
+    RootedObject globalLexical(cx, &referent->as<GlobalObject>().lexicalEnvironment());
     return DebuggerGenericEval(cx, "Debugger.Object.prototype.executeInGlobalWithBindings",
                                args[0], EvalHasExtraBindings, args[1], args.get(2),
                                args.rval(), dbg, globalLexical, nullptr);

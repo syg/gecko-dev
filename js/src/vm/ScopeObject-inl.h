@@ -16,12 +16,12 @@
 
 namespace js {
 
-inline ClonedBlockObject&
+inline LexicalEnvironmentObject&
 NearestEnclosingExtensibleLexicalEnvironment(JSObject* env)
 {
     while (!IsExtensibleLexicalEnvironment(env))
         env = env->enclosingScope();
-    return env->as<ClonedBlockObject>();
+    return env->as<LexicalEnvironmentObject>();
 }
 
 inline void

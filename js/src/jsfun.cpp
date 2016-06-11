@@ -1874,7 +1874,7 @@ FunctionConstructor(JSContext* cx, unsigned argc, Value* vp, GeneratorKind gener
             return false;
     }
 
-    RootedObject globalLexical(cx, &global->lexicalScope());
+    RootedObject globalLexical(cx, &global->lexicalEnvironment());
     RootedFunction fun(cx, NewFunctionWithProto(cx, nullptr, 0,
                                                 JSFunction::INTERPRETED_LAMBDA, globalLexical,
                                                 anonymousAtom, proto,
@@ -2018,40 +2018,40 @@ js::NewScriptedFunction(ExclusiveContext* cx, unsigned nargs,
                         HandleObject proto /* = nullptr */,
                         gc::AllocKind allocKind /* = AllocKind::FUNCTION */,
                         NewObjectKind newKind /* = GenericObject */,
-                        HandleObject enclosingDynamicScopeArg /* = nullptr */)
+                        HandleObject enclosingEnvArg /* = nullptr */)
 {
-    RootedObject enclosingDynamicScope(cx, enclosingDynamicScopeArg);
-    if (!enclosingDynamicScope)
-        enclosingDynamicScope = &cx->global()->lexicalScope();
-    return NewFunctionWithProto(cx, nullptr, nargs, flags, enclosingDynamicScope,
+    RootedObject enclosingEnv(cx, enclosingEnvArg);
+    if (!enclosingEnv)
+        enclosingEnv = &cx->global()->lexicalEnvironment();
+    return NewFunctionWithProto(cx, nullptr, nargs, flags, enclosingEnv,
                                 atom, proto, allocKind, newKind);
 }
 
 #ifdef DEBUG
 static bool
-NewFunctionScopeIsWellFormed(ExclusiveContext* cx, HandleObject parent)
+NewFunctionEnvironmentIsWellFormed(ExclusiveContext* cx, HandleObject env)
 {
-    // Assert that the parent is null, global, or a debug scope proxy. All
-    // other cases of polluting global scope behavior are handled by
-    // ScopeObjects (viz. non-syntactic DynamicWithObject and
+    // Assert that the terminating environment is null, global, or a debug
+    // scope proxy. All other cases of polluting global scope behavior are
+    // handled by EnvironmentObjects (viz. non-syntactic DynamicWithObject and
     // NonSyntacticVariablesObject).
-    RootedObject realParent(cx, SkipScopeParent(parent));
-    return !realParent || realParent == cx->global() ||
-           realParent->is<DebugScopeObject>();
+    RootedObject terminatingEnv(cx, SkipEnvironmentObjects(env));
+    return !terminatingEnv || terminatingEnv == cx->global() ||
+           terminatingEnv->is<DebugScopeObject>();
 }
 #endif
 
 JSFunction*
 js::NewFunctionWithProto(ExclusiveContext* cx, Native native,
-                         unsigned nargs, JSFunction::Flags flags, HandleObject enclosingDynamicScope,
+                         unsigned nargs, JSFunction::Flags flags, HandleObject enclosingEnv,
                          HandleAtom atom, HandleObject proto,
                          gc::AllocKind allocKind /* = AllocKind::FUNCTION */,
                          NewObjectKind newKind /* = GenericObject */,
                          NewFunctionProtoHandling protoHandling /* = NewFunctionClassProto */)
 {
     MOZ_ASSERT(allocKind == AllocKind::FUNCTION || allocKind == AllocKind::FUNCTION_EXTENDED);
-    MOZ_ASSERT_IF(native, !enclosingDynamicScope);
-    MOZ_ASSERT(NewFunctionScopeIsWellFormed(cx, enclosingDynamicScope));
+    MOZ_ASSERT_IF(native, !enclosingEnv);
+    MOZ_ASSERT(NewFunctionEnvironmentIsWellFormed(cx, enclosingEnv));
 
     RootedObject funobj(cx);
     // Don't mark asm.js module functions as singleton since they are
@@ -2084,7 +2084,7 @@ js::NewFunctionWithProto(ExclusiveContext* cx, Native native,
             fun->initLazyScript(nullptr);
         else
             fun->initScript(nullptr);
-        fun->initEnvironment(enclosingDynamicScope);
+        fun->initEnvironment(enclosingEnv);
     } else {
         MOZ_ASSERT(fun->isNative());
         MOZ_ASSERT(native);
@@ -2165,14 +2165,14 @@ NewFunctionClone(JSContext* cx, HandleFunction fun, NewObjectKind newKind,
 }
 
 JSFunction*
-js::CloneFunctionReuseScript(JSContext* cx, HandleFunction fun, HandleObject parent,
+js::CloneFunctionReuseScript(JSContext* cx, HandleFunction fun, HandleObject enclosingEnv,
                              gc::AllocKind allocKind /* = FUNCTION */ ,
                              NewObjectKind newKind /* = GenericObject */,
                              HandleObject proto /* = nullptr */)
 {
-    MOZ_ASSERT(NewFunctionScopeIsWellFormed(cx, parent));
+    MOZ_ASSERT(NewFunctionEnvironmentIsWellFormed(cx, enclosingEnv));
     MOZ_ASSERT(!fun->isBoundFunction());
-    MOZ_ASSERT(CanReuseScriptForClone(cx->compartment(), fun, parent));
+    MOZ_ASSERT(CanReuseScriptForClone(cx->compartment(), fun, enclosingEnv));
 
     RootedFunction clone(cx, NewFunctionClone(cx, fun, newKind, allocKind, proto));
     if (!clone)
@@ -2180,12 +2180,12 @@ js::CloneFunctionReuseScript(JSContext* cx, HandleFunction fun, HandleObject par
 
     if (fun->hasScript()) {
         clone->initScript(fun->nonLazyScript());
-        clone->initEnvironment(parent);
+        clone->initEnvironment(enclosingEnv);
     } else if (fun->isInterpretedLazy()) {
         MOZ_ASSERT(fun->compartment() == clone->compartment());
         LazyScript* lazy = fun->lazyScriptOrNull();
         clone->initLazyScript(lazy);
-        clone->initEnvironment(parent);
+        clone->initEnvironment(enclosingEnv);
     } else {
         clone->initNative(fun->native(), fun->jitInfo());
     }
@@ -2200,12 +2200,11 @@ js::CloneFunctionReuseScript(JSContext* cx, HandleFunction fun, HandleObject par
 }
 
 JSFunction*
-js::CloneFunctionAndScript(JSContext* cx, HandleFunction fun, HandleObject parent,
-                           HandleScope newScope,
-                           gc::AllocKind allocKind /* = FUNCTION */,
+js::CloneFunctionAndScript(JSContext* cx, HandleFunction fun, HandleObject enclosingEnv,
+                           HandleScope newScope, gc::AllocKind allocKind /* = FUNCTION */,
                            HandleObject proto /* = nullptr */)
 {
-    MOZ_ASSERT(NewFunctionScopeIsWellFormed(cx, parent));
+    MOZ_ASSERT(NewFunctionEnvironmentIsWellFormed(cx, enclosingEnv));
     MOZ_ASSERT(!fun->isBoundFunction());
 
     JSScript::AutoDelazify funScript(cx);
@@ -2221,7 +2220,7 @@ js::CloneFunctionAndScript(JSContext* cx, HandleFunction fun, HandleObject paren
 
     if (fun->hasScript()) {
         clone->initScript(nullptr);
-        clone->initEnvironment(parent);
+        clone->initEnvironment(enclosingEnv);
     } else {
         clone->initNative(fun->native(), fun->jitInfo());
     }
@@ -2234,10 +2233,10 @@ js::CloneFunctionAndScript(JSContext* cx, HandleFunction fun, HandleObject paren
      * the global scope or other non-lexical scope).
      */
 #ifdef DEBUG
-    RootedObject terminatingScope(cx, parent);
-    while (IsSyntacticScope(terminatingScope))
-        terminatingScope = terminatingScope->enclosingScope();
-    MOZ_ASSERT_IF(!terminatingScope->is<GlobalObject>(),
+    RootedObject terminatingEnv(cx, enclosingEnv);
+    while (IsSyntacticScope(terminatingEnv))
+        terminatingEnv = terminatingEnv->enclosingScope();
+    MOZ_ASSERT_IF(!terminatingEnv->is<GlobalObject>(),
                   newScope->hasEnclosing(ScopeKind::NonSyntactic));
 #endif
 

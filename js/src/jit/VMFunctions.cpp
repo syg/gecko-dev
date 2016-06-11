@@ -203,7 +203,7 @@ bool
 DefLexical(JSContext* cx, HandlePropertyName dn, unsigned attrs, HandleObject envChain)
 {
     // Find the extensible lexical scope.
-    Rooted<ClonedBlockObject*> lexicalEnv(cx,
+    Rooted<LexicalEnvironmentObject*> lexicalEnv(cx,
         &NearestEnclosingExtensibleLexicalEnvironment(envChain));
 
     // Find the variables object.
@@ -214,7 +214,7 @@ DefLexical(JSContext* cx, HandlePropertyName dn, unsigned attrs, HandleObject en
 bool
 DefGlobalLexical(JSContext* cx, HandlePropertyName dn, unsigned attrs)
 {
-    Rooted<ClonedBlockObject*> globalLexical(cx, &cx->global()->lexicalScope());
+    Rooted<LexicalEnvironmentObject*> globalLexical(cx, &cx->global()->lexicalEnvironment());
     return DefLexicalOperation(cx, globalLexical, cx->global(), dn, attrs);
 }
 
@@ -855,7 +855,7 @@ InitGlobalOrEvalEnvironmentObjects(JSContext* cx, BaselineFrame* frame)
                 return false;
         }
     } else {
-        Rooted<ClonedBlockObject*> lexicalEnv(cx,
+        Rooted<LexicalEnvironmentObject*> lexicalEnv(cx,
             &NearestEnclosingExtensibleLexicalEnvironment(envChain));
         if (!CheckGlobalDeclarationConflicts(cx, script, lexicalEnv, varObj))
             return false;
@@ -867,8 +867,8 @@ InitGlobalOrEvalEnvironmentObjects(JSContext* cx, BaselineFrame* frame)
 bool
 GlobalNameConflictsCheckFromIon(JSContext* cx, HandleScript script)
 {
-    Rooted<ClonedBlockObject*> lexicalScope(cx, &cx->global()->lexicalScope());
-    return CheckGlobalDeclarationConflicts(cx, script, lexicalScope, cx->global());
+    Rooted<LexicalEnvironmentObject*> globalLexical(cx, &cx->global()->lexicalEnvironment());
+    return CheckGlobalDeclarationConflicts(cx, script, globalLexical, cx->global());
 }
 
 bool

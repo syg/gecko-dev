@@ -150,8 +150,12 @@ XDRState<mode>::codeFunction(MutableHandleFunction objp)
     if (!VersionCheck(this))
         return false;
 
+    /* TODOshu
     RootedObject staticLexical(cx(), &cx()->global()->lexicalScope().staticBlock());
     return XDRInterpretedFunction(this, staticLexical, nullptr, objp);
+    */
+
+    return true;
 }
 
 template<XDRMode mode>
@@ -164,9 +168,11 @@ XDRState<mode>::codeScript(MutableHandleScript scriptp)
     if (!VersionCheck(this))
         return false;
 
+    /* TODOshu
     RootedObject staticLexical(cx(), &cx()->global()->lexicalScope().staticBlock());
     if (!XDRScript(this, staticLexical, nullptr, nullptr, scriptp))
         return false;
+    */
 
     return true;
 }

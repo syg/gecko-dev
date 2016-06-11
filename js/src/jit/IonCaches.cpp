@@ -3713,7 +3713,7 @@ SetPropertyIC::update(JSContext* cx, HandleScript outerScript, size_t cacheIndex
         jsbytecode* pc;
         cache.getScriptedLocation(&script, &pc);
         MOZ_ASSERT(!script->hasNonSyntacticScope());
-        InitGlobalLexicalOperation(cx, &cx->global()->lexicalScope(), script, pc, value);
+        InitGlobalLexicalOperation(cx, &cx->global()->lexicalEnvironment(), script, pc, value);
     } else if (*cache.pc() == JSOP_SETELEM || *cache.pc() == JSOP_STRICTSETELEM) {
         if (!SetObjectElement(cx, obj, idval, value, cache.strict()))
             return false;

@@ -593,7 +593,7 @@ NewNativeConstructor(ExclusiveContext* cx, JSNative native, unsigned nargs, Hand
                      NewObjectKind newKind = GenericObject,
                      JSFunction::Flags flags = JSFunction::NATIVE_CTOR);
 
-// Allocate a new scripted function.  If enclosingDynamicScope is null, the
+// Allocate a new scripted function.  If enclosingEnv is null, the
 // global will be used.  In all cases the parent of the resulting object will be
 // the global.
 extern JSFunction*
@@ -601,12 +601,12 @@ NewScriptedFunction(ExclusiveContext* cx, unsigned nargs, JSFunction::Flags flag
                     HandleAtom atom, HandleObject proto = nullptr,
                     gc::AllocKind allocKind = gc::AllocKind::FUNCTION,
                     NewObjectKind newKind = GenericObject,
-                    HandleObject enclosingDynamicScope = nullptr);
+                    HandleObject enclosingEnv = nullptr);
 
 // By default, if proto is nullptr, Function.prototype is used instead.i
 // If protoHandling is NewFunctionExactProto, and proto is nullptr, the created
 // function will use nullptr as its [[Prototype]] instead. If
-// enclosingDynamicScope is null, the function will have a null environment()
+// enclosingEnv is null, the function will have a null environment()
 // (yes, null, not the global).  In all cases, the global will be used as the
 // parent.
 
@@ -616,7 +616,7 @@ enum NewFunctionProtoHandling {
 };
 extern JSFunction*
 NewFunctionWithProto(ExclusiveContext* cx, JSNative native, unsigned nargs,
-                     JSFunction::Flags flags, HandleObject enclosingDynamicScope, HandleAtom atom,
+                     JSFunction::Flags flags, HandleObject enclosingEnv, HandleAtom atom,
                      HandleObject proto, gc::AllocKind allocKind = gc::AllocKind::FUNCTION,
                      NewObjectKind newKind = GenericObject,
                      NewFunctionProtoHandling protoHandling = NewFunctionClassProto);

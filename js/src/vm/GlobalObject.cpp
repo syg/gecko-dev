@@ -330,10 +330,11 @@ GlobalObject::createInternal(JSContext* cx, const Class* clasp)
     if (clasp->flags & JSCLASS_HAS_PRIVATE)
         global->setPrivate(nullptr);
 
-    Rooted<ClonedBlockObject*> lexical(cx, ClonedBlockObject::createGlobal(cx, global));
+    Rooted<LexicalEnvironmentObject*> lexical(
+        cx, LexicalEnvironmentObject::createGlobal(cx, global));
     if (!lexical)
         return nullptr;
-    global->setReservedSlot(LEXICAL_SCOPE, ObjectValue(*lexical));
+    global->setReservedSlot(LEXICAL_ENVIRONMENT, ObjectValue(*lexical));
 
     if (!cx->runtime()->emptyGlobalScope) {
         JSRuntime* rt = cx->runtime();
@@ -400,10 +401,10 @@ GlobalObject::new_(JSContext* cx, const Class* clasp, JSPrincipals* principals,
     return global;
 }
 
-ClonedBlockObject&
-GlobalObject::lexicalScope() const
+LexicalEnvironmentObject&
+GlobalObject::lexicalEnvironment() const
 {
-    return getReservedSlot(LEXICAL_SCOPE).toObject().as<ClonedBlockObject>();
+    return getReservedSlot(LEXICAL_ENVIRONMENT).toObject().as<LexicalEnvironmentObject>();
 }
 
 /* static */ bool

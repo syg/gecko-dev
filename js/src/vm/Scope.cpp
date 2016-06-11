@@ -295,7 +295,8 @@ LexicalScope::create(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
 /* static */ Shape*
 LexicalScope::getEmptyExtensibleEnvironmentShape(JSContext* cx)
 {
-    return EmptyEnvironmentShape(cx, &LexicalEnvironmentObject::class_, 0, BaseShape::DELEGATE);
+    const Class* cls = &LexicalEnvironmentObject::class_;
+    return EmptyEnvironmentShape(cx, cls, JSSLOT_FREE(cls), BaseShape::DELEGATE);
 }
 
 /* static */ FunctionScope*
@@ -370,7 +371,8 @@ FunctionScope::script() const
 /* static */ Shape*
 FunctionScope::getEmptyEnvironmentShape(JSContext* cx)
 {
-    return EmptyEnvironmentShape(cx, &CallObject::class_, 0,
+    const Class* cls = &CallObject::class_;
+    return EmptyEnvironmentShape(cx, cls, JSSLOT_FREE(cls),
                                  BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE);
 }
 

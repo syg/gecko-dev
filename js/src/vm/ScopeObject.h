@@ -913,7 +913,7 @@ class DeclEnvObject : public ScopeObject
 // A non-syntactic dynamic scope object that captures non-lexical
 // bindings. That is, a scope object that captures both qualified var
 // assignments and unqualified bareword assignments. Its parent is always the
-// global lexical scope.
+// global lexical environment.
 //
 // This is used in ExecuteInGlobalAndReturnScope and sits in front of the
 // global scope to capture 'var' and bareword asignments.
@@ -923,8 +923,7 @@ class NonSyntacticVariablesObject : public ScopeObject
     static const unsigned RESERVED_SLOTS = 1;
     static const Class class_;
 
-    static NonSyntacticVariablesObject* create(JSContext* cx,
-                                               Handle<ClonedBlockObject*> globalLexical);
+    static NonSyntacticVariablesObject* create(JSContext* cx);
 };
 
 class NestedScopeObject : public ScopeObject
@@ -1490,7 +1489,8 @@ template <>
 inline bool
 JSObject::is<js::EnvironmentObject>() const
 {
-    return is<js::VarEnvironmentObject>();
+    return is<js::VarEnvironmentObject>() ||
+           is<js::LexicalEnvironmentObject>();
 }
 
 template<>
@@ -1502,7 +1502,7 @@ namespace js {
 inline bool
 IsSyntacticScope(JSObject* scope)
 {
-    if (!scope->is<ScopeObject>())
+    if (!scope->is<ScopeObject>() && !scope->is<EnvironmentObject>())
         return false;
 
     if (scope->is<DynamicWithObject>())
@@ -1510,6 +1510,9 @@ IsSyntacticScope(JSObject* scope)
 
     if (scope->is<ClonedBlockObject>())
         return scope->as<ClonedBlockObject>().isSyntactic();
+
+    if (scope->is<LexicalEnvironmentObject>())
+        return scope->as<LexicalEnvironmentObject>().isSyntactic();
 
     if (scope->is<NonSyntacticVariablesObject>())
         return false;
@@ -1526,13 +1529,15 @@ IsStaticGlobalLexicalScope(JSObject* scope)
 inline bool
 IsExtensibleLexicalEnvironment(JSObject* env)
 {
-    return env->is<ClonedBlockObject>() && env->as<ClonedBlockObject>().isExtensible();
+    return env->is<LexicalEnvironmentObject>() &&
+           env->as<LexicalEnvironmentObject>().isExtensible();
 }
 
 inline bool
 IsGlobalLexicalEnvironment(JSObject* env)
 {
-    return env->is<ClonedBlockObject>() && env->as<ClonedBlockObject>().isGlobal();
+    return env->is<LexicalEnvironmentObject>() &&
+           env->as<LexicalEnvironmentObject>().isGlobal();
 }
 
 inline NestedStaticScope*
@@ -1641,16 +1646,14 @@ ModuleEnvironmentObject* GetModuleEnvironmentForScript(JSScript* script);
 bool GetThisValueForDebuggerMaybeOptimizedOut(JSContext* cx, AbstractFramePtr frame, jsbytecode* pc,
                                               MutableHandleValue res);
 
-bool CheckVarNameConflict(JSContext* cx, Handle<ClonedBlockObject*> lexicalScope,
-                          HandlePropertyName name);
 bool CheckVarNameConflict(JSContext* cx, Handle<LexicalEnvironmentObject*> lexicalEnv,
                           HandlePropertyName name);
 
-bool CheckLexicalNameConflict(JSContext* cx, Handle<ClonedBlockObject*> lexicalScope,
+bool CheckLexicalNameConflict(JSContext* cx, Handle<LexicalEnvironmentObject*> lexicalScope,
                               HandleObject varObj, HandlePropertyName name);
 
 bool CheckGlobalDeclarationConflicts(JSContext* cx, HandleScript script,
-                                     Handle<ClonedBlockObject*> lexicalScope,
+                                     Handle<LexicalEnvironmentObject*> lexicalScope,
                                      HandleObject varObj);
 
 bool CheckEvalDeclarationConflicts(JSContext* cx, HandleScript script,

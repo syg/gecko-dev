@@ -22,13 +22,17 @@ GetFunctionNameBytes(JSContext* cx, JSFunction* fun, JSAutoByteString* bytes)
 }
 
 static inline JSObject*
-SkipScopeParent(JSObject* parent)
+SkipEnvironmentObjects(JSObject* env)
 {
-    if (!parent)
+    if (!env)
         return nullptr;
-    while (parent->is<ScopeObject>())
-        parent = &parent->as<ScopeObject>().enclosingScope();
-    return parent;
+    while (env->is<ScopeObject>() || env->is<EnvironmentObject>()) {
+        if (env->is<ScopeObject>())
+            env = &env->as<ScopeObject>().enclosingScope();
+        else
+            env = &env->as<EnvironmentObject>().enclosingEnvironment();
+    }
+    return env;
 }
 
 inline bool
@@ -68,7 +72,7 @@ CloneFunctionObjectIfNotSingleton(JSContext* cx, HandleFunction fun, HandleObjec
      * the function's script.
      */
     if (CanReuseFunctionForClone(cx, fun)) {
-        RootedObject obj(cx, SkipScopeParent(parent));
+        RootedObject obj(cx, SkipEnvironmentObjects(parent));
         ObjectOpResult succeeded;
         if (proto && !SetPrototype(cx, fun, proto, succeeded))
             return nullptr;

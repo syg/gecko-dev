@@ -2424,7 +2424,7 @@ InlineFrameIterator::computeEnvironmentChain(Value envChainValue, MaybeReadFallb
     // the global on their env chain.
     MOZ_ASSERT(!script()->isForEval());
     MOZ_ASSERT(!script()->hasNonSyntacticScope());
-    return &script()->global().lexicalScope();
+    return &script()->global().lexicalEnvironment();
 }
 
 bool

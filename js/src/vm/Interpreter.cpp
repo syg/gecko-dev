@@ -206,7 +206,7 @@ GetNameOperation(JSContext* cx, InterpreterFrame* fp, jsbytecode* pc, MutableHan
      * before the global object.
      */
     if (IsGlobalOp(JSOp(*pc)) && !fp->script()->hasNonSyntacticScope())
-        obj = &obj->global().lexicalScope();
+        obj = &obj->global().lexicalEnvironment();
 
     Shape* shape = nullptr;
     JSObject* env = nullptr;
@@ -2142,7 +2142,7 @@ CASE(JSOP_BINDNAME)
     if (op == JSOP_BINDNAME || script->hasNonSyntacticScope())
         envChain.set(REGS.fp()->environmentChain());
     else
-        envChain.set(&REGS.fp()->global().lexicalScope());
+        envChain.set(&REGS.fp()->global().lexicalEnvironment());
     ReservedRooted<PropertyName*> name(&rootName0, script->getName(REGS.pc));
 
     /* Assigning to an undeclared name adds a property to the global object. */
@@ -2521,8 +2521,7 @@ CASE(JSOP_GLOBALTHIS)
         if (!GetNonSyntacticGlobalThis(cx, REGS.fp()->environmentChain(), REGS.stackHandleAt(-1)))
             goto error;
     } else {
-        ClonedBlockObject* lexicalEnv = &cx->global()->lexicalScope();
-        PUSH_COPY(lexicalEnv->thisValue());
+        PUSH_COPY(cx->global()->lexicalEnvironment().thisValue());
     }
 }
 END_CASE(JSOP_GLOBALTHIS)
@@ -3257,11 +3256,11 @@ END_CASE(JSOP_INITALIASEDLEXICAL)
 
 CASE(JSOP_INITGLEXICAL)
 {
-    ClonedBlockObject* lexicalEnv;
+    LexicalEnvironmentObject* lexicalEnv;
     if (script->hasNonSyntacticScope())
         lexicalEnv = &REGS.fp()->extensibleLexicalEnvironment();
     else
-        lexicalEnv = &cx->global()->lexicalScope();
+        lexicalEnv = &cx->global()->lexicalEnvironment();
     HandleValue value = REGS.stackHandleAt(-1);
     InitGlobalLexicalOperation(cx, lexicalEnv, script, REGS.pc, value);
 }
@@ -3346,13 +3345,13 @@ END_CASE(JSOP_DEFVAR)
 CASE(JSOP_DEFCONST)
 CASE(JSOP_DEFLET)
 {
-    ClonedBlockObject* lexicalEnv;
+    LexicalEnvironmentObject* lexicalEnv;
     JSObject* varObj;
     if (script->hasNonSyntacticScope()) {
         lexicalEnv = &REGS.fp()->extensibleLexicalEnvironment();
         varObj = &REGS.fp()->varObj();
     } else {
-        lexicalEnv = &cx->global()->lexicalScope();
+        lexicalEnv = &cx->global()->lexicalEnvironment();
         varObj = cx->global();
     }
     if (!DefLexicalOperation(cx, lexicalEnv, varObj, script, REGS.pc))

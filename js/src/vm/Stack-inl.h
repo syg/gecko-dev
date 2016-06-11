@@ -63,7 +63,7 @@ InterpreterFrame::varObj() const
     return *obj;
 }
 
-inline ClonedBlockObject&
+inline LexicalEnvironmentObject&
 InterpreterFrame::extensibleLexicalEnvironment() const
 {
     return NearestEnclosingExtensibleLexicalEnvironment(environmentChain());
