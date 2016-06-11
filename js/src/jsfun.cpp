@@ -2116,7 +2116,7 @@ js::CanReuseScriptForClone(JSCompartment* compartment, HandleFunction fun,
     // whatnot; whoever put them there should be responsible for setting our
     // script's flags appropriately.  We hit this case for JSOP_LAMBDA, for
     // example.
-    if (IsSyntacticScope(newParent))
+    if (IsSyntacticEnvironment(newParent))
         return true;
 
     // We need to clone the script if we're interpreted and not already marked
@@ -2234,7 +2234,7 @@ js::CloneFunctionAndScript(JSContext* cx, HandleFunction fun, HandleObject enclo
      */
 #ifdef DEBUG
     RootedObject terminatingEnv(cx, enclosingEnv);
-    while (IsSyntacticScope(terminatingEnv))
+    while (IsSyntacticEnvironment(terminatingEnv))
         terminatingEnv = terminatingEnv->enclosingScope();
     MOZ_ASSERT_IF(!terminatingEnv->is<GlobalObject>(),
                   newScope->hasEnclosing(ScopeKind::NonSyntactic));

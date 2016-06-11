@@ -1500,7 +1500,7 @@ JSObject::is<js::DebugScopeObject>() const;
 namespace js {
 
 inline bool
-IsSyntacticScope(JSObject* scope)
+IsSyntacticEnvironment(JSObject* scope)
 {
     if (!scope->is<ScopeObject>() && !scope->is<EnvironmentObject>())
         return false;
@@ -1585,7 +1585,7 @@ EnvironmentIter::hasNonSyntacticScopeObject() const
     if (ssi_.type() == StaticScopeIter<CanGC>::NonSyntactic) {
         MOZ_ASSERT_IF(scope_->is<DynamicWithObject>(),
                       !scope_->as<DynamicWithObject>().isSyntactic());
-        return scope_->is<ScopeObject>() && !IsSyntacticScope(scope_);
+        return scope_->is<ScopeObject>() && !IsSyntacticEnvironment(scope_);
     }
     return false;
 }
@@ -1629,7 +1629,7 @@ EnvironmentIter::enclosingScope() const
     // chain; every scope chain must start with zero or more ScopeObjects and
     // terminate with one or more non-ScopeObjects (viz., GlobalObject).
     MOZ_ASSERT(done());
-    MOZ_ASSERT(!IsSyntacticScope(scope_));
+    MOZ_ASSERT(!IsSyntacticEnvironment(scope_));
     return *scope_;
 }
 

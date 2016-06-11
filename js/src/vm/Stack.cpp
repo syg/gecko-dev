@@ -121,7 +121,7 @@ AssertDynamicScopeMatchesStaticScope(JSContext* cx, JSScript* script, JSObject* 
                    (scope->is<ClonedBlockObject>() &&
                     !scope->as<ClonedBlockObject>().isSyntactic()))
             {
-                MOZ_ASSERT(!IsSyntacticScope(scope));
+                MOZ_ASSERT(!IsSyntacticEnvironment(scope));
                 scope = &scope->as<ScopeObject>().enclosingScope();
             }
         } else if (i.hasSyntacticDynamicScopeObject()) {
@@ -257,7 +257,7 @@ InterpreterFrame::epilogue(JSContext* cx)
             if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
                 DebugScopes::onPopStrictEvalScope(this);
         } else if (isNonGlobalEvalFrame()) {
-            MOZ_ASSERT_IF(isDebuggerEvalFrame(), !IsSyntacticScope(environmentChain()));
+            MOZ_ASSERT_IF(isDebuggerEvalFrame(), !IsSyntacticEnvironment(environmentChain()));
         }
         return;
     }
@@ -269,7 +269,7 @@ InterpreterFrame::epilogue(JSContext* cx)
         // Gecko often runs global scripts under custom environments. See
         // users of CreateNonSyntacticEnvironmentChain.
         MOZ_ASSERT(IsGlobalLexicalEnvironment(environmentChain()) ||
-                   !IsSyntacticScope(environmentChain()));
+                   !IsSyntacticEnvironment(environmentChain()));
         return;
     }
 

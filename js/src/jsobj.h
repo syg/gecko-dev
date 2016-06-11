@@ -458,11 +458,11 @@ class JSObject : public js::gc::Cell
      * the global.
      *
      * In code which is not marked hasNonSyntacticScope, scope chains can
-     * contain only syntactic scope objects (see IsSyntacticScope) with a global
-     * object at the root as the scope of the outermost non-function script. In
-     * hasNonSyntacticScope code, the scope of the outermost non-function
-     * script might not be a global object, and can have a mix of other objects
-     * above it before the global object is reached.
+     * contain only syntactic scope objects (see IsSyntacticEnvironment) with
+     * a global object at the root as the scope of the outermost non-function
+     * script. In hasNonSyntacticScope code, the scope of the outermost
+     * non-function script might not be a global object, and can have a mix of
+     * other objects above it before the global object is reached.
      */
 
     /*

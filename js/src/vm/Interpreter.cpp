@@ -648,10 +648,11 @@ js::ExecuteKernel(JSContext* cx, HandleScript script, JSObject& envChainArg,
                   Value* result)
 {
     MOZ_ASSERT_IF(script->isGlobalCode(),
-                  IsGlobalLexicalEnvironment(&envChainArg) || !IsSyntacticScope(&envChainArg));
+                  IsGlobalLexicalEnvironment(&envChainArg) ||
+                  !IsSyntacticEnvironment(&envChainArg));
 #ifdef DEBUG
     RootedObject terminatingEnv(cx, &envChainArg);
-    while (IsSyntacticScope(terminatingEnv))
+    while (IsSyntacticEnvironment(terminatingEnv))
         terminatingEnv = terminatingEnv->enclosingScope();
     MOZ_ASSERT(terminatingEnv->is<GlobalObject>() ||
                script->hasNonSyntacticScope());

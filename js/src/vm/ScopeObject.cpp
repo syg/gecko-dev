@@ -1020,7 +1020,7 @@ LexicalEnvironmentObject::createGlobal(JSContext* cx, Handle<GlobalObject*> glob
 /* static */ LexicalEnvironmentObject*
 LexicalEnvironmentObject::createNonSyntactic(JSContext* cx, HandleObject enclosing)
 {
-    MOZ_ASSERT(!IsSyntacticScope(enclosing));
+    MOZ_ASSERT(!IsSyntacticEnvironment(enclosing));
     RootedShape shape(cx, LexicalScope::getEmptyExtensibleEnvironmentShape(cx));
     if (!shape)
         return nullptr;
@@ -1155,7 +1155,7 @@ ClonedBlockObject::createNonSyntactic(JSContext* cx, HandleObject enclosingStati
                                       HandleObject enclosingScope)
 {
     MOZ_ASSERT(enclosingStatic->is<StaticNonSyntacticScope>());
-    MOZ_ASSERT(!IsSyntacticScope(enclosingScope));
+    MOZ_ASSERT(!IsSyntacticEnvironment(enclosingScope));
 
     Rooted<StaticBlockScope*> staticLexical(cx, StaticBlockScope::create(cx));
     if (!staticLexical)
@@ -1629,7 +1629,7 @@ EnvironmentIter::settle()
             MOZ_ASSERT(scope_->as<CallObject>().isForEval());
             break;
           case StaticScopeIter<CanGC>::NonSyntactic:
-            MOZ_ASSERT(!IsSyntacticScope(scope_));
+            MOZ_ASSERT(!IsSyntacticEnvironment(scope_));
             break;
           case StaticScopeIter<CanGC>::NamedLambda:
             MOZ_CRASH("named lambda static scopes should have been skipped");
@@ -1918,7 +1918,7 @@ class DebugScopeProxy : public BaseProxyHandler
             // Currently consider all global and non-syntactic top-level lexical
             // bindings to be aliased.
             if (block->isExtensible()) {
-                MOZ_ASSERT(IsGlobalLexicalEnvironment(block) || !IsSyntacticScope(block));
+                MOZ_ASSERT(IsGlobalLexicalEnvironment(block) || !IsSyntacticEnvironment(block));
                 return true;
             }
 
@@ -1959,7 +1959,7 @@ class DebugScopeProxy : public BaseProxyHandler
         }
 
         /* The rest of the internal scopes do not have unaliased vars. */
-        MOZ_ASSERT(!IsSyntacticScope(scope) ||
+        MOZ_ASSERT(!IsSyntacticEnvironment(scope) ||
                    scope->is<DeclEnvObject>() ||
                    scope->is<DynamicWithObject>() ||
                    scope->as<CallObject>().isForEval());
