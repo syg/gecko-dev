@@ -665,11 +665,11 @@ class EnvironmentObject : public NativeObject
     // derive EnvironmentObject (they have completely different layouts), the
     // enclosing environment of an EnvironmentObject is necessarily non-null.
     JSObject& enclosingEnvironment() const {
-        return getFixedSlot(ENCLOSING_ENV_SLOT).toObject();
+        return getReservedSlot(ENCLOSING_ENV_SLOT).toObject();
     }
 
     void initEnclosingEnvironment(JSObject* enclosing) {
-        initFixedSlot(ENCLOSING_ENV_SLOT, ObjectOrNullValue(enclosing));
+        initReservedSlot(ENCLOSING_ENV_SLOT, ObjectOrNullValue(enclosing));
     }
 
     // Get or set a name contained in this environment.
@@ -789,8 +789,7 @@ class CallObject : public VarEnvironmentObject
      * only be called if !isForEval.)
      */
     JSFunction& callee() const {
-        MOZ_ASSERT(!is<ModuleEnvironmentObject>());
-        return getFixedSlot(CALLEE_SLOT).toObject().as<JSFunction>();
+        return getReservedSlot(CALLEE_SLOT).toObject().as<JSFunction>();
     }
 
     /* For jit access. */
@@ -847,7 +846,12 @@ typedef MutableHandle<ModuleEnvironmentObject*> MutableHandleModuleEnvironmentOb
 
 class LexicalEnvironmentObject : public EnvironmentObject
 {
-    static const unsigned THIS_VALUE_SLOT = 1;
+    // Global and non-syntactic lexical environments need to store a 'this'
+    // value and all other lexical environments have a fixed shape and store a
+    // backpointer to the LexicalScope.
+    //
+    // Since the two sets are disjoint, we only use one slot to save space.
+    static const unsigned THIS_VALUE_OR_SCOPE_SLOT = 1;
 
   public:
     static const unsigned RESERVED_SLOTS = 2;
@@ -856,6 +860,18 @@ class LexicalEnvironmentObject : public EnvironmentObject
   private:
     static LexicalEnvironmentObject* create(JSContext* cx, HandleShape shape,
                                             HandleObject enclosing);
+    static LexicalEnvironmentObject* create(JSContext* cx, Handle<LexicalScope*> scope,
+                                            HandleObject enclosing);
+
+    void initThisValue(const Value& thisv) {
+        MOZ_ASSERT(isGlobal() || !isSyntactic());
+        initReservedSlot(THIS_VALUE_OR_SCOPE_SLOT, thisv);
+    }
+
+    void initScope(LexicalScope* scope) {
+        MOZ_ASSERT(!isGlobal() && isSyntactic());
+        initReservedSlot(THIS_VALUE_OR_SCOPE_SLOT, PrivateGCThingValue(scope));
+    }
 
   public:
     static LexicalEnvironmentObject* create(JSContext* cx, Handle<LexicalScope*> scope,
@@ -870,24 +886,28 @@ class LexicalEnvironmentObject : public EnvironmentObject
     // variable values as this.
     static LexicalEnvironmentObject* clone(JSContext* cx, Handle<LexicalEnvironmentObject*> env);
 
-    // Global lexical scopes are extensible. Non-global lexicals scopes are
-    // not.
-    bool isExtensible() const;
-
     // Is this the global lexical scope?
     bool isGlobal() const {
         return enclosingEnvironment().is<GlobalObject>();
     }
 
     GlobalObject& global() const {
-        MOZ_ASSERT(isGlobal());
         return enclosingEnvironment().as<GlobalObject>();
     }
 
-    bool isSyntactic() const {
-        return !isExtensible() || isGlobal();
-    }
+    // Global and non-syntactic lexical scopes are extensible. All other
+    // lexical scopes are not.
+    bool isExtensible() const;
 
+    // For non-extensible lexical environments, the LexicalScope that created
+    // this environment. Otherwise asserts.
+    LexicalScope& scope() const;
+
+    // Is this a syntactic (i.e. corresponds to a source text) lexical scope?
+    bool isSyntactic() const;
+
+    // For extensible lexical environments, the 'this' value for its
+    // scope. Otherwise asserts.
     Value thisValue() const;
 };
 

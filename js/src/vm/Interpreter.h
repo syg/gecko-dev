@@ -33,7 +33,7 @@ extern bool
 GetFunctionThis(JSContext* cx, AbstractFramePtr frame, MutableHandleValue res);
 
 extern bool
-GetNonSyntacticGlobalThis(JSContext* cx, HandleObject scopeChain, MutableHandleValue res);
+GetNonSyntacticGlobalThis(JSContext* cx, HandleObject envChain, MutableHandleValue res);
 
 /*
  * numToSkip is the number of stack values the expression decompiler should skip

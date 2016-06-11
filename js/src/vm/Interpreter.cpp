@@ -132,7 +132,7 @@ js::GetNonSyntacticGlobalThis(JSContext* cx, HandleObject envChain, MutableHandl
     RootedObject env(cx, envChain);
     while (true) {
         if (IsExtensibleLexicalEnvironment(env)) {
-            res.set(env->as<ClonedBlockObject>().thisValue());
+            res.set(env->as<LexicalEnvironmentObject>().thisValue());
             return true;
         }
         if (!env->enclosingScope()) {

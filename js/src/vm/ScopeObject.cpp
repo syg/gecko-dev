@@ -953,12 +953,6 @@ const Class NonSyntacticVariablesObject::class_ = {
 
 /*****************************************************************************/
 
-bool
-LexicalEnvironmentObject::isExtensible() const
-{
-    return nonProxyIsExtensible();
-}
-
 /* static */ LexicalEnvironmentObject*
 LexicalEnvironmentObject::create(JSContext* cx, HandleShape shape, HandleObject enclosing)
 {
@@ -980,26 +974,34 @@ LexicalEnvironmentObject::create(JSContext* cx, HandleShape shape, HandleObject 
     MOZ_ASSERT(!obj->inDictionaryMode());
     MOZ_ASSERT(obj->isDelegate());
 
-    LexicalEnvironmentObject* res = &obj->as<LexicalEnvironmentObject>();
-
+    LexicalEnvironmentObject* env = &obj->as<LexicalEnvironmentObject>();
     MOZ_ASSERT(enclosing);
-    res->initEnclosingEnvironment(enclosing);
+    env->initEnclosingEnvironment(enclosing);
+    return env;
+}
 
-    if (res->isGlobal() || !res->isSyntactic())
-        res->initFixedSlot(THIS_VALUE_SLOT, GetThisValue(enclosing));
+/* static */ LexicalEnvironmentObject*
+LexicalEnvironmentObject::create(JSContext* cx, Handle<LexicalScope*> scope,
+                                 HandleObject enclosing)
+{
+    assertSameCompartment(cx, enclosing);
+    MOZ_ASSERT(scope->environmentShape());
 
-    return res;
+    RootedShape shape(cx, scope->environmentShape());
+    LexicalEnvironmentObject* env = create(cx, shape, enclosing);
+    if (!env)
+        return nullptr;
+
+    env->initScope(scope);
+    return env;
 }
 
 /* static */ LexicalEnvironmentObject*
 LexicalEnvironmentObject::create(JSContext* cx, Handle<LexicalScope*> scope,
                                  AbstractFramePtr frame)
 {
-    assertSameCompartment(cx, frame);
-    MOZ_ASSERT(scope->environmentShape());
-    RootedShape shape(cx, scope->environmentShape());
     RootedObject enclosing(cx, frame.environmentChain());
-    return create(cx, shape, enclosing);
+    return create(cx, scope, enclosing);
 }
 
 /* static */ LexicalEnvironmentObject*
@@ -1008,23 +1010,33 @@ LexicalEnvironmentObject::createGlobal(JSContext* cx, Handle<GlobalObject*> glob
     RootedShape shape(cx, LexicalScope::getEmptyExtensibleEnvironmentShape(cx));
     if (!shape)
         return nullptr;
-    Rooted<LexicalEnvironmentObject*> lexical(cx,
-        LexicalEnvironmentObject::create(cx, shape, global));
-    if (!lexical)
+
+    Rooted<LexicalEnvironmentObject*> env(cx, LexicalEnvironmentObject::create(cx, shape, global));
+    if (!env)
         return nullptr;
-    if (!JSObject::setSingleton(cx, lexical))
+
+    if (!JSObject::setSingleton(cx, env))
         return nullptr;
-    return lexical;
+
+    env->initThisValue(GetThisValue(global));
+    return env;
 }
 
 /* static */ LexicalEnvironmentObject*
 LexicalEnvironmentObject::createNonSyntactic(JSContext* cx, HandleObject enclosing)
 {
     MOZ_ASSERT(!IsSyntacticEnvironment(enclosing));
+
     RootedShape shape(cx, LexicalScope::getEmptyExtensibleEnvironmentShape(cx));
     if (!shape)
         return nullptr;
-    return LexicalEnvironmentObject::create(cx, shape, enclosing);
+
+    LexicalEnvironmentObject* env = LexicalEnvironmentObject::create(cx, shape, enclosing);
+    if (!env)
+        return nullptr;
+
+    env->initThisValue(GetThisValue(enclosing));
+    return env;
 }
 
 /* static */ LexicalEnvironmentObject*
@@ -1039,52 +1051,75 @@ LexicalEnvironmentObject::createHollowForDebug(JSContext* cx, Handle<LexicalScop
     // This environment's parent link is never used: the DebugScopeObject that
     // refers to this scope carries its own parent link, which is what
     // Debugger uses to construct the tree of Debugger.Environment objects.
-    Rooted<LexicalEnvironmentObject*> obj(cx, create(cx, shape, nullptr));
-    if (!obj)
+    Rooted<LexicalEnvironmentObject*> env(cx, create(cx, shape, nullptr));
+    if (!env)
         return nullptr;
 
     RootedValue optimizedOut(cx, MagicValue(JS_OPTIMIZED_OUT));
     RootedId id(cx);
     for (Rooted<BindingIter> bi(cx, BindingIter(scope)); !bi; bi++) {
         id = NameToId(bi.name()->asPropertyName());
-        if (!SetProperty(cx, obj, id, optimizedOut))
+        if (!SetProperty(cx, env, id, optimizedOut))
             return nullptr;
     }
 
-    if (!obj->setFlags(cx, BaseShape::NOT_EXTENSIBLE, JSObject::GENERATE_SHAPE))
+    if (!env->setFlags(cx, BaseShape::NOT_EXTENSIBLE, JSObject::GENERATE_SHAPE))
         return nullptr;
 
-    return obj;
+    env->initScope(scope);
+    return env;
 }
 
 /* static */ LexicalEnvironmentObject*
-LexicalEnvironmentObject::clone(JSContext* cx, Handle<LexicalEnvironmentObject*> source)
+LexicalEnvironmentObject::clone(JSContext* cx, Handle<LexicalEnvironmentObject*> env)
 {
-    MOZ_ASSERT(!source->isExtensible());
-
-    RootedShape shape(cx, source->lastProperty());
-    RootedObject enclosing(cx, &source->enclosingEnvironment());
-
-    Rooted<LexicalEnvironmentObject*> copy(cx, create(cx, shape, enclosing));
+    Rooted<LexicalScope*> scope(cx, &env->scope());
+    RootedObject enclosing(cx, &env->enclosingEnvironment());
+    Rooted<LexicalEnvironmentObject*> copy(cx, create(cx, scope, enclosing));
     if (!copy)
         return nullptr;
 
-    for (uint32_t i = JSSLOT_FREE(&class_), count = shape->slot(); i < count; i++)
-        copy->setSlot(i, source->getSlot(i));
+    uint32_t slotCount = scope->environmentShape()->slot();
+    MOZ_ASSERT(slotCount == env->lastProperty()->slot());
+    for (uint32_t i = JSSLOT_FREE(&class_); i < slotCount; i++)
+        copy->setSlot(i, env->getSlot(i));
 
     return copy;
+}
+
+bool
+LexicalEnvironmentObject::isExtensible() const
+{
+    MOZ_ASSERT(nonProxyIsExtensible() == isGlobal() || !isSyntactic());
+    return nonProxyIsExtensible();
+}
+
+LexicalScope&
+LexicalEnvironmentObject::scope() const
+{
+    MOZ_ASSERT(!isExtensible());
+    Value v = getReservedSlot(THIS_VALUE_OR_SCOPE_SLOT);
+    MOZ_ASSERT(v.isPrivateGCThing());
+    return *static_cast<LexicalScope*>(v.toGCThing());
+}
+
+bool
+LexicalEnvironmentObject::isSyntactic() const
+{
+    return !isExtensible() || isGlobal();
 }
 
 Value
 LexicalEnvironmentObject::thisValue() const
 {
-    MOZ_ASSERT(isGlobal() || !isSyntactic());
-    Value v = getReservedSlot(THIS_VALUE_SLOT);
+    MOZ_ASSERT(isExtensible());
+    Value v = getReservedSlot(THIS_VALUE_OR_SCOPE_SLOT);
     if (v.isObject()) {
         // If `v` is a Window, return the WindowProxy instead. We called
         // GetThisValue (which also does ToWindowProxyIfWindow) when storing
-        // the value in THIS_VALUE_SLOT, but it's possible the WindowProxy was
-        // attached to the global *after* we set THIS_VALUE_SLOT.
+        // the value in THIS_VALUE_OR_SCOPE_SLOT, but it's possible the
+        // WindowProxy was attached to the global *after* we set
+        // THIS_VALUE_OR_SCOPE_SLOT.
         return ObjectValue(*ToWindowProxyIfWindow(&v.toObject()));
     }
     return v;
