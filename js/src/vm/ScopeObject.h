@@ -957,7 +957,7 @@ class NestedScopeObject : public ScopeObject
     }
 };
 
-// With scope objects on the run-time scope chain.
+// With environment objects on the run-time environment chain.
 class WithEnvironmentObject : public EnvironmentObject
 {
     static const unsigned OBJECT_SLOT = 1;
@@ -980,10 +980,10 @@ class WithEnvironmentObject : public EnvironmentObject
     JSObject* withThis() const;
 
     /*
-     * Return whether this object is a syntactic with object.  If not, this is a
-     * With object we inserted between the outermost syntactic scope and the
-     * global object to wrap the scope chain someone explicitly passed via JSAPI
-     * to CompileFunction or script evaluation.
+     * Return whether this object is a syntactic with object.  If not, this is
+     * a With object we inserted between the outermost syntactic scope and the
+     * global object to wrap the environment chain someone explicitly passed
+     * via JSAPI to CompileFunction or script evaluation.
      */
     bool isSyntactic() const;
 
