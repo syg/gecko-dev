@@ -567,7 +567,8 @@ template <typename ScopeCreator>
 bool
 BytecodeEmitter::EmitterScope::internScope(BytecodeEmitter* bce, ScopeCreator createScope)
 {
-    Scope* scope = createScope(bce->cx, enclosingScope(bce));
+    RootedScope enclosing(bce->cx, enclosingScope(bce));
+    Scope* scope = createScope(bce->cx, enclosing);
     if (!scope)
         return false;
     scopeIndex_ = bce->scopeList.length();
@@ -749,7 +750,9 @@ BytecodeEmitter::EmitterScope::enterLexical(BytecodeEmitter* bce, ScopeKind kind
         return false;
 
     // Create and intern the VM scope.
-    auto createScope = [kind, bindings, firstFrameSlot](ExclusiveContext* cx, Scope* enclosing) {
+    auto createScope = [kind, bindings, firstFrameSlot](ExclusiveContext* cx,
+                                                        HandleScope enclosing)
+    {
         return LexicalScope::create(cx, kind, bindings, firstFrameSlot, enclosing);
     };
     if (!internScope(bce, createScope))
@@ -795,7 +798,7 @@ BytecodeEmitter::EmitterScope::enterDeclEnv(BytecodeEmitter* bce, FunctionBox* f
     bi++;
     MOZ_ASSERT(!bi);
 
-    auto createScope = [funbox](ExclusiveContext* cx, Scope* enclosing) {
+    auto createScope = [funbox](ExclusiveContext* cx, HandleScope enclosing) {
         return LexicalScope::create(cx, ScopeKind::Lexical, funbox->declEnvBindings,
                                     LOCALNO_LIMIT, enclosing);
     };
@@ -896,9 +899,9 @@ BytecodeEmitter::EmitterScope::enterFunctionBody(BytecodeEmitter* bce, FunctionB
         fallbackFreeNameLocation_ = Some(NameLocation::Dynamic());
 
     // Create and intern the VM scope.
-    auto createScope = [funbox, firstFrameSlot](ExclusiveContext* cx, Scope* enclosing) {
-        return FunctionScope::create(cx, funbox->funScopeBindings, firstFrameSlot,
-                                     funbox->function(), enclosing);
+    auto createScope = [funbox, firstFrameSlot](ExclusiveContext* cx, HandleScope enclosing) {
+        RootedFunction fun(cx, funbox->function());
+        return FunctionScope::create(cx, funbox->funScopeBindings, firstFrameSlot, fun, enclosing);
     };
     if (!internBodyScope(bce, createScope))
         return false;
@@ -969,7 +972,7 @@ BytecodeEmitter::EmitterScope::enterGlobal(BytecodeEmitter* bce, GlobalSharedCon
         // lazily upon first access.
         fallbackFreeNameLocation_ = Some(NameLocation::Intrinsic());
 
-        auto createScope = [](ExclusiveContext* cx, Scope* enclosing) {
+        auto createScope = [](ExclusiveContext* cx, HandleScope enclosing) {
             MOZ_ASSERT(!enclosing);
             return cx->emptyGlobalScope();
         };
@@ -1007,7 +1010,7 @@ BytecodeEmitter::EmitterScope::enterGlobal(BytecodeEmitter* bce, GlobalSharedCon
     else
         fallbackFreeNameLocation_ = Some(NameLocation::Dynamic());
 
-    auto createScope = [globalsc](ExclusiveContext* cx, Scope* enclosing) {
+    auto createScope = [globalsc](ExclusiveContext* cx, HandleScope enclosing) {
         MOZ_ASSERT(!enclosing);
         return GlobalScope::create(cx, globalsc->scopeKind(), globalsc->bindings);
     };
@@ -1053,7 +1056,7 @@ BytecodeEmitter::EmitterScope::enterEval(BytecodeEmitter* bce, EvalSharedContext
     // For simplicity, treat all free name lookups in eval scripts as dynamic.
     fallbackFreeNameLocation_ = Some(NameLocation::Dynamic());
 
-    auto createScope = [evalsc](ExclusiveContext* cx, Scope* enclosing) {
+    auto createScope = [evalsc](ExclusiveContext* cx, HandleScope enclosing) {
         ScopeKind scopeKind = evalsc->strict() ? ScopeKind::StrictEval : ScopeKind::Eval;
         return EvalScope::create(cx, scopeKind, evalsc->bindings, enclosing);
     };
@@ -1071,7 +1074,7 @@ BytecodeEmitter::EmitterScope::enterWith(BytecodeEmitter* bce)
     // 'with' make all accesses dynamic and unanalyzable.
     fallbackFreeNameLocation_ = Some(NameLocation::Dynamic());
 
-    auto createScope = [](ExclusiveContext* cx, Scope* enclosing) {
+    auto createScope = [](ExclusiveContext* cx, HandleScope enclosing) {
         return WithScope::create(cx, enclosing);
     };
     if (!internScope(bce, createScope))

@@ -124,7 +124,7 @@ CopyBindingData(ExclusiveContext* cx, ScopeData* data, size_t dataSize)
 template <typename ScopeData>
 static ScopeData*
 CopyBindingData(ExclusiveContext* cx, BindingIter& bi, ScopeData* data, size_t dataSize,
-                const Class* cls, uint32_t baseShapeFlags, Shape** envShape)
+                const Class* cls, uint32_t baseShapeFlags, MutableHandleShape envShape)
 {
     // Copy a fresh BindingIter for use below.
     BindingIter freshBi(bi);
@@ -137,11 +137,11 @@ CopyBindingData(ExclusiveContext* cx, BindingIter& bi, ScopeData* data, size_t d
 
     // Make a new environment shape if any environment slots were used.
     if (bi.nextEnvironmentSlot() == JSSLOT_FREE(cls)) {
-        *envShape = nullptr;
+        envShape.set(nullptr);
     } else {
-        *envShape = CreateEnvironmentShape(cx, freshBi, cls, bi.nextEnvironmentSlot(),
-                                           baseShapeFlags);
-        if (!*envShape)
+        envShape.set(CreateEnvironmentShape(cx, freshBi, cls, bi.nextEnvironmentSlot(),
+                                            baseShapeFlags));
+        if (!envShape)
             return nullptr;
     }
 
@@ -157,12 +157,12 @@ NewEmptyScopeData(ExclusiveContext* cx, size_t dataSize)
 }
 
 /* static */ Scope*
-Scope::create(ExclusiveContext* cx, ScopeKind kind, Scope* enclosing, Shape* environmentShape,
+Scope::create(ExclusiveContext* cx, ScopeKind kind, HandleScope enclosing, HandleShape envShape,
               uintptr_t data)
 {
     Scope* scope = Allocate<Scope>(cx);
     if (scope)
-        new (scope) Scope(kind, enclosing, environmentShape, data);
+        new (scope) Scope(kind, enclosing, envShape, data);
     return scope;
 }
 
@@ -200,23 +200,27 @@ Scope::maybeCloneEnvironmentShape(JSContext* cx)
     return environmentShape_;
 }
 
-Scope*
-Scope::clone(JSContext* cx, Scope* enclosing)
+/* static */ Scope*
+Scope::clone(JSContext* cx, HandleScope scope, HandleScope enclosing)
 {
-    MOZ_ASSERT(!is<FunctionScope>() && !is<GlobalScope>(),
+    MOZ_ASSERT(!scope->is<FunctionScope>() && !scope->is<GlobalScope>(),
                "FunctionScopes and GlobalScopes should use the class-specific clone.");
-    MOZ_ASSERT_IF(is<LexicalScope>(), as<LexicalScope>().computeFirstFrameSlot() ==
-                                      LexicalScope::computeNextFrameSlot(enclosing));
+    MOZ_ASSERT_IF(scope->is<LexicalScope>(),
+                  scope->as<LexicalScope>().computeFirstFrameSlot() ==
+                  LexicalScope::computeNextFrameSlot(enclosing));
 
-    Shape* envShape = maybeCloneEnvironmentShape(cx);
-    if (!envShape)
-        return nullptr;
+    RootedShape envShape(cx);
+    if (scope->environmentShape()) {
+        envShape = scope->maybeCloneEnvironmentShape(cx);
+        if (!envShape)
+            return nullptr;
+    }
 
-    Scope* clone = create(cx, kind_, enclosing, envShape, data_);
+    Scope* clone = create(cx, scope->kind_, enclosing, envShape, scope->data_);
     if (!clone)
         return nullptr;
 
-    reinterpret_cast<RefCountedData*>(data_)->addRef();
+    reinterpret_cast<RefCountedData*>(scope->data_)->addRef();
     return clone;
 }
 
@@ -268,14 +272,14 @@ LexicalScope::computeNextFrameSlot(Scope* start)
 
 /* static */ LexicalScope*
 LexicalScope::create(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
-                     uint32_t firstFrameSlot, Scope* enclosing)
+                     uint32_t firstFrameSlot, HandleScope enclosing)
 {
     MOZ_ASSERT(data, "LexicalScopes should not be created if there are no bindings.");
     MOZ_ASSERT(firstFrameSlot == computeNextFrameSlot(enclosing));
 
     // The data that's passed in is from the frontend and is LifoAlloc'd or is
     // from Scope::copy. Copy it now that we're creating a permanent VM scope.
-    Shape* envShape = nullptr;
+    RootedShape envShape(cx);
     BindingData* copy;
     BindingIter bi(*data, firstFrameSlot);
     copy = CopyBindingData(cx, bi, data, sizeOfBindingData(data->length),
@@ -301,7 +305,7 @@ LexicalScope::getEmptyExtensibleEnvironmentShape(JSContext* cx)
 
 /* static */ FunctionScope*
 FunctionScope::create(ExclusiveContext* cx, BindingData* bindings, uint32_t firstFrameSlot,
-                      JSFunction* fun, Scope* enclosing)
+                      HandleFunction fun, HandleScope enclosing)
 {
     MOZ_ASSERT_IF(enclosing, firstFrameSlot == computeNextFrameSlot(enclosing));
     MOZ_ASSERT(fun->isTenured());
@@ -314,7 +318,7 @@ FunctionScope::create(ExclusiveContext* cx, BindingData* bindings, uint32_t firs
 
     // The data that's passed in is from the frontend and is LifoAlloc'd or is
     // from Scope::copy. Copy it now that we're creating a permanent VM scope.
-    Shape* envShape = nullptr;
+    RootedShape envShape(cx);
     if (bindings) {
         BindingIter bi(*bindings, firstFrameSlot);
         data->bindings = CopyBindingData(cx, bi, bindings, sizeOfBindingData(bindings->length),
@@ -336,24 +340,28 @@ FunctionScope::create(ExclusiveContext* cx, BindingData* bindings, uint32_t firs
     return &scope->as<FunctionScope>();
 }
 
-FunctionScope*
-FunctionScope::clone(JSContext* cx, JSFunction* fun, Scope* enclosing)
+/* static */ FunctionScope*
+FunctionScope::clone(JSContext* cx, Handle<FunctionScope*> scope, HandleFunction fun,
+                     HandleScope enclosing)
 {
-    MOZ_ASSERT_IF(enclosing, computeFirstFrameSlot() == computeNextFrameSlot(enclosing));
-    MOZ_ASSERT(fun != canonicalFunction());
+    MOZ_ASSERT_IF(enclosing, scope->computeFirstFrameSlot() == computeNextFrameSlot(enclosing));
+    MOZ_ASSERT(fun != scope->canonicalFunction());
 
     Data* dataClone = NewEmptyScopeData<Data>(cx, sizeof(Data));
     if (!dataClone)
         return nullptr;
 
     dataClone->canonicalFunction.init(fun);
-    dataClone->bindings = data().bindings;
+    dataClone->bindings = scope->data().bindings;
 
-    Shape* envShape = maybeCloneEnvironmentShape(cx);
-    if (!envShape)
-        return nullptr;
+    RootedShape envShape(cx);
+    if (scope->environmentShape()) {
+        envShape = scope->maybeCloneEnvironmentShape(cx);
+        if (!envShape)
+            return nullptr;
+    }
 
-    Scope* clone = Scope::create(cx, kind(), enclosing, envShape,
+    Scope* clone = Scope::create(cx, scope->kind(), enclosing, envShape,
                                  reinterpret_cast<uintptr_t>(dataClone));
     if (!clone)
         return nullptr;
@@ -402,30 +410,31 @@ GlobalScope::create(ExclusiveContext* cx, ScopeKind kind, BindingData* data)
     return &scope->as<GlobalScope>();
 }
 
-GlobalScope*
-GlobalScope::clone(JSContext* cx, ScopeKind kind)
+/* static */ GlobalScope*
+GlobalScope::clone(JSContext* cx, Handle<GlobalScope*> scope, ScopeKind kind)
 {
-    Scope* clone = Scope::create(cx, kind, nullptr, nullptr, data_);
+    Scope* clone = Scope::create(cx, kind, nullptr, nullptr, scope->data_);
     if (!clone)
         return nullptr;
 
-    data().addRef();
+    scope->data().addRef();
     return &clone->as<GlobalScope>();
 }
 
 /* static */ WithScope*
-WithScope::create(ExclusiveContext* cx, Scope* enclosing)
+WithScope::create(ExclusiveContext* cx, HandleScope enclosing)
 {
     Scope* scope = Scope::create(cx, ScopeKind::With, enclosing, nullptr, 0);
     return static_cast<WithScope*>(scope);
 }
 
 /* static */ EvalScope*
-EvalScope::create(ExclusiveContext* cx, ScopeKind scopeKind, BindingData* data, Scope* enclosing)
+EvalScope::create(ExclusiveContext* cx, ScopeKind scopeKind, BindingData* data,
+                  HandleScope enclosing)
 {
     // The data that's passed in is from the frontend and is LifoAlloc'd or is
     // from Scope::copy. Copy it now that we're creating a permanent VM scope.
-    Shape* envShape = nullptr;
+    RootedShape envShape(cx);
     BindingData* copy;
     if (data) {
         if (scopeKind == ScopeKind::StrictEval) {

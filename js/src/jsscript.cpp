@@ -3141,7 +3141,7 @@ js::detail::CopyScript(JSContext* cx, HandleScript src, HandleScript dst,
     RootedScope clone(cx);
     for (uint32_t i = scopes.length(); i < nscopes; i++) {
         original = vector[i];
-        clone = original->clone(cx, scopes[FindScopeIndex(src, *original->enclosing())]);
+        clone = Scope::clone(cx, original, scopes[FindScopeIndex(src, *original->enclosing())]);
         if (!clone || !scopes.append(clone))
             return false;
     }
@@ -3320,7 +3320,8 @@ js::CloneGlobalScript(JSContext* cx, ScopeKind scopeKind, HandleScript src)
 
     MOZ_ASSERT(src->bodyScopeIndex() == 0);
     Rooted<GCVector<Scope*>> scopes(cx, GCVector<Scope*>(cx));
-    GlobalScope* clone = src->bodyScope()->as<GlobalScope>().clone(cx, scopeKind);
+    Rooted<GlobalScope*> original(cx, &src->bodyScope()->as<GlobalScope>());
+    GlobalScope* clone = GlobalScope::clone(cx, original, scopeKind);
     if (!clone || !scopes.append(clone))
         return nullptr;
 
@@ -3359,10 +3360,11 @@ js::CloneScriptIntoFunction(JSContext* cx, HandleScope enclosingScope, HandleFun
 
     // Clone the non-intra-body scopes.
     Rooted<GCVector<Scope*>> scopes(cx, GCVector<Scope*>(cx));
+    RootedScope original(cx);
+    RootedScope enclosingClone(cx);
     for (uint32_t i = 0; i <= src->bodyScopeIndex(); i++) {
-        Scope* original = src->getScope(i);
+        original = src->getScope(i);
 
-        Scope* enclosingClone;
         if (i == 0) {
             enclosingClone = enclosingScope;
         } else {
@@ -3372,9 +3374,9 @@ js::CloneScriptIntoFunction(JSContext* cx, HandleScope enclosingScope, HandleFun
 
         Scope* clone;
         if (original->is<FunctionScope>())
-            clone = original->as<FunctionScope>().clone(cx, fun, enclosingClone);
+            clone = FunctionScope::clone(cx, original.as<FunctionScope>(), fun, enclosingClone);
         else
-            clone = original->clone(cx, enclosingClone);
+            clone = Scope::clone(cx, original, enclosingClone);
 
         if (!clone || !scopes.append(clone))
             return nullptr;

@@ -219,8 +219,8 @@ class Scope : public js::gc::TenuredCell
         data_(data)
     { }
 
-    static Scope* create(ExclusiveContext* cx, ScopeKind kind, Scope* enclosing,
-                         Shape* environmentShape, uintptr_t data);
+    static Scope* create(ExclusiveContext* cx, ScopeKind kind, HandleScope enclosing,
+                         HandleShape envShape, uintptr_t data);
 
     Shape* maybeCloneEnvironmentShape(JSContext* cx);
 
@@ -272,7 +272,7 @@ class Scope : public js::gc::TenuredCell
 
     // GlobalScopes and FunctionScopes have extra data that's needed when
     // cloning and cannot use the generic clone.
-    Scope* clone(JSContext* cx, Scope* enclosing);
+    static Scope* clone(JSContext* cx, HandleScope scope, HandleScope enclosing);
 
     void traceChildren(JSTracer* trc);
     void finalize(FreeOp* fop);
@@ -312,7 +312,7 @@ class LexicalScope : public Scope
     }
 
     static LexicalScope* create(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
-                                uint32_t firstFrameSlot, Scope* enclosing);
+                                uint32_t firstFrameSlot, HandleScope enclosing);
 
   protected:
     BindingData& data() {
@@ -399,7 +399,7 @@ class FunctionScope : public Scope
     }
 
     static FunctionScope* create(ExclusiveContext* cx, BindingData* data, uint32_t firstFrameSlot,
-                                 JSFunction* fun, Scope* enclosing);
+                                 HandleFunction fun, HandleScope enclosing);
 
   private:
     // Because canonicalFunction is per-compartment and cannot be shared
@@ -435,7 +435,8 @@ class FunctionScope : public Scope
     }
 
   public:
-    FunctionScope* clone(JSContext* cx, JSFunction* fun, Scope* enclosing);
+    static FunctionScope* clone(JSContext* cx, Handle<FunctionScope*> scope, HandleFunction fun,
+                                HandleScope enclosing);
 
     uint32_t computeFirstFrameSlot() const {
         return computeNextFrameSlot(enclosing());
@@ -510,7 +511,7 @@ class GlobalScope : public Scope
     }
 
   public:
-    GlobalScope* clone(JSContext* cx, ScopeKind kind);
+    static GlobalScope* clone(JSContext* cx, Handle<GlobalScope*> scope, ScopeKind kind);
 
     bool isNonSyntactic() const {
         return kind() == ScopeKind::NonSyntactic;
@@ -534,7 +535,7 @@ class WithScope : public Scope
     static const ScopeKind classScopeKind_ = ScopeKind::With;
 
   public:
-    static WithScope* create(ExclusiveContext* cx, Scope* enclosing);
+    static WithScope* create(ExclusiveContext* cx, HandleScope enclosing);
 };
 
 class EvalScope : public Scope
@@ -567,7 +568,7 @@ class EvalScope : public Scope
     }
 
     static EvalScope* create(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
-                             Scope* enclosing);
+                             HandleScope enclosing);
 
   private:
     BindingData& data() {
@@ -998,6 +999,34 @@ SPECIALIZE_ROOTING_CONTAINERS(BindingIter);
 SPECIALIZE_ROOTING_CONTAINERS(ScopeIter);
 
 #undef SPECIALIZE_ROOTING_CONTAINERS
+
+//
+// Allow using is<T> and as<T> on Rooted<Scope*> and Handle<Scope*>.
+//
+
+template <>
+class RootedBase<Scope*>
+{
+  public:
+    template <class U>
+    JS::Handle<U*> as() const {
+        const JS::Rooted<Scope*>& self = *static_cast<const JS::Rooted<Scope*>*>(this);
+        MOZ_ASSERT(self->is<U>());
+        return Handle<U*>::fromMarkedLocation(reinterpret_cast<U* const*>(self.address()));
+    }
+};
+
+template <>
+class HandleBase<Scope*>
+{
+  public:
+    template <class U>
+    JS::Handle<U*> as() const {
+        const JS::Handle<Scope*>& self = *static_cast<const JS::Handle<Scope*>*>(this);
+        MOZ_ASSERT(self->is<U>());
+        return Handle<U*>::fromMarkedLocation(reinterpret_cast<U* const*>(self.address()));
+    }
+};
 
 } // namespace js
 
