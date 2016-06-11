@@ -3739,7 +3739,6 @@ BytecodeEmitter::emitFunctionScript(ParseNode* body)
          */
 
         if (funbox->argumentsHasLocalBinding()) {
-            MOZ_ASSERT(offset() == 0);  /* See JSScript::argumentsBytecode. */
             if (!emitInitializeFunctionSpecialName(cx->names().arguments, JSOP_ARGUMENTS))
                 return false;
         }

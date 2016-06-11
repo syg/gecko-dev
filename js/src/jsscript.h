@@ -1154,7 +1154,6 @@ class JSScript : public js::gc::TenuredCell
     bool argumentsHasVarBinding() const {
         return argsHasVarBinding_;
     }
-    jsbytecode* argumentsBytecode() const { MOZ_ASSERT(code()[0] == JSOP_ARGUMENTS); return code(); }
     void setArgumentsHasVarBinding();
     bool argumentsAliasesFormals() const {
         return argumentsHasVarBinding() && hasMappedArgsObj();
