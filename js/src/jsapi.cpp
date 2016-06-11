@@ -3519,8 +3519,6 @@ CreateNonSyntacticEnvironmentChain(JSContext* cx, AutoObjectVector& envChain,
         //
         // TODOshu: disallow the subscript loader from using non-distinguished
         // objects as dynamic scopes.
-        //
-        // TODOshu: fix static scope requirement?
         env.set(cx->compartment()->getOrCreateNonSyntacticLexicalEnvironment(cx, env));
         if (!env)
             return false;
