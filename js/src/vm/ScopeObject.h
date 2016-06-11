@@ -863,15 +863,8 @@ class LexicalEnvironmentObject : public EnvironmentObject
     static LexicalEnvironmentObject* create(JSContext* cx, Handle<LexicalScope*> scope,
                                             HandleObject enclosing);
 
-    void initThisValue(const Value& thisv) {
-        MOZ_ASSERT(isGlobal() || !isSyntactic());
-        initReservedSlot(THIS_VALUE_OR_SCOPE_SLOT, thisv);
-    }
-
-    void initScope(LexicalScope* scope) {
-        MOZ_ASSERT(!isGlobal() && isSyntactic());
-        initReservedSlot(THIS_VALUE_OR_SCOPE_SLOT, PrivateGCThingValue(scope));
-    }
+    void initThisValue(JSObject* obj);
+    void initScope(LexicalScope* scope);
 
   public:
     static LexicalEnvironmentObject* create(JSContext* cx, Handle<LexicalScope*> scope,
@@ -903,8 +896,12 @@ class LexicalEnvironmentObject : public EnvironmentObject
     // this environment. Otherwise asserts.
     LexicalScope& scope() const;
 
-    // Is this a syntactic (i.e. corresponds to a source text) lexical scope?
+    // Is this a syntactic (i.e. corresponds to a source text) lexical
+    // environment?
     bool isSyntactic() const;
+
+    // Is this a lexical environment that only holds parameters for a catch block?
+    bool isForCatchParameters() const;
 
     // For extensible lexical environments, the 'this' value for its
     // scope. Otherwise asserts.
@@ -977,14 +974,10 @@ class WithEnvironmentObject : public EnvironmentObject
                                                      HandleObject enclosing);
 
     /* Return the 'o' in 'with (o)'. */
-    JSObject& object() const {
-        return getReservedSlot(OBJECT_SLOT).toObject();
-    }
+    JSObject& object() const;
 
     /* Return object for GetThisValue. */
-    JSObject* withThis() const {
-        return &getReservedSlot(THIS_SLOT).toObject();
-    }
+    JSObject* withThis() const;
 
     /*
      * Return whether this object is a syntactic with object.  If not, this is a
@@ -992,17 +985,10 @@ class WithEnvironmentObject : public EnvironmentObject
      * global object to wrap the scope chain someone explicitly passed via JSAPI
      * to CompileFunction or script evaluation.
      */
-    bool isSyntactic() const {
-        Value v = getReservedSlot(SCOPE_SLOT);
-        MOZ_ASSERT(v.isPrivateGCThing() || v.isNull());
-        return v.isPrivateGCThing();
-    }
+    bool isSyntactic() const;
 
     // For syntactic with environment objects, the with scope.
-    WithScope& scope() const {
-        MOZ_ASSERT(isSyntactic());
-        return *static_cast<WithScope*>(getReservedSlot(SCOPE_SLOT).toGCThing());
-    }
+    WithScope& scope() const;
 
     static inline size_t objectSlot() {
         return OBJECT_SLOT;

@@ -1025,7 +1025,7 @@ LexicalEnvironmentObject::createGlobal(JSContext* cx, Handle<GlobalObject*> glob
     if (!JSObject::setSingleton(cx, env))
         return nullptr;
 
-    env->initThisValue(GetThisValue(global));
+    env->initThisValue(global);
     return env;
 }
 
@@ -1042,7 +1042,7 @@ LexicalEnvironmentObject::createNonSyntactic(JSContext* cx, HandleObject enclosi
     if (!env)
         return nullptr;
 
-    env->initThisValue(GetThisValue(enclosing));
+    env->initThisValue(enclosing);
     return env;
 }
 
@@ -1094,6 +1094,20 @@ LexicalEnvironmentObject::clone(JSContext* cx, Handle<LexicalEnvironmentObject*>
     return copy;
 }
 
+void
+LexicalEnvironmentObject::initThisValue(JSObject* obj)
+{
+    MOZ_ASSERT(isGlobal() || !isSyntactic());
+    initReservedSlot(THIS_VALUE_OR_SCOPE_SLOT, GetThisValue(obj));
+}
+
+void
+LexicalEnvironmentObject::initScope(LexicalScope* scope)
+{
+    MOZ_ASSERT(!isGlobal() && isSyntactic());
+    initReservedSlot(THIS_VALUE_OR_SCOPE_SLOT, PrivateGCThingValue(scope));
+}
+
 bool
 LexicalEnvironmentObject::isExtensible() const
 {
@@ -1114,6 +1128,12 @@ bool
 LexicalEnvironmentObject::isSyntactic() const
 {
     return !isExtensible() || isGlobal();
+}
+
+bool
+LexicalEnvironmentObject::isForCatchParameters() const
+{
+    return !isExtensible() && scope().kind() == ScopeKind::Catch;
 }
 
 Value
@@ -3402,6 +3422,33 @@ js::CreateObjectsForEnvironmentChain(JSContext* cx, AutoObjectVector& chain,
 
     envObj.set(enclosingEnv);
     return true;
+}
+
+JSObject&
+WithEnvironmentObject::object() const
+{
+    return getReservedSlot(OBJECT_SLOT).toObject();
+}
+
+JSObject*
+WithEnvironmentObject::withThis() const
+{
+    return &getReservedSlot(THIS_SLOT).toObject();
+}
+
+bool
+WithEnvironmentObject::isSyntactic() const
+{
+    Value v = getReservedSlot(SCOPE_SLOT);
+    MOZ_ASSERT(v.isPrivateGCThing() || v.isNull());
+    return v.isPrivateGCThing();
+}
+
+WithScope&
+WithEnvironmentObject::scope() const
+{
+    MOZ_ASSERT(isSyntactic());
+    return *static_cast<WithScope*>(getReservedSlot(SCOPE_SLOT).toGCThing());
 }
 
 bool
