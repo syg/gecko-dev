@@ -340,6 +340,10 @@ class LexicalScope : public Scope
     // defaults scope and the body scope. If so, we can omit wasting frame
     // slots and start the body scope at frame slot 0.
     bool optimizeParameterDefaultsFrameSlots(frontend::FunctionBox* funbox);
+
+    // Returns an empty shape for extensible global and non-syntactic lexical
+    // scopes.
+    static Shape* getEmptyExtensibleEnvironmentShape(JSContext* cx);
 };
 
 template <>
@@ -450,6 +454,8 @@ class FunctionScope : public Scope
     uint32_t numPositionalFormalParameters() const {
         return data().bindings->nonPositionalFormalStart;
     }
+
+    static Shape* getEmptyEnvironmentShape(JSContext* cx);
 };
 
 // Scope corresponding to both the global object scope and the global lexical
@@ -907,6 +913,91 @@ class ScopeIter
         TraceEdge(trc, &scope_, "scope iter scope");
     }
 };
+
+//
+// Specializations of Rooted containers for the iterators.
+//
+
+template <typename Outer>
+class BindingIterOperations
+{
+    const BindingIter& iter() const { return static_cast<const Outer*>(this)->get(); }
+
+  public:
+    bool done() const { return iter().done(); }
+    explicit operator bool() const { return !done(); }
+    bool canHaveArgumentSlots() const { return iter().canHaveArgumentSlots(); }
+    bool canHaveFrameSlots() const { return iter().canHaveFrameSlots(); }
+    bool canHaveEnvironmentSlots() const { return iter().canHaveEnvironmentSlots(); }
+    JSAtom* name() const { return iter().name(); }
+    bool closedOver() const { return iter().closedOver(); }
+    BindingLocation location() const { return iter().location(); }
+    BindingKind kind() const { return iter().kind(); }
+    bool hasArgumentSlot() const { return iter().hasArgumentSlot(); }
+    uint16_t argumentSlot() const { return iter().argumentSlot(); }
+    uint32_t nextFrameSlot() const { return iter().nextFrameSlot(); }
+    uint32_t nextEnvironmentSlot() const { return iter().nextEnvironmentSlot(); }
+};
+
+template <typename Outer>
+class MutableBindingIterOperations : public BindingIterOperations<Outer>
+{
+    const BindingIter& iter() const { return static_cast<const Outer*>(this)->get(); }
+    BindingIter& iter() { return static_cast<Outer*>(this)->get(); }
+
+  public:
+    void operator++(int) { iter().operator++(1); }
+};
+
+template <typename Outer>
+class ScopeIterOperations
+{
+    const ScopeIter& iter() const { return static_cast<const Outer*>(this)->get(); }
+
+  public:
+    bool done() const { return iter().done(); }
+    explicit operator bool() const { return !done(); }
+    Scope* scope() const { return iter().scope(); }
+    ScopeKind kind() const { return iter().kind(); }
+    Shape* environmentShape() const { return iter().environmentShape(); }
+    bool hasSyntacticEnvironment() const { return iter().hasSyntacticEnvironment(); }
+};
+
+template <typename Outer>
+class MutableScopeIterOperations
+{
+    const ScopeIter& iter() const { return static_cast<const Outer*>(this)->get(); }
+    ScopeIter& iter() { return static_cast<Outer*>(this)->get(); }
+
+  public:
+    void operator++(int) { iter().operator++(1); }
+};
+
+#define SPECIALIZE_ROOTING_CONTAINERS(Iter)                             \
+    template <>                                                         \
+    class RootedBase<Iter>                                              \
+      : public Mutable##Iter##Operations<JS::Rooted<Iter>>              \
+    { };                                                                \
+                                                                        \
+    template <>                                                         \
+    class MutableHandleBase<Iter>                                       \
+      : public Mutable##Iter##Operations<JS::MutableHandle<Iter>>       \
+    { };                                                                \
+                                                                        \
+    template <>                                                         \
+    class HandleBase<Iter>                                              \
+      : public Iter##Operations<JS::Handle<Iter>>                       \
+    { };                                                                \
+                                                                        \
+    template <>                                                         \
+    class PersistentRootedBase<Iter>                                    \
+      : public Iter##Operations<JS::PersistentRooted<Iter>>             \
+    { }
+
+SPECIALIZE_ROOTING_CONTAINERS(BindingIter);
+SPECIALIZE_ROOTING_CONTAINERS(ScopeIter);
+
+#undef SPECIALIZE_ROOTING_CONTAINERS
 
 } // namespace js
 

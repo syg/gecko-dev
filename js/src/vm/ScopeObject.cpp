@@ -413,20 +413,27 @@ CallObject::createHollowForDebug(JSContext* cx, HandleFunction callee)
 {
     MOZ_ASSERT(!callee->needsCallObject());
 
-    // This scope's parent link is never used: the DebugScopeObject that
-    // refers to this scope carries its own parent link, which is what
-    // Debugger uses to construct the tree of Debugger.Environment objects. So
-    // just parent this scope directly to the global lexical scope.
     Rooted<GlobalObject*> global(cx, &callee->global());
-    RootedObject globalLexical(cx, &global->lexicalScope());
-    Rooted<CallObject*> callobj(cx, createForFunction(cx, globalLexical, callee));
+    RootedShape shape(cx, FunctionScope::getEmptyEnvironmentShape(cx));
+    if (!shape)
+        return nullptr;
+    RootedObjectGroup group(cx, ObjectGroup::defaultNewGroup(cx, &class_, TaggedProto(nullptr)));
+    if (!group)
+        return nullptr;
+    Rooted<CallObject*> callobj(cx, create(cx, shape, group));
     if (!callobj)
         return nullptr;
+
+    // This environment's parent link is never used: the DebugScopeObject that
+    // refers to this scope carries its own parent link, which is what
+    // Debugger uses to construct the tree of Debugger.Environment objects.
+    callobj->initEnclosingEnvironment(nullptr);
+    callobj->initFixedSlot(CALLEE_SLOT, ObjectOrNullValue(callee));
 
     RootedValue optimizedOut(cx, MagicValue(JS_OPTIMIZED_OUT));
     RootedId id(cx);
     RootedScript script(cx, callee->nonLazyScript());
-    for (BindingIter bi(script); bi; bi++) {
+    for (Rooted<BindingIter> bi(cx, BindingIter(script)); !bi; bi++) {
         id = NameToId(bi.name()->asPropertyName());
         if (!SetProperty(cx, callobj, id, optimizedOut))
             return nullptr;
@@ -943,6 +950,136 @@ const Class NonSyntacticVariablesObject::class_ = {
 };
 
 /*****************************************************************************/
+
+bool
+LexicalEnvironmentObject::isExtensible() const
+{
+    return nonProxyIsExtensible();
+}
+
+/* static */ LexicalEnvironmentObject*
+LexicalEnvironmentObject::create(JSContext* cx, HandleShape shape, HandleObject enclosing)
+{
+
+    MOZ_ASSERT(shape->getObjectClass() == &LexicalEnvironmentObject::class_);
+
+    RootedObjectGroup group(cx, ObjectGroup::defaultNewGroup(cx, &LexicalEnvironmentObject::class_,
+                                                             TaggedProto(nullptr)));
+    if (!group)
+        return nullptr;
+
+    gc::AllocKind allocKind = gc::GetGCObjectKind(&LexicalEnvironmentObject::class_);
+    if (CanBeFinalizedInBackground(allocKind, &LexicalEnvironmentObject::class_))
+        allocKind = GetBackgroundAllocKind(allocKind);
+    RootedNativeObject obj(cx, MaybeNativeObject(JSObject::create(cx, allocKind,
+                                                                  gc::TenuredHeap, shape, group)));
+    if (!obj)
+        return nullptr;
+
+    MOZ_ASSERT(!obj->inDictionaryMode());
+    MOZ_ASSERT(obj->isDelegate());
+
+    LexicalEnvironmentObject* res = &obj->as<LexicalEnvironmentObject>();
+
+    MOZ_ASSERT(enclosing);
+    res->initEnclosingEnvironment(enclosing);
+
+    if (res->isGlobal() || !res->isSyntactic())
+        res->initFixedSlot(THIS_VALUE_SLOT, GetThisValue(enclosing));
+
+    return res;
+}
+
+/* static */ LexicalEnvironmentObject*
+LexicalEnvironmentObject::create(JSContext* cx, Handle<LexicalScope*> scope,
+                                 AbstractFramePtr frame)
+{
+    assertSameCompartment(cx, frame);
+    MOZ_ASSERT(scope->environmentShape());
+    RootedShape shape(cx, scope->environmentShape());
+    RootedObject enclosing(cx, frame.environmentChain());
+    return create(cx, shape, enclosing);
+}
+
+/* static */ LexicalEnvironmentObject*
+LexicalEnvironmentObject::createGlobal(JSContext* cx, Handle<GlobalObject*> global)
+{
+    RootedShape shape(cx, LexicalScope::getEmptyExtensibleEnvironmentShape(cx));
+    if (!shape)
+        return nullptr;
+    Rooted<LexicalEnvironmentObject*> lexical(cx,
+        LexicalEnvironmentObject::create(cx, shape, global));
+    if (!lexical)
+        return nullptr;
+    if (!JSObject::setSingleton(cx, lexical))
+        return nullptr;
+    return lexical;
+}
+
+/* static */ LexicalEnvironmentObject*
+LexicalEnvironmentObject::createNonSyntactic(JSContext* cx, HandleObject enclosing)
+{
+    MOZ_ASSERT(!IsSyntacticScope(enclosing));
+    RootedShape shape(cx, LexicalScope::getEmptyExtensibleEnvironmentShape(cx));
+    if (!shape)
+        return nullptr;
+    return LexicalEnvironmentObject::create(cx, shape, enclosing);
+}
+
+/* static */ LexicalEnvironmentObject*
+LexicalEnvironmentObject::createHollowForDebug(JSContext* cx, Handle<LexicalScope*> scope)
+{
+    MOZ_ASSERT(!scope->environmentShape());
+
+    RootedShape shape(cx, LexicalScope::getEmptyExtensibleEnvironmentShape(cx));
+    if (!shape)
+        return nullptr;
+
+    // This environment's parent link is never used: the DebugScopeObject that
+    // refers to this scope carries its own parent link, which is what
+    // Debugger uses to construct the tree of Debugger.Environment objects.
+    Rooted<LexicalEnvironmentObject*> obj(cx, create(cx, shape, nullptr));
+    if (!obj)
+        return nullptr;
+
+    RootedValue optimizedOut(cx, MagicValue(JS_OPTIMIZED_OUT));
+    RootedId id(cx);
+    for (Rooted<BindingIter> bi(cx, BindingIter(scope)); !bi; bi++) {
+        id = NameToId(bi.name()->asPropertyName());
+        if (!SetProperty(cx, obj, id, optimizedOut))
+            return nullptr;
+    }
+
+    if (!obj->setFlags(cx, BaseShape::NOT_EXTENSIBLE, JSObject::GENERATE_SHAPE))
+        return nullptr;
+
+    return obj;
+}
+
+Value
+LexicalEnvironmentObject::thisValue() const
+{
+    MOZ_ASSERT(isGlobal() || !isSyntactic());
+    Value v = getReservedSlot(THIS_VALUE_SLOT);
+    if (v.isObject()) {
+        // If `v` is a Window, return the WindowProxy instead. We called
+        // GetThisValue (which also does ToWindowProxyIfWindow) when storing
+        // the value in THIS_VALUE_SLOT, but it's possible the WindowProxy was
+        // attached to the global *after* we set THIS_VALUE_SLOT.
+        return ObjectValue(*ToWindowProxyIfWindow(&v.toObject()));
+    }
+    return v;
+}
+
+const Class LexicalEnvironmentObject::class_ = {
+    "LexicalEnvironment",
+    JSCLASS_HAS_RESERVED_SLOTS(LexicalEnvironmentObject::RESERVED_SLOTS) |
+    JSCLASS_IS_ANONYMOUS,
+    JS_NULL_CLASS_OPS,
+    JS_NULL_CLASS_SPEC,
+    JS_NULL_CLASS_EXT,
+    JS_NULL_OBJECT_OPS
+};
 
 bool
 ClonedBlockObject::isExtensible() const

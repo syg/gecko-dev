@@ -650,7 +650,7 @@ class JSScript : public js::gc::TenuredCell
 
     friend bool
     js::detail::CopyScript(JSContext* cx, js::HandleScript src, js::HandleScript dst,
-                           js::MutableHandle<GCVector<js::Scope*>> scopes);
+                           js::MutableHandle<JS::GCVector<js::Scope*>> scopes);
 
   private:
     jsbytecode*     code_;     /* bytecodes and their immediate operands */

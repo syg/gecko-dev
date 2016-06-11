@@ -649,7 +649,6 @@ class ScopeObject : public NativeObject
     }
 };
 
-
 class EnvironmentObject : public NativeObject
 {
   protected:
@@ -734,6 +733,7 @@ class CallObject : public VarEnvironmentObject
                               HandleFunction callee);
 
   public:
+    static const uint32_t RESERVED_SLOTS = 2;
     static const Class class_;
 
     /* These functions are internal and are exposed only for JITs. */
@@ -752,8 +752,6 @@ class CallObject : public VarEnvironmentObject
 
     static CallObject* createTemplateObject(JSContext* cx, HandleScript script,
                                             gc::InitialHeap heap);
-
-    static const uint32_t RESERVED_SLOTS = 2;
 
     static CallObject* createForFunction(JSContext* cx, HandleObject enclosing,
                                          HandleFunction callee);
@@ -846,6 +844,52 @@ class ModuleEnvironmentObject : public LexicalScopeBase
 typedef Rooted<ModuleEnvironmentObject*> RootedModuleEnvironmentObject;
 typedef Handle<ModuleEnvironmentObject*> HandleModuleEnvironmentObject;
 typedef MutableHandle<ModuleEnvironmentObject*> MutableHandleModuleEnvironmentObject;
+
+class LexicalEnvironmentObject : public EnvironmentObject
+{
+    static const unsigned THIS_VALUE_SLOT = 1;
+
+  public:
+    static const unsigned RESERVED_SLOTS = 2;
+    static const Class class_;
+
+  private:
+    static LexicalEnvironmentObject* create(JSContext* cx, HandleShape shape,
+                                            HandleObject enclosing);
+
+  public:
+    static LexicalEnvironmentObject* create(JSContext* cx, Handle<LexicalScope*> scope,
+                                            AbstractFramePtr frame);
+
+    static LexicalEnvironmentObject* createGlobal(JSContext* cx, Handle<GlobalObject*> global);
+    static LexicalEnvironmentObject* createNonSyntactic(JSContext* cx, HandleObject enclosing);
+    static LexicalEnvironmentObject* createHollowForDebug(JSContext* cx,
+                                                          Handle<LexicalScope*> scope);
+
+    // Create a new ClonedBlockObject with the same enclosing scope and
+    // variable values as this.
+    static LexicalEnvironmentObject* clone(JSContext* cx, Handle<LexicalEnvironmentObject*> env);
+
+    // Global lexical scopes are extensible. Non-global lexicals scopes are
+    // not.
+    bool isExtensible() const;
+
+    // Is this the global lexical scope?
+    bool isGlobal() const {
+        return enclosingEnvironment().is<GlobalObject>();
+    }
+
+    GlobalObject& global() const {
+        MOZ_ASSERT(isGlobal());
+        return enclosingEnvironment().as<GlobalObject>();
+    }
+
+    bool isSyntactic() const {
+        return !isExtensible() || isGlobal();
+    }
+
+    Value thisValue() const;
+};
 
 class DeclEnvObject : public ScopeObject
 {

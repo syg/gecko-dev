@@ -124,7 +124,7 @@ CopyBindingData(ExclusiveContext* cx, ScopeData* data, size_t dataSize)
 template <typename ScopeData>
 static ScopeData*
 CopyBindingData(ExclusiveContext* cx, BindingIter& bi, ScopeData* data, size_t dataSize,
-              const Class* cls, uint32_t baseShapeFlags, Shape** envShape)
+                const Class* cls, uint32_t baseShapeFlags, Shape** envShape)
 {
     // Copy a fresh BindingIter for use below.
     BindingIter freshBi(bi);
@@ -292,6 +292,12 @@ LexicalScope::create(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
     return &scope->as<LexicalScope>();
 }
 
+/* static */ Shape*
+LexicalScope::getEmptyExtensibleEnvironmentShape(JSContext* cx)
+{
+    return EmptyEnvironmentShape(cx, &LexicalEnvironmentObject::class_, 0, BaseShape::DELEGATE);
+}
+
 /* static */ FunctionScope*
 FunctionScope::create(ExclusiveContext* cx, BindingData* bindings, uint32_t firstFrameSlot,
                       JSFunction* fun, Scope* enclosing)
@@ -359,6 +365,13 @@ JSScript*
 FunctionScope::script() const
 {
     return canonicalFunction()->nonLazyScript();
+}
+
+/* static */ Shape*
+FunctionScope::getEmptyEnvironmentShape(JSContext* cx)
+{
+    return EmptyEnvironmentShape(cx, &CallObject::class_, 0,
+                                 BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE);
 }
 
 /* static */ GlobalScope*
