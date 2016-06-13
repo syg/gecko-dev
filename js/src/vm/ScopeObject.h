@@ -934,7 +934,7 @@ class DeclEnvObject : public ScopeObject
 //
 // This is used in ExecuteInGlobalAndReturnScope and sits in front of the
 // global scope to capture 'var' and bareword asignments.
-class NonSyntacticVariablesObject : public ScopeObject
+class NonSyntacticVariablesObject : public EnvironmentObject
 {
   public:
     static const unsigned RESERVED_SLOTS = 1;

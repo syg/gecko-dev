@@ -461,14 +461,13 @@ js::ExecuteInGlobalAndReturnScope(JSContext* cx, HandleObject global, HandleScri
         Debugger::onNewScript(cx, script);
     }
 
-    Rooted<ScopeObject*> env(cx, NonSyntacticVariablesObject::create(cx));
+    Rooted<EnvironmentObject*> env(cx, NonSyntacticVariablesObject::create(cx));
     if (!env)
         return false;
 
     // Unlike the non-syntactic scope chain API used by the subscript loader,
     // this API creates a fresh block scope each time.
-    RootedObject enclosingStaticScope(cx);
-    env = ClonedBlockObject::createNonSyntactic(cx, enclosingStaticScope, env);
+    env = LexicalEnvironmentObject::createNonSyntactic(cx, env);
     if (!env)
         return false;
 

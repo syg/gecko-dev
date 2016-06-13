@@ -920,7 +920,7 @@ StaticNonSyntacticScope::create(JSContext*cx, HandleObject enclosing)
 {
     StaticNonSyntacticScope* obj =
         NewObjectWithNullTaggedProto<StaticNonSyntacticScope>(cx, TenuredObject,
-                                                                     BaseShape::DELEGATE);
+                                                              BaseShape::DELEGATE);
     if (!obj)
         return nullptr;
 
@@ -948,7 +948,7 @@ NonSyntacticVariablesObject::create(JSContext* cx)
         return nullptr;
 
     RootedObject globalLexical(cx, &cx->global()->lexicalEnvironment());
-    obj->setEnclosingScope(globalLexical);
+    obj->initEnclosingEnvironment(globalLexical);
     return obj;
 }
 
