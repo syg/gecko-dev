@@ -369,7 +369,7 @@ LexicalScope::getEmptyExtensibleEnvironmentShape(JSContext* cx)
 template <XDRMode mode>
 /* static */ bool
 LexicalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, HandleScope enclosing,
-                  MutableHandle<LexicalScope*> scope)
+                  MutableHandleScope scope)
 {
     JSContext* cx = xdr->cx();
 
@@ -476,7 +476,7 @@ FunctionScope::getEmptyEnvironmentShape(JSContext* cx)
 template <XDRMode mode>
 /* static */ bool
 FunctionScope::XDR(XDRState<mode>* xdr, HandleFunction fun, HandleScope enclosing,
-                   MutableHandle<FunctionScope*> scope)
+                   MutableHandleScope scope)
 {
     JSContext* cx = xdr->cx();
 
@@ -540,7 +540,7 @@ GlobalScope::clone(JSContext* cx, Handle<GlobalScope*> scope, ScopeKind kind)
 
 template <XDRMode mode>
 /* static */ bool
-GlobalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, MutableHandle<GlobalScope*> scope)
+GlobalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, MutableHandleScope scope)
 {
     JSContext* cx = xdr->cx();
 
@@ -627,7 +627,7 @@ EvalScope::nearestVarScopeForDirectEval(Scope* scope)
 template <XDRMode mode>
 /* static */ bool
 EvalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, HandleScope enclosing,
-               MutableHandle<EvalScope*> scope)
+               MutableHandleScope scope)
 {
     JSContext* cx = xdr->cx();
 

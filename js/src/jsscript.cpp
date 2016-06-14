@@ -218,7 +218,7 @@ XDRLazyFreeVariables(XDRState<mode>* xdr, MutableHandle<LazyScript*> lazy)
 template<XDRMode mode>
 static bool
 XDRRelazificationInfo(XDRState<mode>* xdr, HandleFunction fun, HandleScript script,
-                      HandleObject enclosingScope, MutableHandle<LazyScript*> lazy)
+                      HandleScope enclosingScope, MutableHandle<LazyScript*> lazy)
 {
     MOZ_ASSERT_IF(mode == XDR_ENCODE, script->isRelazifiable() && script->maybeLazyScript());
     MOZ_ASSERT_IF(mode == XDR_ENCODE, !lazy->numInnerFunctions());
@@ -248,8 +248,6 @@ XDRRelazificationInfo(XDRState<mode>* xdr, HandleFunction fun, HandleScript scri
             return false;
 
         if (mode == XDR_DECODE) {
-            // TODOshu
-            RootedScope enclosingScope(cx);
             lazy.set(LazyScript::Create(cx, fun, script, enclosingScope, script,
                                         packedFields, begin, end, lineno, column));
 
@@ -309,7 +307,7 @@ enum XDRClassKind {
 
 template<XDRMode mode>
 bool
-js::XDRScript(XDRState<mode>* xdr, HandleScope enclosingScope, HandleScript enclosingScript,
+js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope, HandleScript enclosingScript,
               HandleFunction fun, MutableHandleScript scriptp)
 {
     /* NB: Keep this in sync with CopyScript. */
@@ -348,6 +346,7 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope enclosingScope, HandleScript encl
     uint32_t funLength = 0;
     uint32_t nTypeSets = 0;
     uint32_t scriptBits = 0;
+    uint32_t bodyScopeIndex = 0;
 
     JSContext* cx = xdr->cx();
     RootedScript script(cx);
@@ -389,6 +388,7 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope enclosingScope, HandleScript encl
         lineno = script->lineno();
         column = script->column();
         nslots = script->nslots();
+        bodyScopeIndex = script->bodyScopeIndex();
         natoms = script->natoms();
 
         nsrcnotes = script->numNotes();
@@ -610,10 +610,14 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope enclosingScope, HandleScript encl
         return false;
     }
 
+    if (!xdr->codeUint32(&bodyScopeIndex))
+        return false;
+
     if (mode == XDR_DECODE) {
         script->lineno_ = lineno;
         script->column_ = column;
         script->nslots_ = nslots;
+        script->bodyScopeIndex_ = bodyScopeIndex;
     }
 
     jsbytecode* code = script->code();
@@ -666,13 +670,74 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope enclosingScope, HandleScript encl
         }
     }
 
-    MOZ_ASSERT(nscopes != 0);
-    for (i = 0; i != nscopes; ++i) {
-        GCPtrScope* scopep = &script->scopes()->vector[i];
-
+    {
+        MOZ_ASSERT(nscopes != 0);
+        GCPtrScope* vector = script->scopes()->vector;
+        RootedScope scope(cx);
+        RootedScope enclosing(cx);
         ScopeKind scopeKind;
-        if (!xdr->codeEnum32(&scopeKind))
-            return false;
+        uint32_t enclosingIndex;
+        for (i = 0; i != nscopes; ++i) {
+            if (mode == XDR_ENCODE) {
+                scope = vector[i];
+                scopeKind = scope->kind();
+            }
+
+            if (!xdr->codeEnum32(&scopeKind))
+                return false;
+
+            if (mode == XDR_ENCODE) {
+                if (i == 0)
+                    enclosingIndex = UINT32_MAX;
+                else
+                    enclosingIndex = FindScopeIndex(script, scope->enclosing());
+            }
+
+            if (!xdr->codeUint32(&enclosingScopeIndex))
+                return false;
+
+            if (mode == XDR_DECODE) {
+                if (i == 0) {
+                    MOZ_ASSERT(enclosingIndex == UINT32_MAX);
+                    enclosing = scriptEnclosingScope;
+                } else {
+                    MOZ_ASSERT(enclosingScopeIndex < i);
+                    enclosing = vector[enclosingScopeIndex];
+                }
+            }
+
+            switch (scopeKind) {
+              case ScopeKind::Function:
+                MOZ_ASSERT(i == script->bodyScopeIndex());
+                if (!FunctionScope::XDR(xdr, fun, enclosing, &scope))
+                    return false;
+                break;
+              case ScopeKind::ParameterDefaults:
+              case ScopeKind::Lexical:
+              case ScopeKind::Catch:
+                if (!LexicalScope::XDR(xdr, scopeKind, enclosing, &scope))
+                    return false;
+                break;
+              case ScopeKind::With:
+                break;
+              case ScopeKind::Eval:
+              case ScopeKind::StrictEval:
+                if (!EvalScope::XDR(xdr, scopeKind, enclosing, &scope))
+                    return false;
+                break;
+              case ScopeKind::Global:
+              case ScopeKind::NonSyntactic:
+                if (!GlobalScope::XDR(xdr, scopeKind, &scope))
+                    return false;
+                break;
+              case ScopeKind::Module:
+                MOZ_CRASH("NYI");
+                break;
+            }
+
+            if (mode == XDR_DECODE)
+                vector[i].init(scope);
+        }
     }
 
     /*
@@ -865,8 +930,7 @@ js::XDRLazyScript(XDRState<mode>* xdr, HandleObject enclosingScope, HandleScript
         }
 
         if (mode == XDR_DECODE) {
-            // TODOshu enclosing scope
-            lazy.set(LazyScript::Create(cx, fun, nullptr, nullptr, enclosingScript,
+            lazy.set(LazyScript::Create(cx, fun, nullptr, enclosingScope, enclosingScript,
                                         packedFields, begin, end, lineno, column));
             if (!lazy)
                 return false;
@@ -3657,11 +3721,13 @@ js::SetFrameArgumentsObject(JSContext* cx, AbstractFramePtr frame,
      * object. Note that 'arguments' may have already been overwritten.
      */
 
-#if 0
-    TODOshu
-    BindingIter bi = Bindings::argumentsBinding(cx, script);
+    Rooted<BindingIter> bi(cx, BindingIter(script));
+    while (bi && bi.name() != cx->names().arguments)
+        bi++;
+    if (!bi)
+        return;
 
-    if (script->bindingIsAliased(bi)) {
+    if (bi.location().kind() == BindingLocation::Kind::Environment) {
         /*
          * Scan the script to find the slot in the call object that 'arguments'
          * is assigned to.
@@ -3675,13 +3741,15 @@ js::SetFrameArgumentsObject(JSContext* cx, AbstractFramePtr frame,
         // Note that here and below, it is insufficient to only check for
         // JS_OPTIMIZED_ARGUMENTS, as Ion could have optimized out the
         // arguments slot.
-        if (IsOptimizedPlaceholderMagicValue(frame.callObj().as<ScopeObject>().aliasedVar(ScopeCoordinate(pc))))
-            frame.callObj().as<ScopeObject>().setAliasedVar(cx, ScopeCoordinate(pc), cx->names().arguments, ObjectValue(*argsobj));
+        EnvironmentObject& env = frame.callObj().as<EnvironmentObject>();
+        if (IsOptimizedPlaceholderMagicValue(env.aliasedBinding(bi)))
+            env.setAliasedBinding(cx, bi, ObjectValue(*argsobj));
     } else {
-        if (IsOptimizedPlaceholderMagicValue(frame.unaliasedLocal(bi.frameIndex())))
-            frame.unaliasedLocal(bi.frameIndex()) = ObjectValue(*argsobj);
+        MOZ_ASSERT(bi.location().kind() == BindingLocation::Kind::Frame);
+        uint32_t frameSlot = bi.location().slot();
+        if (IsOptimizedPlaceholderMagicValue(frame.unaliasedLocal(frameSlot)))
+            frame.unaliasedLocal(frameSlot) = ObjectValue(*argsobj);
     }
-#endif
 }
 
 /* static */ bool
@@ -3766,7 +3834,8 @@ JSScript::formalLivesInArgumentsObject(unsigned argSlot)
     return argsObjAliasesFormals() && !formalIsAliased(argSlot);
 }
 
-LazyScript::LazyScript(JSFunction* fun, void* table, uint64_t packedFields, uint32_t begin, uint32_t end, uint32_t lineno, uint32_t column)
+LazyScript::LazyScript(JSFunction* fun, void* table, uint64_t packedFields,
+                       uint32_t begin, uint32_t end, uint32_t lineno, uint32_t column)
   : script_(nullptr),
     function_(fun),
     enclosingScope_(nullptr),

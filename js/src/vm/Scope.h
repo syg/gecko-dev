@@ -317,7 +317,7 @@ class LexicalScope : public Scope
 
     template <XDRMode mode>
     static bool XDR(XDRState<mode>* xdr, ScopeKind kind, HandleScope enclosing,
-                    MutableHandle<LexicalScope*> scope);
+                    MutableHandleScope scope);
 
   protected:
     BindingData& data() {
@@ -408,7 +408,7 @@ class FunctionScope : public Scope
 
     template <XDRMode mode>
     static bool XDR(XDRState<mode>* xdr, HandleFunction fun, HandleScope enclosing,
-                    MutableHandle<FunctionScope*> scope);
+                    MutableHandleScope scope);
 
   private:
     // Because canonicalFunction is per-compartment and cannot be shared
@@ -511,7 +511,7 @@ class GlobalScope : public Scope
     static GlobalScope* create(ExclusiveContext* cx, ScopeKind kind, BindingData* data);
 
     template <XDRMode mode>
-    static bool XDR(XDRState<mode>* xdr, ScopeKind kind, MutableHandle<GlobalScope*> scope);
+    static bool XDR(XDRState<mode>* xdr, ScopeKind kind, MutableHandleScope scope);
 
   private:
     BindingData& data() {
@@ -584,7 +584,7 @@ class EvalScope : public Scope
 
     template <XDRMode mode>
     static bool XDR(XDRState<mode>* xdr, ScopeKind kind, HandleScope enclosing,
-                    MutableHandle<EvalScope*> scope);
+                    MutableHandleScope scope);
 
   private:
     BindingData& data() {
