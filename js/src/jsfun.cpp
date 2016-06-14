@@ -2037,7 +2037,7 @@ NewFunctionEnvironmentIsWellFormed(ExclusiveContext* cx, HandleObject env)
     // NonSyntacticVariablesObject).
     RootedObject terminatingEnv(cx, SkipEnvironmentObjects(env));
     return !terminatingEnv || terminatingEnv == cx->global() ||
-           terminatingEnv->is<DebugScopeObject>();
+           terminatingEnv->is<DebugEnvironmentProxy>();
 }
 #endif
 

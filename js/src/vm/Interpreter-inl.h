@@ -279,8 +279,8 @@ SetNameOperation(JSContext* cx, JSScript* script, jsbytecode* pc, HandleObject e
     RootedValue receiver(cx, ObjectValue(*env));
     if (env->isUnqualifiedVarObj()) {
         RootedNativeObject varobj(cx);
-        if (env->is<DebugScopeObject>())
-            varobj = &env->as<DebugScopeObject>().scope().as<NativeObject>();
+        if (env->is<DebugEnvironmentProxy>())
+            varobj = &env->as<DebugEnvironmentProxy>().environment().as<NativeObject>();
         else
             varobj = &env->as<NativeObject>();
         MOZ_ASSERT(!varobj->getOpsSetProperty());

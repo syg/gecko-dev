@@ -347,10 +347,10 @@ BytecodeCompiler::maybeSetSourceMapFromOptions()
 bool
 BytecodeCompiler::deoptimizeArgumentsInEnclosingScripts(JSContext* cx, HandleObject environment)
 {
-    RootedObject scope(cx, environment);
-    while (scope->is<ScopeObject>() || scope->is<DebugScopeObject>()) {
-        if (scope->is<CallObject>() && !scope->as<CallObject>().isForEval()) {
-            RootedScript script(cx, scope->as<CallObject>().callee().getOrCreateScript(cx));
+    RootedObject env(cx, environment);
+    while (env->is<EnvironmentObject>() || env->is<DebugEnvironmentProxy>()) {
+        if (env->is<CallObject>() && !env->as<CallObject>().isForEval()) {
+            RootedScript script(cx, env->as<CallObject>().callee().getOrCreateScript(cx));
             if (!script)
                 return false;
             if (script->argumentsHasVarBinding()) {
@@ -358,7 +358,7 @@ BytecodeCompiler::deoptimizeArgumentsInEnclosingScripts(JSContext* cx, HandleObj
                     return false;
             }
         }
-        scope = scope->enclosingScope();
+        env = env->enclosingScope();
     }
 
     return true;

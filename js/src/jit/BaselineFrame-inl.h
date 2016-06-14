@@ -45,7 +45,7 @@ inline void
 BaselineFrame::popWith(JSContext* cx)
 {
     if (MOZ_UNLIKELY(isDebuggee()))
-        DebugScopes::onPopWith(this);
+        DebugEnvironments::onPopWith(this);
 
     MOZ_ASSERT(environmentChain()->is<WithEnvironmentObject>());
     popOffEnvironmentChain();

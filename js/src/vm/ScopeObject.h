@@ -863,8 +863,15 @@ class LexicalEnvironmentObject : public EnvironmentObject
     static LexicalEnvironmentObject* create(JSContext* cx, Handle<LexicalScope*> scope,
                                             HandleObject enclosing);
 
-    void initThisValue(JSObject* obj);
-    void initScope(LexicalScope* scope);
+    void initThisValue(JSObject* obj) {
+        MOZ_ASSERT(isGlobal() || !isSyntactic());
+        initReservedSlot(THIS_VALUE_OR_SCOPE_SLOT, GetThisValue(obj));
+    }
+
+    void initScope(LexicalScope* scope) {
+        MOZ_ASSERT(!isGlobal() && isSyntactic());
+        initReservedSlot(THIS_VALUE_OR_SCOPE_SLOT, PrivateGCThingValue(scope));
+    }
 
   public:
     static LexicalEnvironmentObject* create(JSContext* cx, Handle<LexicalScope*> scope,
@@ -879,6 +886,18 @@ class LexicalEnvironmentObject : public EnvironmentObject
     // variable values as this.
     static LexicalEnvironmentObject* clone(JSContext* cx, Handle<LexicalEnvironmentObject*> env);
 
+    // Copy in all the unaliased formals and locals.
+    static bool copyUnaliasedValues(JSContext* cx, Handle<LexicalEnvironmentObject*> env,
+                                    AbstractFramePtr frame);
+
+    // For non-extensible lexical environments, the LexicalScope that created
+    // this environment. Otherwise asserts.
+    LexicalScope& scope() const {
+        Value v = getReservedSlot(THIS_VALUE_OR_SCOPE_SLOT);
+        MOZ_ASSERT(!isExtensible() && v.isPrivateGCThing());
+        return *static_cast<LexicalScope*>(v.toGCThing());
+    }
+
     // Is this the global lexical scope?
     bool isGlobal() const {
         return enclosingEnvironment().is<GlobalObject>();
@@ -892,16 +911,11 @@ class LexicalEnvironmentObject : public EnvironmentObject
     // lexical scopes are not.
     bool isExtensible() const;
 
-    // For non-extensible lexical environments, the LexicalScope that created
-    // this environment. Otherwise asserts.
-    LexicalScope& scope() const;
-
     // Is this a syntactic (i.e. corresponds to a source text) lexical
     // environment?
-    bool isSyntactic() const;
-
-    // Is this a lexical environment that only holds parameters for a catch block?
-    bool isForCatchParameters() const;
+    bool isSyntactic() const {
+        return !isExtensible() || isGlobal();
+    }
 
     // For extensible lexical environments, the 'this' value for its
     // scope. Otherwise asserts.
@@ -1147,11 +1161,11 @@ CloneNestedScopeObject(JSContext* cx, HandleObject enclosingScope,
 // global code.
 class MOZ_RAII EnvironmentIter
 {
-    StaticScopeIter<CanGC> ssi_;
-    RootedObject scope_;
+    Rooted<ScopeIter> si_;
+    RootedObject env_;
     AbstractFramePtr frame_;
 
-    void incrementStaticScopeIter();
+    void incrementScopeIter();
     void settle();
 
     // No value semantics.
@@ -1162,109 +1176,145 @@ class MOZ_RAII EnvironmentIter
     EnvironmentIter(JSContext* cx, const EnvironmentIter& ei
                     MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
 
-    // Constructing from a dynamic scope, static scope pair. All scopes are
+    // Constructing from an environment, scope pair. All environments
     // considered not to be withinInitialFrame, since no frame is given.
-    EnvironmentIter(JSContext* cx, JSObject* scope, JSObject* staticScope
+    EnvironmentIter(JSContext* cx, JSObject* env, Scope* scope
                     MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
 
-    // Constructing from a frame. Places the EnvironmentIter on the innermost scope
-    // at pc.
+    // Constructing from a frame. Places the EnvironmentIter on the innermost
+    // environment at pc.
     EnvironmentIter(JSContext* cx, AbstractFramePtr frame, jsbytecode* pc
                     MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
 
-    inline bool done() const;
-    EnvironmentIter& operator++();
+    bool done() const {
+        return si_.done();
+    }
+
+    explicit operator bool() const {
+        return !done();
+    }
+
+    void operator++(int) {
+        incrementScopeIter();
+        settle();
+    }
+
+    EnvironmentIter& operator++() {
+        operator++(1);
+        return *this;
+    }
 
     // If done():
-    inline JSObject& enclosingScope() const;
+    JSObject& enclosingEnvironment() const;
 
     // If !done():
-    enum Type { Module, Call, Block, With, Eval, NonSyntactic };
-    Type type() const;
+    bool hasNonSyntacticEnvironmentObject() const;
 
-    inline bool hasNonSyntacticScopeObject() const;
-    inline bool hasSyntacticScopeObject() const;
-    inline bool hasAnyScopeObject() const;
-    inline bool canHaveSyntacticScopeObject() const;
-    ScopeObject& scope() const;
+    bool hasSyntacticEnvironment() const {
+        return si_.hasSyntacticEnvironment();
+    }
 
-    JSObject* maybeStaticScope() const;
-    StaticBlockScope& staticBlock() const { return ssi_.block(); }
-    StaticWithScope& staticWith() const { return ssi_.staticWith(); }
-    StaticEvalScope& staticEval() const { return ssi_.eval(); }
-    StaticNonSyntacticScope& staticNonSyntactic() const { return ssi_.nonSyntactic(); }
-    JSFunction& fun() const { return ssi_.fun(); }
-    ModuleObject& module() const { return ssi_.module(); }
+    bool hasAnyEnvironmentObject() const {
+        return hasNonSyntacticEnvironmentObject() || hasSyntacticEnvironment();
+    }
 
-    bool withinInitialFrame() const { return !!frame_; }
-    AbstractFramePtr initialFrame() const { MOZ_ASSERT(withinInitialFrame()); return frame_; }
-    AbstractFramePtr maybeInitialFrame() const { return frame_; }
+    EnvironmentObject& environment() const {
+        MOZ_ASSERT(hasAnyEnvironmentObject());
+        return env_->as<EnvironmentObject>();
+    }
+
+    Scope& scope() const {
+        return *si_.scope();
+    }
+
+    Scope* maybeScope() const {
+        if (si_)
+            return si_.scope();
+        return nullptr;
+    }
+
+    JSFunction& callee() const {
+        return env_->as<CallObject>().callee();
+    }
+
+    bool withinInitialFrame() const {
+        return !!frame_;
+    }
+
+    AbstractFramePtr initialFrame() const {
+        MOZ_ASSERT(withinInitialFrame());
+        return frame_;
+    }
+
+    AbstractFramePtr maybeInitialFrame() const {
+        return frame_;
+    }
 
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
 
-// The key in MissingScopeMap. For live frames, maps live frames to their
-// synthesized scopes. For completely optimized-out scopes, maps the static
-// scope objects to their synthesized scopes. The scopes we synthesize for
-// static scope objects are read-only, and we never use their parent links, so
-// they don't need to be distinct.
+// The key in MissingEnvironmentMap. For live frames, maps live frames to
+// their synthesized environments. For completely optimized-out environments,
+// maps the Scope to their synthesized environments. The env we synthesize for
+// Scopes are read-only, and we never use their parent links, so they don't
+// need to be distinct.
 //
-// That is, completely optimized out scopes can't be distinguished by
-// frame. Note that even if the frame corresponding to the static scope is
-// live on the stack, it is unsound to synthesize a scope from that live
-// frame. In other words, the provenance of the scope chain is from allocated
-// closures (i.e., allocation sites) and is irrecoverable from simple stack
-// inspection (i.e., call sites).
-class MissingScopeKey
+// That is, completely optimized out environments can't be distinguished by
+// frame. Note that even if the frame corresponding to the Scope is live on
+// the stack, it is unsound to synthesize an environment from that live
+// frame. In other words, the provenance of the environment chain is from
+// allocated closures (i.e., allocation sites) and is irrecoverable from
+// simple stack inspection (i.e., call sites).
+class MissingEnvironmentKey
 {
-    friend class LiveScopeVal;
+    friend class LiveEnvironmentVal;
 
     AbstractFramePtr frame_;
-    JSObject* staticScope_;
+    Scope* scope_;
 
   public:
-    explicit MissingScopeKey(const EnvironmentIter& ei)
+    explicit MissingEnvironmentKey(const EnvironmentIter& ei)
       : frame_(ei.maybeInitialFrame()),
-        staticScope_(ei.maybeStaticScope())
+        scope_(ei.maybeScope())
     { }
 
     AbstractFramePtr frame() const { return frame_; }
-    JSObject* staticScope() const { return staticScope_; }
+    Scope* scope() const { return scope_; }
 
-    void updateStaticScope(JSObject* obj) { staticScope_ = obj; }
+    void updateScope(Scope* scope) { scope_ = scope; }
     void updateFrame(AbstractFramePtr frame) { frame_ = frame; }
 
     // For use as hash policy.
-    typedef MissingScopeKey Lookup;
-    static HashNumber hash(MissingScopeKey sk);
-    static bool match(MissingScopeKey sk1, MissingScopeKey sk2);
-    bool operator!=(const MissingScopeKey& other) const {
-        return frame_ != other.frame_ || staticScope_ != other.staticScope_;
+    typedef MissingEnvironmentKey Lookup;
+    static HashNumber hash(MissingEnvironmentKey sk);
+    static bool match(MissingEnvironmentKey sk1, MissingEnvironmentKey sk2);
+    bool operator!=(const MissingEnvironmentKey& other) const {
+        return frame_ != other.frame_ || scope_ != other.scope_;
     }
-    static void rekey(MissingScopeKey& k, const MissingScopeKey& newKey) {
+    static void rekey(MissingEnvironmentKey& k, const MissingEnvironmentKey& newKey) {
         k = newKey;
     }
 };
 
-// The value in LiveScopeMap, mapped from by live scope objects.
-class LiveScopeVal
+// The value in LiveEnvironmentMap, mapped from by live environment objects.
+class LiveEnvironmentVal
 {
-    friend class DebugScopes;
-    friend class MissingScopeKey;
+    friend class DebugEnvironments;
+    friend class MissingEnvironmentKey;
 
     AbstractFramePtr frame_;
-    HeapPtr<JSObject*> staticScope_;
+    HeapPtr<Scope*> scope_;
 
     static void staticAsserts();
 
   public:
-    explicit LiveScopeVal(const EnvironmentIter& ei)
+    explicit LiveEnvironmentVal(const EnvironmentIter& ei)
       : frame_(ei.initialFrame()),
-        staticScope_(ei.maybeStaticScope())
+        scope_(ei.maybeScope())
     { }
 
     AbstractFramePtr frame() const { return frame_; }
-    JSObject* staticScope() const { return staticScope_; }
+    Scope* scope() const { return scope_; }
 
     void updateFrame(AbstractFramePtr frame) { frame_ = frame; }
 
@@ -1286,30 +1336,30 @@ class LiveScopeVal
  * now incomplete: it may not contain all, or any, of the ScopeObjects to
  * represent the current scope.
  *
- * To resolve this, the debugger first calls GetDebugScopeFor* to synthesize a
+ * To resolve this, the debugger first calls GetDebugEnvironmentFor* to synthesize a
  * "debug scope chain". A debug scope chain is just a chain of objects that
  * fill in missing scopes and protect the engine from unexpected access. (The
  * latter means that some debugger operations, like redefining a lexical
  * binding, can fail when a true eval would succeed.) To do both of these
- * things, GetDebugScopeFor* creates a new proxy DebugScopeObject to sit in
+ * things, GetDebugEnvironmentFor* creates a new proxy DebugEnvironmentProxy to sit in
  * front of every existing ScopeObject.
  *
- * GetDebugScopeFor* ensures the invariant that the same DebugScopeObject is
+ * GetDebugEnvironmentFor* ensures the invariant that the same DebugEnvironmentProxy is
  * always produced for the same underlying scope (optimized or not!). This is
- * maintained by some bookkeeping information stored in DebugScopes.
+ * maintained by some bookkeeping information stored in DebugEnvironments.
  */
 
 extern JSObject*
-GetDebugScopeForFunction(JSContext* cx, HandleFunction fun);
+GetDebugEnvironmentForFunction(JSContext* cx, HandleFunction fun);
 
 extern JSObject*
-GetDebugScopeForFrame(JSContext* cx, AbstractFramePtr frame, jsbytecode* pc);
+GetDebugEnvironmentForFrame(JSContext* cx, AbstractFramePtr frame, jsbytecode* pc);
 
 extern JSObject*
-GetDebugScopeForGlobalLexicalScope(JSContext* cx);
+GetDebugEnvironmentForGlobalLexicalScope(JSContext* cx);
 
 /* Provides debugger access to a scope. */
-class DebugScopeObject : public ProxyObject
+class DebugEnvironmentProxy : public ProxyObject
 {
     /*
      * The enclosing scope on the dynamic scope chain. This slot is analogous
@@ -1324,11 +1374,11 @@ class DebugScopeObject : public ProxyObject
     static const unsigned SNAPSHOT_EXTRA = 1;
 
   public:
-    static DebugScopeObject* create(JSContext* cx, ScopeObject& scope, HandleObject enclosing);
-    static DebugScopeObject* create(JSContext* cx, EnvironmentObject& env, HandleObject enclosing);
+    static DebugEnvironmentProxy* create(JSContext* cx, EnvironmentObject& env,
+                                         HandleObject enclosing);
 
-    ScopeObject& scope() const;
-    JSObject& enclosingScope() const;
+    EnvironmentObject& environment() const;
+    JSObject& enclosingEnvironment() const;
 
     /* May only be called for proxies to function call objects. */
     ArrayObject* maybeSnapshot() const;
@@ -1343,7 +1393,7 @@ class DebugScopeObject : public ProxyObject
 
     // Returns true iff this is a function scope with its own this-binding
     // (all functions except arrow functions and generator expression lambdas).
-    bool isFunctionScopeWithThis();
+    bool isFunctionEnvironmentWithThis();
 
     // Does this debug scope not have a dynamic counterpart or was never live
     // (and thus does not have a synthesized ScopeObject or a snapshot)?
@@ -1351,20 +1401,20 @@ class DebugScopeObject : public ProxyObject
 };
 
 /* Maintains per-compartment debug scope bookkeeping information. */
-class DebugScopes
+class DebugEnvironments
 {
     /* The map from (non-debug) scopes to debug scopes. */
-    ObjectWeakMap proxiedScopes;
+    ObjectWeakMap proxiedEnvs;
 
     /*
      * The map from live frames which have optimized-away scopes to the
      * corresponding debug scopes.
      */
-    typedef HashMap<MissingScopeKey,
-                    ReadBarrieredDebugScopeObject,
-                    MissingScopeKey,
-                    RuntimeAllocPolicy> MissingScopeMap;
-    MissingScopeMap missingScopes;
+    typedef HashMap<MissingEnvironmentKey,
+                    ReadBarrieredDebugEnvironmentProxy,
+                    MissingEnvironmentKey,
+                    RuntimeAllocPolicy> MissingEnvironmentMap;
+    MissingEnvironmentMap missingEnvs;
 
     /*
      * The map from scope objects of live frames to the live frame. This map
@@ -1373,23 +1423,23 @@ class DebugScopes
      * removes scopes as they are popped). Thus, two consecutive debugger lazy
      * updates of liveScopes need only fill in the new scopes.
      */
-    // TODOshu switch to EnvironmentObject
     typedef GCHashMap<ReadBarriered<JSObject*>,
-                      LiveScopeVal,
+                      LiveEnvironmentVal,
                       MovableCellHasher<ReadBarriered<JSObject*>>,
-                      RuntimeAllocPolicy> LiveScopeMap;
-    LiveScopeMap liveScopes;
-    static MOZ_ALWAYS_INLINE void liveScopesPostWriteBarrier(JSRuntime* rt, LiveScopeMap* map,
-                                                             ScopeObject* key);
+                      RuntimeAllocPolicy> LiveEnvironmentMap;
+    LiveEnvironmentMap liveEnvs;
+    static MOZ_ALWAYS_INLINE void liveScopesPostWriteBarrier(JSRuntime* rt,
+                                                             LiveEnvironmentMap* map,
+                                                             EnvironmentObject* key);
 
   public:
-    explicit DebugScopes(JSContext* c);
-    ~DebugScopes();
+    explicit DebugEnvironments(JSContext* c);
+    ~DebugEnvironments();
 
   private:
     bool init();
 
-    static DebugScopes* ensureCompartmentData(JSContext* cx);
+    static DebugEnvironments* ensureCompartmentData(JSContext* cx);
 
   public:
     void mark(JSTracer* trc);
@@ -1398,19 +1448,20 @@ class DebugScopes
     void checkHashTablesAfterMovingGC(JSRuntime* rt);
 #endif
 
-    static DebugScopeObject* hasDebugScope(JSContext* cx, ScopeObject& scope);
-    static bool addDebugScope(JSContext* cx, ScopeObject& scope, DebugScopeObject& debugScope);
+    static DebugEnvironmentProxy* hasDebugEnvironment(JSContext* cx, EnvironmentObject& env);
+    static bool addDebugEnvironment(JSContext* cx, EnvironmentObject& env,
+                                    DebugEnvironmentProxy& debugEnv);
 
-    static DebugScopeObject* hasDebugScope(JSContext* cx, const EnvironmentIter& ei);
-    static bool addDebugScope(JSContext* cx, const EnvironmentIter& ei,
-                              DebugScopeObject& debugScope);
+    static DebugEnvironmentProxy* hasDebugEnvironment(JSContext* cx, const EnvironmentIter& ei);
+    static bool addDebugEnvironment(JSContext* cx, const EnvironmentIter& ei,
+                              DebugEnvironmentProxy& debugEnv);
 
-    static bool updateLiveScopes(JSContext* cx);
-    static LiveScopeVal* hasLiveScope(ScopeObject& scope);
+    static bool updateLiveEnvironments(JSContext* cx);
+    static LiveEnvironmentVal* hasLiveEnvironment(EnvironmentObject& env);
     static void unsetPrevUpToDateUntil(JSContext* cx, AbstractFramePtr frame);
 
     // When a frame bails out from Ion to Baseline, there might be missing
-    // scopes keyed on, and live scopes containing, the old
+    // envs keyed on, and live envs containing, the old
     // RematerializedFrame. Forward those values to the new BaselineFrame.
     static void forwardLiveFrame(JSContext* cx, AbstractFramePtr from, AbstractFramePtr to);
 
@@ -1420,7 +1471,7 @@ class DebugScopes
     static void onPopBlock(JSContext* cx, const EnvironmentIter& ei);
     static void onPopBlock(JSContext* cx, AbstractFramePtr frame, jsbytecode* pc);
     static void onPopWith(AbstractFramePtr frame);
-    static void onPopStrictEvalScope(AbstractFramePtr frame);
+    static void onPopStrictEval(AbstractFramePtr frame);
     static void onCompartmentUnsetIsDebuggee(JSCompartment* c);
 };
 
@@ -1501,21 +1552,18 @@ JSObject::is<js::EnvironmentObject>() const
 
 template<>
 bool
-JSObject::is<js::DebugScopeObject>() const;
+JSObject::is<js::DebugEnvironmentProxy>() const;
 
 namespace js {
 
 inline bool
 IsSyntacticEnvironment(JSObject* scope)
 {
-    if (!scope->is<ScopeObject>() && !scope->is<EnvironmentObject>())
+    if (!scope->is<EnvironmentObject>())
         return false;
 
     if (scope->is<WithEnvironmentObject>())
         return scope->as<WithEnvironmentObject>().isSyntactic();
-
-    if (scope->is<ClonedBlockObject>())
-        return scope->as<ClonedBlockObject>().isSyntactic();
 
     if (scope->is<LexicalEnvironmentObject>())
         return scope->as<LexicalEnvironmentObject>().isSyntactic();
@@ -1568,75 +1616,6 @@ ScopeObject::aliasedVar(ScopeCoordinate sc)
 {
     MOZ_ASSERT(is<LexicalScopeBase>() || is<ClonedBlockObject>());
     return getSlot(sc.slot());
-}
-
-inline bool
-EnvironmentIter::done() const
-{
-    return ssi_.done();
-}
-
-inline bool
-EnvironmentIter::hasSyntacticScopeObject() const
-{
-    return ssi_.hasSyntacticDynamicScopeObject();
-}
-
-inline bool
-EnvironmentIter::hasNonSyntacticScopeObject() const
-{
-    // The case we're worrying about here is a NonSyntactic static scope which
-    // has 0+ corresponding non-syntactic WithEnvironmentObject scopes, a
-    // NonSyntacticVariablesObject, or a non-syntactic ClonedBlockObject.
-    if (ssi_.type() == StaticScopeIter<CanGC>::NonSyntactic) {
-        MOZ_ASSERT_IF(scope_->is<WithEnvironmentObject>(),
-                      !scope_->as<WithEnvironmentObject>().isSyntactic());
-        return scope_->is<ScopeObject>() && !IsSyntacticEnvironment(scope_);
-    }
-    return false;
-}
-
-inline bool
-EnvironmentIter::hasAnyScopeObject() const
-{
-    return hasSyntacticScopeObject() || hasNonSyntacticScopeObject();
-}
-
-inline bool
-EnvironmentIter::canHaveSyntacticScopeObject() const
-{
-    if (ssi_.done())
-        return false;
-
-    switch (type()) {
-      case Module:
-      case Call:
-      case Block:
-      case With:
-        return true;
-
-      case Eval:
-        // Only strict eval scopes can have dynamic scope objects.
-        return staticEval().isStrict();
-
-      case NonSyntactic:
-        return false;
-    }
-
-    // Silence warnings.
-    return false;
-}
-
-inline JSObject&
-EnvironmentIter::enclosingScope() const
-{
-    // As an engine invariant (maintained internally and asserted by Execute),
-    // ScopeObjects and non-ScopeObjects cannot be interleaved on the scope
-    // chain; every scope chain must start with zero or more ScopeObjects and
-    // terminate with one or more non-ScopeObjects (viz., GlobalObject).
-    MOZ_ASSERT(done());
-    MOZ_ASSERT(!IsSyntacticEnvironment(scope_));
-    return *scope_;
 }
 
 extern bool

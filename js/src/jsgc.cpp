@@ -2417,7 +2417,7 @@ GCRuntime::sweepZoneAfterCompacting(Zone* zone)
         c->sweepSavedStacks();
         c->sweepGlobalObject(fop);
         c->sweepSelfHostingScriptSource();
-        c->sweepDebugScopes();
+        c->sweepDebugEnvironments();
         c->sweepJitCompartment(fop);
         c->sweepNativeIterators();
         c->sweepTemplateObjects();
@@ -5269,7 +5269,7 @@ GCRuntime::beginSweepingZoneGroup(AutoLockForExclusiveAccess& lock)
 
             for (GCCompartmentGroupIter c(rt); !c.done(); c.next()) {
                 c->sweepGlobalObject(&fop);
-                c->sweepDebugScopes();
+                c->sweepDebugEnvironments();
                 c->sweepJitCompartment(&fop);
                 c->sweepTemplateObjects();
             }
@@ -7358,8 +7358,8 @@ js::gc::CheckHashTablesAfterMovingGC(JSRuntime* rt)
         c->checkWrapperMapAfterMovingGC();
         c->checkBaseShapeTableAfterMovingGC();
         c->checkScriptMapsAfterMovingGC();
-        if (c->debugScopes)
-            c->debugScopes->checkHashTablesAfterMovingGC(rt);
+        if (c->debugEnvs)
+            c->debugEnvs->checkHashTablesAfterMovingGC(rt);
     }
 }
 #endif

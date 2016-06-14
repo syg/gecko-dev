@@ -513,8 +513,8 @@ class GlobalScope : public Scope
   public:
     static GlobalScope* clone(JSContext* cx, Handle<GlobalScope*> scope, ScopeKind kind);
 
-    bool isNonSyntactic() const {
-        return kind() == ScopeKind::NonSyntactic;
+    bool isSyntactic() const {
+        return kind() != ScopeKind::NonSyntactic;
     }
 
     bool hasBindings() const {
@@ -872,7 +872,7 @@ class ScopeIter
       : scope_(scope)
     { }
 
-    explicit ScopeIter(ScopeIter& si)
+    explicit ScopeIter(const ScopeIter& si)
       : scope_(si.scope_)
     { }
 
@@ -965,7 +965,7 @@ class ScopeIterOperations
 };
 
 template <typename Outer>
-class MutableScopeIterOperations
+class MutableScopeIterOperations : public ScopeIterOperations<Outer>
 {
     const ScopeIter& iter() const { return static_cast<const Outer*>(this)->get(); }
     ScopeIter& iter() { return static_cast<Outer*>(this)->get(); }

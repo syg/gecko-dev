@@ -3615,7 +3615,7 @@ CloneFunctionObject(JSContext* cx, HandleObject funobj, HandleObject dynamicScop
         // are not creating an extra failure condition for DEBUG builds.
         if (!fun->getOrCreateScript(cx))
             return nullptr;
-        MOZ_ASSERT(!scope->as<GlobalScope>().isNonSyntactic() ||
+        MOZ_ASSERT(scope->as<GlobalScope>().isSyntactic() ||
                    fun->nonLazyScript()->hasNonSyntacticScope());
 #endif
         return CloneFunctionReuseScript(cx, fun, dynamicScope, fun->getAllocKind());

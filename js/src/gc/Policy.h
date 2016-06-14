@@ -29,7 +29,7 @@ class ArrayBufferViewObject;
 class ArrayObject;
 class BaseShape;
 class ClonedBlockObject;
-class DebugScopeObject;
+class DebugEnvironmentProxy;
 class ExportEntryObject;
 class GlobalObject;
 class ImportEntryObject;
@@ -86,7 +86,7 @@ class JitCode;
     D(js::ArrayObject*) \
     D(js::BaseShape*) \
     D(js::ClonedBlockObject*) \
-    D(js::DebugScopeObject*) \
+    D(js::DebugEnvironmentProxy*) \
     D(js::ExportEntryObject*) \
     D(js::GlobalObject*) \
     D(js::ImportEntryObject*) \

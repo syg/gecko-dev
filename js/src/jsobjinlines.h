@@ -240,8 +240,8 @@ js::DeleteElement(JSContext* cx, HandleObject obj, uint32_t index, ObjectOpResul
 inline bool
 JSObject::isQualifiedVarObj() const
 {
-    if (is<js::DebugScopeObject>())
-        return as<js::DebugScopeObject>().scope().isQualifiedVarObj();
+    if (is<js::DebugEnvironmentProxy>())
+        return as<js::DebugEnvironmentProxy>().environment().isQualifiedVarObj();
     bool rv = hasAllFlags(js::BaseShape::QUALIFIED_VAROBJ);
     MOZ_ASSERT_IF(rv,
                   is<js::GlobalObject>() ||
@@ -256,8 +256,8 @@ JSObject::isQualifiedVarObj() const
 inline bool
 JSObject::isUnqualifiedVarObj() const
 {
-    if (is<js::DebugScopeObject>())
-        return as<js::DebugScopeObject>().scope().isUnqualifiedVarObj();
+    if (is<js::DebugEnvironmentProxy>())
+        return as<js::DebugEnvironmentProxy>().environment().isUnqualifiedVarObj();
     return is<js::GlobalObject>() || is<js::NonSyntacticVariablesObject>();
 }
 

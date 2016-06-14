@@ -273,7 +273,7 @@ class MOZ_RAII AutoSetNewObjectMetadata : private JS::CustomAutoRooter
 } /* namespace js */
 
 namespace js {
-class DebugScopes;
+class DebugEnvironments;
 class ObjectWeakMap;
 class WatchpointMap;
 class WeakMapBase;
@@ -626,7 +626,7 @@ struct JSCompartment
     void sweepSelfHostingScriptSource();
     void sweepJitCompartment(js::FreeOp* fop);
     void sweepRegExps();
-    void sweepDebugScopes();
+    void sweepDebugEnvironments();
     void sweepNativeIterators();
     void sweepTemplateObjects();
 
@@ -784,7 +784,7 @@ struct JSCompartment
     js::DebugScriptMap* debugScriptMap;
 
     /* Bookkeeping information for debug scope objects. */
-    js::DebugScopes* debugScopes;
+    js::DebugEnvironments* debugEnvs;
 
     /*
      * List of potentially active iterators that may need deleted property

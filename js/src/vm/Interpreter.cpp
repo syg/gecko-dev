@@ -947,20 +947,24 @@ js::EnterWithOperation(JSContext* cx, AbstractFramePtr frame, HandleValue val,
 static void
 PopEnvironment(JSContext* cx, EnvironmentIter& ei)
 {
-    switch (ei.type()) {
-      case EnvironmentIter::Block:
+    switch (ei.scope().kind()) {
+      case ScopeKind::ParameterDefaults:
+      case ScopeKind::Lexical:
+      case ScopeKind::Catch:
         if (cx->compartment()->isDebuggee())
-            DebugScopes::onPopBlock(cx, ei);
-        if (ei.staticBlock().needsClone())
+            DebugEnvironments::onPopBlock(cx, ei);
+        if (ei.scope().as<LexicalScope>().environmentShape())
             ei.initialFrame().popBlock(cx);
         break;
-      case EnvironmentIter::With:
+      case ScopeKind::With:
         ei.initialFrame().popWith(cx);
         break;
-      case EnvironmentIter::Module:
-      case EnvironmentIter::Call:
-      case EnvironmentIter::Eval:
-      case EnvironmentIter::NonSyntactic:
+      case ScopeKind::Function:
+      case ScopeKind::Eval:
+      case ScopeKind::StrictEval:
+      case ScopeKind::Global:
+      case ScopeKind::NonSyntactic:
+      case ScopeKind::Module:
         break;
     }
 }
@@ -974,10 +978,8 @@ js::UnwindEnvironment(JSContext* cx, EnvironmentIter& ei, jsbytecode* pc)
         return;
 
     RootedScope scope(cx, ei.initialFrame().script()->innermostScope(pc));
-    /* TODOshu
-    for (; ei.maybeStaticScope() != staticScope; ++ei)
+    for (; ei.maybeScope() != scope; ei++)
         PopEnvironment(cx, ei);
-    */
 }
 
 // Unwind all environments. This is needed because block scopes may cover the
@@ -990,7 +992,7 @@ js::UnwindEnvironment(JSContext* cx, EnvironmentIter& ei, jsbytecode* pc)
 void
 js::UnwindAllEnvironmentsInFrame(JSContext* cx, EnvironmentIter& ei)
 {
-    for (; ei.withinInitialFrame(); ++ei)
+    for (; ei.withinInitialFrame(); ei++)
         PopEnvironment(cx, ei);
 }
 
@@ -1438,11 +1440,10 @@ static JSFunction&
 GetSuperEnvFunction(JSContext* cx, InterpreterRegs& regs)
 {
     JSObject* env = regs.fp()->environmentChain();
-    //Scope* scope = regs.fp()->script()->innermostScope(regs.pc);
-    // TODOshu fix EnvironmentIter.
-    for (EnvironmentIter ei(cx, env, nullptr); !ei.done(); ++ei) {
-        if (ei.hasSyntacticScopeObject() && ei.type() == EnvironmentIter::Call) {
-            JSFunction& callee = ei.scope().as<CallObject>().callee();
+    Scope* scope = regs.fp()->script()->innermostScope(regs.pc);
+    for (EnvironmentIter ei(cx, env, scope); ei; ei++) {
+        if (ei.hasSyntacticEnvironment() && ei.scope().kind() == ScopeKind::Function) {
+            JSFunction& callee = ei.environment().as<CallObject>().callee();
 
             // Arrow functions don't have the information we're looking for,
             // their enclosing scopes do. Nevertheless, they might have call
@@ -3710,7 +3711,7 @@ CASE(JSOP_POPBLOCKSCOPE)
 #endif
 
     if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
-        DebugScopes::onPopBlock(cx, REGS.fp(), REGS.pc);
+        DebugEnvironments::onPopBlock(cx, REGS.fp(), REGS.pc);
 
     // Pop block from scope chain.
     REGS.fp()->popBlock(cx);
@@ -3727,14 +3728,14 @@ CASE(JSOP_DEBUGLEAVEBLOCK)
     // help from bytecode to do its job.  See bug 927782.
 
     if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
-        DebugScopes::onPopBlock(cx, REGS.fp(), REGS.pc);
+        DebugEnvironments::onPopBlock(cx, REGS.fp(), REGS.pc);
 }
 END_CASE(JSOP_DEBUGLEAVEBLOCK)
 
 CASE(JSOP_FRESHENBLOCKSCOPE)
 {
     if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
-        DebugScopes::onPopBlock(cx, REGS.fp(), REGS.pc);
+        DebugEnvironments::onPopBlock(cx, REGS.fp(), REGS.pc);
 
     if (!REGS.fp()->freshenBlock(cx))
         goto error;
@@ -4265,13 +4266,13 @@ js::DefFunOperation(JSContext* cx, HandleScript script, HandleObject envChain,
     /*
      * Step 5e.
      *
-     * A DebugScopeObject is okay here, and sometimes necessary. If
+     * A DebugEnvironmentProxy is okay here, and sometimes necessary. If
      * Debugger.Frame.prototype.eval defines a function with the same name as an
-     * extant variable in the frame, the DebugScopeObject takes care of storing
+     * extant variable in the frame, the DebugEnvironmentProxy takes care of storing
      * the function in the stack frame (for non-aliased variables) or on the
      * scope object (for aliased).
      */
-    MOZ_ASSERT(parent->isNative() || parent->is<DebugScopeObject>());
+    MOZ_ASSERT(parent->isNative() || parent->is<DebugEnvironmentProxy>());
     if (parent->is<GlobalObject>()) {
         if (shape->configurable())
             return DefineProperty(cx, parent, name, rval, nullptr, nullptr, attrs);

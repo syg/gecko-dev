@@ -712,10 +712,11 @@ DebugEpilogue(JSContext* cx, BaselineFrame* frame, jsbytecode* pc, bool ok)
 
     if (frame->isFunctionFrame()) {
         MOZ_ASSERT_IF(ok, frame->hasReturnValue());
-        DebugScopes::onPopCall(frame, cx);
+        DebugEnvironments::onPopCall(frame, cx);
     } else if (frame->isStrictEvalFrame()) {
-        MOZ_ASSERT_IF(frame->hasCallObj(), frame->environmentChain()->as<CallObject>().isForEval());
-        DebugScopes::onPopStrictEvalScope(frame);
+        MOZ_ASSERT_IF(frame->hasCallObj(),
+                      frame->environmentChain()->as<CallObject>().isForEval());
+        DebugEnvironments::onPopStrictEval(frame);
     }
 
     if (!ok) {
@@ -1031,7 +1032,7 @@ DebugLeaveBlock(JSContext* cx, BaselineFrame* frame, jsbytecode* pc)
 {
     MOZ_ASSERT(frame->script()->baselineScript()->hasDebugInstrumentation());
     if (cx->compartment()->isDebuggee())
-        DebugScopes::onPopBlock(cx, frame, pc);
+        DebugEnvironments::onPopBlock(cx, frame, pc);
     return true;
 }
 

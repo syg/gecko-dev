@@ -157,12 +157,12 @@ AssertDynamicScopeMatchesStaticScope(JSContext* cx, JSScript* script, JSObject* 
 
     // In the case of a non-syntactic scope chain, the immediate parent of the
     // outermost non-syntactic scope may be the global lexical scope, or, if
-    // called from Debugger, a DebugScopeObject.
+    // called from Debugger, a DebugEnvironmentProxy.
     //
     // In the case of a syntactic scope chain, the outermost scope is always a
     // GlobalObject.
     MOZ_ASSERT(scope->is<GlobalObject>() || IsGlobalLexicalScope(scope) ||
-               scope->is<DebugScopeObject>());
+               scope->is<DebugEnvironmentProxy>());
 #endif
 }
 
@@ -255,7 +255,7 @@ InterpreterFrame::epilogue(JSContext* cx)
         if (isStrictEvalFrame()) {
             MOZ_ASSERT_IF(hasCallObj(), environmentChain()->as<CallObject>().isForEval());
             if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
-                DebugScopes::onPopStrictEvalScope(this);
+                DebugEnvironments::onPopStrictEval(this);
         } else if (isNonGlobalEvalFrame()) {
             MOZ_ASSERT_IF(isDebuggerEvalFrame(), !IsSyntacticEnvironment(environmentChain()));
         }
@@ -286,7 +286,7 @@ InterpreterFrame::epilogue(JSContext* cx)
     }
 
     if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
-        DebugScopes::onPopCall(this, cx);
+        DebugEnvironments::onPopCall(this, cx);
 
     if (!callee().isGenerator() &&
         isConstructing() &&
@@ -354,7 +354,7 @@ void
 InterpreterFrame::popWith(JSContext* cx)
 {
     if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
-        DebugScopes::onPopWith(this);
+        DebugEnvironments::onPopWith(this);
 
     MOZ_ASSERT(environmentChain()->is<WithEnvironmentObject>());
     popOffEnvironmentChain();
@@ -1560,7 +1560,7 @@ jit::JitActivation::getRematerializedFrame(JSContext* cx, const JitFrameIterator
         }
 
         // See comment in unsetPrevUpToDateUntil.
-        DebugScopes::unsetPrevUpToDateUntil(cx, p->value()[inlineDepth]);
+        DebugEnvironments::unsetPrevUpToDateUntil(cx, p->value()[inlineDepth]);
     }
 
     return p->value()[inlineDepth];

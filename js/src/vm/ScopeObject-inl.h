@@ -253,11 +253,11 @@ StaticScopeIter<allowGC>::module() const
 inline JSObject*
 JSObject::enclosingScope() const
 {
-    if (is<js::ScopeObject>())
-        return &as<js::ScopeObject>().enclosingScope();
+    if (is<js::EnvironmentObject>())
+        return &as<js::EnvironmentObject>().enclosingEnvironment();
 
-    if (is<js::DebugScopeObject>())
-        return &as<js::DebugScopeObject>().enclosingScope();
+    if (is<js::DebugEnvironmentProxy>())
+        return &as<js::DebugEnvironmentProxy>().enclosingEnvironment();
 
     if (is<js::GlobalObject>())
         return nullptr;

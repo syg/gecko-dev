@@ -78,7 +78,7 @@ JSCompartment::JSCompartment(Zone* zone, const JS::CompartmentOptions& options =
     watchpointMap(nullptr),
     scriptCountsMap(nullptr),
     debugScriptMap(nullptr),
-    debugScopes(nullptr),
+    debugEnvs(nullptr),
     enumerators(nullptr),
     compartmentStats_(nullptr),
     scheduledForDestruction(false),
@@ -107,7 +107,7 @@ JSCompartment::~JSCompartment()
     js_delete(watchpointMap);
     js_delete(scriptCountsMap);
     js_delete(debugScriptMap);
-    js_delete(debugScopes);
+    js_delete(debugEnvs);
     js_delete(objectMetadataTable);
     js_delete(lazyArrayBuffers);
     js_delete(nonSyntacticLexicalEnvironments_),
@@ -637,8 +637,8 @@ JSCompartment::traceRoots(JSTracer* trc, js::gc::GCRuntime::TraceOrMarkRuntime t
     }
 
     /* Mark debug scopes, if present */
-    if (debugScopes)
-        debugScopes->mark(trc);
+    if (debugEnvs)
+        debugEnvs->mark(trc);
 
     if (lazyArrayBuffers)
         lazyArrayBuffers->trace(trc);
@@ -735,11 +735,11 @@ JSCompartment::sweepRegExps()
 }
 
 void
-JSCompartment::sweepDebugScopes()
+JSCompartment::sweepDebugEnvironments()
 {
     JSRuntime* rt = runtimeFromAnyThread();
-    if (debugScopes)
-        debugScopes->sweep(rt);
+    if (debugEnvs)
+        debugEnvs->sweep(rt);
 }
 
 void
@@ -905,7 +905,7 @@ JSCompartment::clearTables()
     // compartment and zone.
     MOZ_ASSERT(crossCompartmentWrappers.empty());
     MOZ_ASSERT(!jitCompartment_);
-    MOZ_ASSERT(!debugScopes);
+    MOZ_ASSERT(!debugEnvs);
     MOZ_ASSERT(enumerators->next() == enumerators);
     MOZ_ASSERT(regExps.empty());
 
@@ -1084,7 +1084,7 @@ JSCompartment::unsetIsDebuggee()
 {
     if (isDebuggee()) {
         debugModeBits &= ~DebuggerObservesMask;
-        DebugScopes::onCompartmentUnsetIsDebuggee(this);
+        DebugEnvironments::onCompartmentUnsetIsDebuggee(this);
     }
 }
 
