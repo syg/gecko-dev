@@ -302,21 +302,17 @@ static bool
 SaveSharedScriptData(ExclusiveContext*, Handle<JSScript*>, SharedScriptData*, uint32_t);
 
 enum XDRClassKind {
-    CK_BlockObject  = 0,
-    CK_WithObject   = 1,
-    CK_RegexpObject = 2,
-    CK_JSFunction   = 3,
-    CK_JSObject     = 4
+    CK_RegexpObject = 0,
+    CK_JSFunction,
+    CK_JSObject
 };
 
 template<XDRMode mode>
 bool
-js::XDRScript(XDRState<mode>* xdr, HandleObject enclosingScopeArg, HandleScript enclosingScript,
+js::XDRScript(XDRState<mode>* xdr, HandleScope enclosingScope, HandleScript enclosingScript,
               HandleFunction fun, MutableHandleScript scriptp)
 {
     /* NB: Keep this in sync with CopyScript. */
-
-    MOZ_ASSERT(enclosingScopeArg);
 
     enum ScriptBits {
         NoScriptRval,
@@ -355,7 +351,6 @@ js::XDRScript(XDRState<mode>* xdr, HandleObject enclosingScopeArg, HandleScript 
 
     JSContext* cx = xdr->cx();
     RootedScript script(cx);
-    RootedObject enclosingScope(cx, enclosingScopeArg);
     natoms = nsrcnotes = 0;
     nconsts = nobjects = nscopes = nregexps = ntrynotes = nscopenotes = nyieldoffsets = 0;
 
@@ -528,17 +523,6 @@ js::XDRScript(XDRState<mode>* xdr, HandleObject enclosingScopeArg, HandleScript 
             sourceObject = &enclosingScript->sourceObject()->as<ScriptSourceObject>();
         }
 
-        // If the outermost script has a non-syntactic scope, reflect that on
-        // the static scope chain.
-        if (scriptBits & (1 << HasNonSyntacticScope) &&
-            IsStaticGlobalLexicalScope(enclosingScope))
-        {
-            enclosingScope = StaticNonSyntacticScope::create(cx, enclosingScope);
-            if (!enclosingScope)
-                return false;
-        }
-
-        // TODOshu bodyscope
         script = JSScript::Create(cx, options, sourceObject, 0, 0);
         if (!script)
             return false;
@@ -682,6 +666,15 @@ js::XDRScript(XDRState<mode>* xdr, HandleObject enclosingScopeArg, HandleScript 
         }
     }
 
+    MOZ_ASSERT(nscopes != 0);
+    for (i = 0; i != nscopes; ++i) {
+        GCPtrScope* scopep = &script->scopes()->vector[i];
+
+        ScopeKind scopeKind;
+        if (!xdr->codeEnum32(&scopeKind))
+            return false;
+    }
+
     /*
      * Here looping from 0-to-length to xdr objects is essential to ensure that
      * all references to enclosing blocks (via FindScopeObjectIndex below) happen
@@ -693,10 +686,6 @@ js::XDRScript(XDRState<mode>* xdr, HandleObject enclosingScopeArg, HandleScript 
 
         if (mode == XDR_ENCODE) {
             JSObject* obj = *objp;
-            if (obj->is<StaticBlockScope>())
-                classk = CK_BlockObject;
-            else if (obj->is<StaticWithScope>())
-                classk = CK_WithObject;
             else if (obj->is<RegExpObject>())
                 classk = CK_RegexpObject;
             else if (obj->is<JSFunction>())
@@ -711,52 +700,6 @@ js::XDRScript(XDRState<mode>* xdr, HandleObject enclosingScopeArg, HandleScript 
             return false;
 
         switch (classk) {
-          case CK_BlockObject:
-          case CK_WithObject: {
-            /* Code the nested block's enclosing scope. */
-            uint32_t enclosingStaticScopeIndex = 0;
-            if (mode == XDR_ENCODE) {
-                NestedStaticScope& scope = (*objp)->as<NestedStaticScope>();
-                if (NestedStaticScope* enclosing = scope.enclosingNestedScope()) {
-                    if (IsStaticGlobalLexicalScope(enclosing))
-                        enclosingStaticScopeIndex = UINT32_MAX;
-                    else
-                        enclosingStaticScopeIndex = FindScopeObjectIndex(script, *enclosing);
-                } else {
-                    enclosingStaticScopeIndex = UINT32_MAX;
-                }
-            }
-            if (!xdr->codeUint32(&enclosingStaticScopeIndex))
-                return false;
-            Rooted<JSObject*> enclosingStaticScope(cx);
-            if (mode == XDR_DECODE) {
-                if (enclosingStaticScopeIndex != UINT32_MAX) {
-                    MOZ_ASSERT(enclosingStaticScopeIndex < i);
-                    enclosingStaticScope = script->objects()->vector[enclosingStaticScopeIndex];
-                } else {
-                    // This is not ternary because MSVC can't typecheck the
-                    // ternary.
-                    if (fun)
-                        enclosingStaticScope = fun;
-                    else
-                        enclosingStaticScope = enclosingScope;
-                }
-            }
-
-            if (classk == CK_BlockObject) {
-                Rooted<StaticBlockScope*> tmp(cx, static_cast<StaticBlockScope*>(objp->get()));
-                if (!XDRStaticBlockScope(xdr, enclosingStaticScope, &tmp))
-                    return false;
-                *objp = tmp;
-            } else {
-                Rooted<StaticWithScope*> tmp(cx, static_cast<StaticWithScope*>(objp->get()));
-                if (!XDRStaticWithScope(xdr, enclosingStaticScope, &tmp))
-                    return false;
-                *objp = tmp;
-            }
-            break;
-          }
-
           case CK_RegexpObject: {
             Rooted<RegExpObject*> regexp(cx);
             if (mode == XDR_ENCODE)
@@ -771,62 +714,30 @@ js::XDRScript(XDRState<mode>* xdr, HandleObject enclosingScopeArg, HandleScript 
           case CK_JSFunction: {
             /* Code the nested function's enclosing scope. */
             uint32_t funEnclosingScopeIndex = 0;
-            RootedObject funEnclosingScope(cx);
+            RootedScope funEnclosingScope(cx);
             if (mode == XDR_ENCODE) {
                 RootedFunction function(cx, &(*objp)->as<JSFunction>());
 
-                /* TODOshu
-                if (function->isInterpretedLazy())
+                if (function->isInterpretedLazy()) {
                     funEnclosingScope = function->lazyScript()->enclosingScope();
-                else if (function->isInterpreted())
-                    funEnclosingScope = function->nonLazyScript()->bodyScope()->enclosingScope();
-                else {
-                */
+                } else if (function->isInterpreted()) {
+                    funEnclosingScope = function->nonLazyScript()->enclosingScope();
+                } else {
                     MOZ_ASSERT(function->isAsmJSNative());
                     JS_ReportError(cx, "AsmJS modules are not yet supported in XDR serialization.");
                     return false;
-                    //}
-
-                StaticScopeIter<NoGC> ssi(funEnclosingScope);
-
-                // Starting from a nested function, hitting a non-syntactic
-                // scope on the static scope chain means that its enclosing
-                // function has a non-syntactic scope. Nested functions
-                // themselves never have non-syntactic scope chains.
-                if (ssi.done() ||
-                    ssi.type() == StaticScopeIter<NoGC>::NonSyntactic ||
-                    ssi.type() == StaticScopeIter<NoGC>::Function)
-                {
-                    MOZ_ASSERT_IF(ssi.done() || ssi.type() != StaticScopeIter<NoGC>::Function, !fun);
-                    funEnclosingScopeIndex = UINT32_MAX;
-                } else if (ssi.type() == StaticScopeIter<NoGC>::Block) {
-                    if (ssi.block().isGlobal()) {
-                        funEnclosingScopeIndex = UINT32_MAX;
-                    } else {
-                        funEnclosingScopeIndex = FindScopeObjectIndex(script, ssi.block());
-                        MOZ_ASSERT(funEnclosingScopeIndex < i);
-                    }
-                } else {
-                    funEnclosingScopeIndex = FindScopeObjectIndex(script, ssi.staticWith());
-                    MOZ_ASSERT(funEnclosingScopeIndex < i);
                 }
+
+                funEnclosingScopeIndex = FindScopeIndex(script, funEnclosingScope);
+                MOZ_ASSERT(funEnclosingScopeIndex < i);
             }
 
             if (!xdr->codeUint32(&funEnclosingScopeIndex))
                 return false;
 
             if (mode == XDR_DECODE) {
-                if (funEnclosingScopeIndex == UINT32_MAX) {
-                    // This is not ternary because MSVC can't typecheck the
-                    // ternary.
-                    if (fun)
-                        funEnclosingScope = fun;
-                    else
-                        funEnclosingScope = enclosingScope;
-                } else {
-                    MOZ_ASSERT(funEnclosingScopeIndex < i);
-                    funEnclosingScope = script->objects()->vector[funEnclosingScopeIndex];
-                }
+                MOZ_ASSERT(funEnclosingScopeIndex < i);
+                funEnclosingScope = script->objects()->vector[funEnclosingScopeIndex];
             }
 
             // Code nested function and script.

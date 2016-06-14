@@ -549,8 +549,8 @@ fun_resolve(JSContext* cx, HandleObject obj, HandleId id, bool* resolvedp)
 
 template<XDRMode mode>
 bool
-js::XDRInterpretedFunction(XDRState<mode>* xdr, HandleObject enclosingScope, HandleScript enclosingScript,
-                           MutableHandleFunction objp)
+js::XDRInterpretedFunction(XDRState<mode>* xdr, HandleScope enclosingScope,
+                           HandleScript enclosingScript, MutableHandleFunction objp)
 {
     enum FirstWordFlag {
         HasAtom             = 0x1,

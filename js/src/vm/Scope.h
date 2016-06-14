@@ -16,6 +16,7 @@
 #include "gc/Heap.h"
 #include "gc/Policy.h"
 #include "js/UbiNode.h"
+#include "vm/Xdr.h"
 
 namespace js {
 
@@ -314,6 +315,10 @@ class LexicalScope : public Scope
     static LexicalScope* create(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
                                 uint32_t firstFrameSlot, HandleScope enclosing);
 
+    template <XDRMode mode>
+    static bool XDR(XDRState<mode>* xdr, ScopeKind kind, HandleScope enclosing,
+                    MutableHandle<LexicalScope*> scope);
+
   protected:
     BindingData& data() {
         return *reinterpret_cast<BindingData*>(data_);
@@ -400,6 +405,10 @@ class FunctionScope : public Scope
 
     static FunctionScope* create(ExclusiveContext* cx, BindingData* data, uint32_t firstFrameSlot,
                                  HandleFunction fun, HandleScope enclosing);
+
+    template <XDRMode mode>
+    static bool XDR(XDRState<mode>* xdr, HandleFunction fun, HandleScope enclosing,
+                    MutableHandle<FunctionScope*> scope);
 
   private:
     // Because canonicalFunction is per-compartment and cannot be shared
@@ -501,6 +510,9 @@ class GlobalScope : public Scope
 
     static GlobalScope* create(ExclusiveContext* cx, ScopeKind kind, BindingData* data);
 
+    template <XDRMode mode>
+    static bool XDR(XDRState<mode>* xdr, ScopeKind kind, MutableHandle<GlobalScope*> scope);
+
   private:
     BindingData& data() {
         return *reinterpret_cast<BindingData*>(data_);
@@ -569,6 +581,10 @@ class EvalScope : public Scope
 
     static EvalScope* create(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
                              HandleScope enclosing);
+
+    template <XDRMode mode>
+    static bool XDR(XDRState<mode>* xdr, ScopeKind kind, HandleScope enclosing,
+                    MutableHandle<EvalScope*> scope);
 
   private:
     BindingData& data() {
@@ -1022,6 +1038,30 @@ class RootedBase<Scope*> : public ScopeCastOperation<JS::Rooted<Scope*>>
 template <>
 class HandleBase<Scope*> : public ScopeCastOperation<JS::Handle<Scope*>>
 { };
+
+//
+// XDR helpers.
+//
+
+template <XDRMode mode>
+bool XDRLexicalScope(XDRState<mode>* xdr, ScopeKind kind, HandleScope enclosing,
+                     MutableHandle<LexicalScope*> scope);
+
+template <XDRMode mode>
+bool XDRFunctionScope(XDRState<mode>* xdr, HandleScope enclosing,
+                      MutableHandle<FunctionScope*> scope);
+
+template <XDRMode mode>
+bool XDRGlobalScope(XDRState<mode>* xdr, HandleScope enclosing,
+                    MutableHandle<GlobalScope*> scope);
+
+template <XDRMode mode>
+bool XDRWithScope(XDRState<mode>* xdr, HandleScope enclosing,
+                  MutableHandle<WithScope*> scope);
+
+template <XDRMode mode>
+bool XDREvalScope(XDRState<mode>* xdr, HandleScope enclosing,
+                  MutableHandle<EvalScope*> scope);
 
 } // namespace js
 

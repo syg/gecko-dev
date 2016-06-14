@@ -156,6 +156,69 @@ NewEmptyScopeData(ExclusiveContext* cx, size_t dataSize)
     return reinterpret_cast<ScopeData*>(bytes);
 }
 
+static bool
+XDRBindingName(XDRState<XDR_ENCODE>* xdr, BindingName* bindingName)
+{
+    JSContext* cx = xdr->cx();
+
+    RootedAtom atom(cx, bindingName->name());
+    if (!XDRAtom(cx, &atom))
+        return false;
+
+    uint8_t closedOver = bindingName->closedOver();
+    if (!xdr->codeUint8(&closedOver))
+        return false;
+
+    return true;
+}
+
+static bool
+XDRBindingName(XDRState<XDR_DECODE>* xdr, BindingName* bindingName)
+{
+    JSContext* cx = xdr->cx();
+
+    RootedAtom atom(cx);
+    if (!XDRAtom(cx, &atom))
+        return false;
+
+    uint8_t closedOver;
+    if (!xdr->codeUint8(&closedOver))
+        return false;
+
+    *bindingName = BindingName(atom, closedOver);
+
+    return true;
+}
+
+template <typename Scope, XDRMode mode>
+static bool
+XDRSizedBindingData(XDRState<mode>* xdr, Handle<Scope*> scope, Scope::BindingData** data)
+{
+    JSContext* cx = xdr->cx();
+
+    uint32_t length;
+    if (mode == XDR_ENCODE)
+        length = scope->data().length;
+    if (!xdr->codeUint32(&length))
+        return false;
+
+    if (mode == XDR_ENCODE) {
+        *data = &scope->data();
+    } else {
+        *data = NewEmptyScopeData<Scope::BindingData>(cx, Scope::sizeOfData(length));
+        if (!*data)
+            return false;
+        (*data)->length = length;
+    }
+
+    for (uint32_t i = 0; i < length; i++) {
+        if (!XDRBindingName(xdr, &data->names[i]))
+            return false;
+    }
+
+    return true;
+}
+
 /* static */ Scope*
 Scope::create(ExclusiveContext* cx, ScopeKind kind, HandleScope enclosing, HandleShape envShape,
               uintptr_t data)
@@ -303,6 +366,32 @@ LexicalScope::getEmptyExtensibleEnvironmentShape(JSContext* cx)
     return EmptyEnvironmentShape(cx, cls, JSSLOT_FREE(cls), BaseShape::DELEGATE);
 }
 
+template <XDRMode mode>
+/* static */ bool
+LexicalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, HandleScope enclosing,
+                  MutableHandle<LexicalScope*> scope)
+{
+    JSContext* cx = xdr->cx();
+
+    BindingData* data;
+    if (!XDRSizedBindingData<LexicalScope>(xdr, scope, &data))
+        return false;
+
+    if (!xdr->codeUint32(&data->constStart))
+        return false;
+    if (!xdr->codeUint32(&data->nextFrameSlot))
+        return false;
+
+    if (mode == XDR_DECODE) {
+        scope.set(create(cx, kind, data, computeNextFrameSlot(enclosing), enclosing));
+        if (!scope)
+            return false;
+        js_free(data);
+    }
+
+    return true;
+}
+
 /* static */ FunctionScope*
 FunctionScope::create(ExclusiveContext* cx, BindingData* bindings, uint32_t firstFrameSlot,
                       HandleFunction fun, HandleScope enclosing)
@@ -384,6 +473,34 @@ FunctionScope::getEmptyEnvironmentShape(JSContext* cx)
                                  BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE);
 }
 
+template <XDRMode mode>
+/* static */ bool
+FunctionScope::XDR(XDRState<mode>* xdr, HandleFunction fun, HandleScope enclosing,
+                   MutableHandle<FunctionScope*> scope)
+{
+    JSContext* cx = xdr->cx();
+
+    BindingData* data;
+    if (!XDRSizedBindingData<FunctionScope>(xdr, scope, &data))
+        return false;
+
+    if (!xdr->codeUint16(&data->nonPositionalParamStart))
+        return false;
+    if (!xdr->codeUint16(&data->varStart))
+        return false;
+    if (!xdr->codeUint32(&data->nextFrameSlot))
+        return false;
+
+    if (mode == XDR_DECODE) {
+        scope.set(create(cx, data, computeFirstFrameSlot(enclosing), fun, enclosing));
+        if (!scope)
+            return false;
+        js_free(data);
+    }
+
+    return true;
+}
+
 /* static */ GlobalScope*
 GlobalScope::create(ExclusiveContext* cx, ScopeKind kind, BindingData* data)
 {
@@ -419,6 +536,31 @@ GlobalScope::clone(JSContext* cx, Handle<GlobalScope*> scope, ScopeKind kind)
 
     scope->data().addRef();
     return &clone->as<GlobalScope>();
+}
+
+template <XDRMode mode>
+/* static */ bool
+GlobalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, MutableHandle<GlobalScope*> scope)
+{
+    JSContext* cx = xdr->cx();
+
+    BindingData* data;
+    if (!XDRSizedBindingData<GlobalScope>(xdr, scope, &data))
+        return false;
+
+    if (!xdr->codeUint32(&data->letStart))
+        return false;
+    if (!xdr->codeUint32(&data->constStart))
+        return false;
+
+    if (mode == XDR_DECODE) {
+        scope.set(create(cx, kind, data));
+        if (!scope)
+            return false;
+        js_free(data);
+    }
+
+    return true;
 }
 
 /* static */ WithScope*
@@ -480,6 +622,30 @@ EvalScope::nearestVarScopeForDirectEval(Scope* scope)
         }
     }
     return nullptr;
+}
+
+template <XDRMode mode>
+/* static */ bool
+EvalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, HandleScope enclosing,
+               MutableHandle<EvalScope*> scope)
+{
+    JSContext* cx = xdr->cx();
+
+    BindingData* data;
+    if (!XDRSizedBindingData<EvalScope>(xdr, scope, &data))
+        return false;
+
+    if (!xdr->codeUint32(&data->nextFrameSlot))
+        return false;
+
+    if (mode == XDR_DECODE) {
+        scope.set(create(cx, kind, data, enclosing));
+        if (!scope)
+            return false;
+        js_free(data);
+    }
+
+    return true;
 }
 
 bool

@@ -622,12 +622,12 @@ GeneratorKindFromBits(unsigned val) {
  */
 template<XDRMode mode>
 bool
-XDRScript(XDRState<mode>* xdr, HandleObject enclosingScope, HandleScript enclosingScript,
+XDRScript(XDRState<mode>* xdr, HandleScope enclosingScope, HandleScript enclosingScript,
           HandleFunction fun, MutableHandleScript scriptp);
 
 template<XDRMode mode>
 bool
-XDRLazyScript(XDRState<mode>* xdr, HandleObject enclosingScope, HandleScript enclosingScript,
+XDRLazyScript(XDRState<mode>* xdr, HandleScope enclosingScope, HandleScript enclosingScript,
               HandleFunction fun, MutableHandle<LazyScript*> lazy);
 
 /*
@@ -644,9 +644,9 @@ class JSScript : public js::gc::TenuredCell
     template <js::XDRMode mode>
     friend
     bool
-    js::XDRScript(js::XDRState<mode>* xdr, js::HandleObject enclosingScope,
-                  js::HandleScript enclosingScript,
-                  js::HandleFunction fun, js::MutableHandleScript scriptp);
+    js::XDRScript(js::XDRState<mode>* xdr, js::HandleScope enclosingScope,
+                  js::HandleScript enclosingScript, js::HandleFunction fun,
+                  js::MutableHandleScript scriptp);
 
     friend bool
     js::detail::CopyScript(JSContext* cx, js::HandleScript src, js::HandleScript dst,
