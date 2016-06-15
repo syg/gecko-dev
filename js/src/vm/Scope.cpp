@@ -689,6 +689,10 @@ template
 EvalScope::XDR(XDRState<XDR_DECODE>* xdr, ScopeKind kind, HandleScope enclosing,
                MutableHandleScope scope);
 
+ScopeIter::ScopeIter(JSScript* script)
+  : scope_(script->bodyScope())
+{ }
+
 bool
 ScopeIter::hasSyntacticEnvironment() const
 {

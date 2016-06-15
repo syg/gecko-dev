@@ -3341,39 +3341,17 @@ WithEnvironmentObject::scope() const
     return *static_cast<WithScope*>(getReservedSlot(SCOPE_SLOT).toGCThing());
 }
 
-bool
-js::HasNonSyntacticStaticScopeChain(JSObject* staticScope)
-{
-    for (StaticScopeIter<NoGC> ssi(staticScope); !ssi.done(); ssi++) {
-        // If we hit a function scope, we can short circuit the logic, as
-        // scripts cache whether they are under a non-syntactic scope.
-        if (ssi.type() == StaticScopeIter<NoGC>::Function)
-            return ssi.funScript()->hasNonSyntacticScope();
-        if (ssi.type() == StaticScopeIter<NoGC>::NonSyntactic)
-            return true;
-    }
-    return false;
-}
-
-uint32_t
-js::StaticScopeChainLength(JSObject* staticScope)
-{
-    uint32_t length = 0;
-    for (StaticScopeIter<NoGC> ssi(staticScope); !ssi.done(); ssi++)
-        length++;
-    return length;
-}
-
 ModuleEnvironmentObject*
 js::GetModuleEnvironmentForScript(JSScript* script)
 {
-    StaticScopeIter<NoGC> ssi(nullptr /* script->enclosingStaticScope() */);
-    while (!ssi.done() && ssi.type() != StaticScopeIter<NoGC>::Module)
-        ssi++;
-    if (ssi.done())
+    ScopeIter si(script);
+    while (si && si.kind() != ScopeKind::Module)
+        si++;
+    if (!si)
         return nullptr;
 
-    return ssi.module().environment();
+    // TODOshu
+    return nullptr; // ssi.module().environment();
 }
 
 bool

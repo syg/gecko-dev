@@ -900,6 +900,8 @@ class ScopeIter
       : scope_(scope)
     { }
 
+    explicit ScopeIter(JSScript* script);
+
     explicit ScopeIter(const ScopeIter& si)
       : scope_(si.scope_)
     { }

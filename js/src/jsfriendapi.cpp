@@ -419,9 +419,9 @@ js::GetOutermostEnclosingFunctionOfScriptedCaller(JSContext* cx)
         return nullptr;
 
     RootedFunction curr(cx, iter.callee(cx));
-    for (StaticScopeIter<NoGC> i(curr); !i.done(); i++) {
-        if (i.type() == StaticScopeIter<NoGC>::Function)
-            curr = &i.fun();
+    for (ScopeIter si(curr->nonLazyScript()); si; si++) {
+        if (si.kind() == ScopeKind::Function)
+            curr = si.scope()->as<FunctionScope>().canonicalFunction();
     }
 
     assertSameCompartment(cx, curr);

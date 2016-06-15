@@ -471,78 +471,6 @@ class StaticNonSyntacticScope : public StaticScope
     }
 };
 
-template <AllowGC allowGC>
-class StaticScopeIter
-{
-    typename MaybeRooted<JSObject*, allowGC>::RootType obj;
-    bool onNamedLambda;
-
-    static bool IsStaticScope(JSObject* obj) {
-        return obj->is<StaticBlockScope>() ||
-               obj->is<StaticWithScope>() ||
-               obj->is<StaticEvalScope>() ||
-               obj->is<StaticNonSyntacticScope>() ||
-               obj->is<JSFunction>() ||
-               obj->is<ModuleObject>();
-    }
-
-  public:
-    StaticScopeIter(ExclusiveContext* cx, JSObject* obj)
-      : obj(cx, obj), onNamedLambda(false)
-    {
-        static_assert(allowGC == CanGC,
-                      "the context-accepting constructor should only be used "
-                      "in CanGC code");
-        MOZ_ASSERT_IF(obj, IsStaticScope(obj));
-    }
-
-    StaticScopeIter(ExclusiveContext* cx, const StaticScopeIter<CanGC>& ssi)
-      : obj(cx, ssi.obj), onNamedLambda(ssi.onNamedLambda)
-    {
-        JS_STATIC_ASSERT(allowGC == CanGC);
-    }
-
-    explicit StaticScopeIter(JSObject* obj)
-      : obj((ExclusiveContext*) nullptr, obj), onNamedLambda(false)
-    {
-        static_assert(allowGC == NoGC,
-                      "the constructor not taking a context should only be "
-                      "used in NoGC code");
-        MOZ_ASSERT_IF(obj, IsStaticScope(obj));
-    }
-
-    explicit StaticScopeIter(const StaticScopeIter<NoGC>& ssi)
-      : obj((ExclusiveContext*) nullptr, ssi.obj), onNamedLambda(ssi.onNamedLambda)
-    {
-        static_assert(allowGC == NoGC,
-                      "the constructor not taking a context should only be "
-                      "used in NoGC code");
-    }
-
-    bool done() const { return !obj; }
-    void operator++(int);
-
-    JSObject* staticScope() const { MOZ_ASSERT(!done()); return obj; }
-
-    // Return whether this static scope will have a syntactic scope (i.e. a
-    // ScopeObject that isn't a non-syntactic With or
-    // NonSyntacticVariablesObject) on the dynamic scope chain.
-    bool hasSyntacticDynamicScopeObject() const;
-    Shape* scopeShape() const;
-
-    enum Type { Module, Function, Block, With, NamedLambda, Eval, NonSyntactic };
-    Type type() const;
-
-    StaticBlockScope& block() const;
-    StaticWithScope& staticWith() const;
-    StaticEvalScope& eval() const;
-    StaticNonSyntacticScope& nonSyntactic() const;
-    JSScript* funScript() const;
-    JSFunction& fun() const;
-    JSScript* moduleScript() const;
-    ModuleObject& module() const;
-};
-
 
 /*****************************************************************************/
 
@@ -1622,9 +1550,6 @@ extern bool
 CreateObjectsForEnvironmentChain(JSContext* cx, AutoObjectVector& chain,
                                  HandleObject terminatingEnv,
                                  MutableHandleObject envObj);
-
-bool HasNonSyntacticStaticScopeChain(JSObject* staticScope);
-uint32_t StaticScopeChainLength(JSObject* staticScope);
 
 ModuleEnvironmentObject* GetModuleEnvironmentForScript(JSScript* script);
 
