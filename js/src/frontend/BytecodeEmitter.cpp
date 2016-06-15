@@ -2813,7 +2813,7 @@ BytecodeEmitter::emitTDZCheckIfNeeded(JSAtom* name, const NameLocation& loc)
 {
     // Dynamic accesses have TDZ checks built into their VM code and should
     // never emit explicit TDZ checks.
-    MOZ_ASSERT(loc.isLexical() && loc.hasKnownSlot());
+    MOZ_ASSERT(loc.hasKnownSlot() && loc.isLexical());
 
     Maybe<MaybeCheckTDZ> check = innermostTDZCheckCache->needsTDZCheck(name);
     if (!check)
@@ -4446,8 +4446,8 @@ BytecodeEmitter::emitSingleDeclaration(ParseNode* declList, ParseNode* decl,
     if (!initializer && declList->isKind(PNK_VAR))
         return true;
 
-    auto emitRhs = [&](BytecodeEmitter* bce, const NameLocation& lhsLoc, bool) {
-        if (lhsLoc.isLexical()) {
+    auto emitRhs = [initializer, declList](BytecodeEmitter* bce, const NameLocation&, bool) {
+        if (!initializer && !declList->isKind(PNK_VAR)) {
             // Lexical declarations are initialized to undefined without an
             // initializer.
             return bce->emit1(JSOP_UNDEFINED);
