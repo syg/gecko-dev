@@ -750,7 +750,7 @@ JSString* FunctionToString(JSContext* cx, HandleFunction fun, bool lambdaParen);
 
 template<XDRMode mode>
 bool
-XDRInterpretedFunction(XDRState<mode>* xdr, HandleObject enclosingScope,
+XDRInterpretedFunction(XDRState<mode>* xdr, HandleScope enclosingScope,
                        HandleScript enclosingScript, MutableHandleFunction objp);
 
 /*

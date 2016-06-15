@@ -827,7 +827,7 @@ LexicalScope::optimizeParameterDefaultsFrameSlots(FunctionBox* funbox)
     // superfluous moves and wasting frame slots and start the body scope at
     // frame slot 0.
     BindingIter fbi(*funbox->funScopeBindings, 0);
-    for (BindingIter dbi(data(), 0); dbi; dbi++, fbi++) {
+    for (BindingIter dbi(bindingData(), 0); dbi; dbi++, fbi++) {
         if (dbi.name() != fbi.name() ||
             (dbi.location().kind() == BindingLocation::Kind::Frame &&
              dbi.location() != fbi.location()))
@@ -836,7 +836,7 @@ LexicalScope::optimizeParameterDefaultsFrameSlots(FunctionBox* funbox)
         }
     }
 
-    data().nextFrameSlot = 0;
+    bindingData().nextFrameSlot = 0;
     return true;
 }
 

@@ -666,10 +666,10 @@ js::XDRInterpretedFunction(XDRState<mode>* xdr, HandleScope enclosingScope,
 }
 
 template bool
-js::XDRInterpretedFunction(XDRState<XDR_ENCODE>*, HandleObject, HandleScript, MutableHandleFunction);
+js::XDRInterpretedFunction(XDRState<XDR_ENCODE>*, HandleScope, HandleScript, MutableHandleFunction);
 
 template bool
-js::XDRInterpretedFunction(XDRState<XDR_DECODE>*, HandleObject, HandleScript, MutableHandleFunction);
+js::XDRInterpretedFunction(XDRState<XDR_DECODE>*, HandleScope, HandleScript, MutableHandleFunction);
 
 /*
  * [[HasInstance]] internal method for Function objects: fetch the .prototype

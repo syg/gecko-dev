@@ -676,7 +676,7 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope, HandleScrip
         RootedScope scope(cx);
         RootedScope enclosing(cx);
         ScopeKind scopeKind;
-        uint32_t enclosingIndex;
+        uint32_t enclosingScopeIndex = 0;
         for (i = 0; i != nscopes; ++i) {
             if (mode == XDR_ENCODE) {
                 scope = vector[i];
@@ -687,10 +687,12 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope, HandleScrip
                 return false;
 
             if (mode == XDR_ENCODE) {
-                if (i == 0)
-                    enclosingIndex = UINT32_MAX;
-                else
-                    enclosingIndex = FindScopeIndex(script, scope->enclosing());
+                if (i == 0) {
+                    enclosingScopeIndex = UINT32_MAX;
+                } else {
+                    MOZ_ASSERT(scope->enclosing());
+                    enclosingScopeIndex = FindScopeIndex(script, *scope->enclosing());
+                }
             }
 
             if (!xdr->codeUint32(&enclosingScopeIndex))
@@ -698,7 +700,7 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope, HandleScrip
 
             if (mode == XDR_DECODE) {
                 if (i == 0) {
-                    MOZ_ASSERT(enclosingIndex == UINT32_MAX);
+                    MOZ_ASSERT(enclosingScopeIndex == UINT32_MAX);
                     enclosing = scriptEnclosingScope;
                 } else {
                     MOZ_ASSERT(enclosingScopeIndex < i);
@@ -751,7 +753,7 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope, HandleScrip
 
         if (mode == XDR_ENCODE) {
             JSObject* obj = *objp;
-            else if (obj->is<RegExpObject>())
+            if (obj->is<RegExpObject>())
                 classk = CK_RegexpObject;
             else if (obj->is<JSFunction>())
                 classk = CK_JSFunction;
@@ -793,7 +795,7 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope, HandleScrip
                     return false;
                 }
 
-                funEnclosingScopeIndex = FindScopeIndex(script, funEnclosingScope);
+                funEnclosingScopeIndex = FindScopeIndex(script, *funEnclosingScope);
                 MOZ_ASSERT(funEnclosingScopeIndex < i);
             }
 
@@ -802,7 +804,7 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope, HandleScrip
 
             if (mode == XDR_DECODE) {
                 MOZ_ASSERT(funEnclosingScopeIndex < i);
-                funEnclosingScope = script->objects()->vector[funEnclosingScopeIndex];
+                funEnclosingScope = script->scopes()->vector[funEnclosingScopeIndex];
             }
 
             // Code nested function and script.
@@ -868,7 +870,7 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope, HandleScrip
         if (mode == XDR_ENCODE)
             lazy = script->maybeLazyScript();
 
-        if (!XDRRelazificationInfo(xdr, fun, script, enclosingScope, &lazy))
+        if (!XDRRelazificationInfo(xdr, fun, script, scriptEnclosingScope, &lazy))
             return false;
 
         if (mode == XDR_DECODE)
@@ -887,16 +889,16 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope, HandleScrip
 }
 
 template bool
-js::XDRScript(XDRState<XDR_ENCODE>*, HandleObject, HandleScript, HandleFunction,
+js::XDRScript(XDRState<XDR_ENCODE>*, HandleScope, HandleScript, HandleFunction,
               MutableHandleScript);
 
 template bool
-js::XDRScript(XDRState<XDR_DECODE>*, HandleObject, HandleScript, HandleFunction,
+js::XDRScript(XDRState<XDR_DECODE>*, HandleScope, HandleScript, HandleFunction,
               MutableHandleScript);
 
 template<XDRMode mode>
 bool
-js::XDRLazyScript(XDRState<mode>* xdr, HandleObject enclosingScope, HandleScript enclosingScript,
+js::XDRLazyScript(XDRState<mode>* xdr, HandleScope enclosingScope, HandleScript enclosingScript,
                   HandleFunction fun, MutableHandle<LazyScript*> lazy)
 {
     JSContext* cx = xdr->cx();
@@ -951,7 +953,7 @@ js::XDRLazyScript(XDRState<mode>* xdr, HandleObject enclosingScope, HandleScript
             if (mode == XDR_ENCODE)
                 func = innerFunctions[i];
 
-            if (!XDRInterpretedFunction(xdr, fun, enclosingScript, &func))
+            if (!XDRInterpretedFunction(xdr, enclosingScope, enclosingScript, &func))
                 return false;
 
             if (mode == XDR_DECODE)
@@ -963,11 +965,11 @@ js::XDRLazyScript(XDRState<mode>* xdr, HandleObject enclosingScope, HandleScript
 }
 
 template bool
-js::XDRLazyScript(XDRState<XDR_ENCODE>*, HandleObject, HandleScript,
+js::XDRLazyScript(XDRState<XDR_ENCODE>*, HandleScope, HandleScript,
                   HandleFunction, MutableHandle<LazyScript*>);
 
 template bool
-js::XDRLazyScript(XDRState<XDR_DECODE>*, HandleObject, HandleScript,
+js::XDRLazyScript(XDRState<XDR_DECODE>*, HandleScope, HandleScript,
                   HandleFunction, MutableHandle<LazyScript*>);
 
 void

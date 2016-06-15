@@ -162,7 +162,7 @@ XDRBindingName(XDRState<XDR_ENCODE>* xdr, BindingName* bindingName)
     JSContext* cx = xdr->cx();
 
     RootedAtom atom(cx, bindingName->name());
-    if (!XDRAtom(cx, &atom))
+    if (!XDRAtom(xdr, &atom))
         return false;
 
     uint8_t closedOver = bindingName->closedOver();
@@ -178,7 +178,7 @@ XDRBindingName(XDRState<XDR_DECODE>* xdr, BindingName* bindingName)
     JSContext* cx = xdr->cx();
 
     RootedAtom atom(cx);
-    if (!XDRAtom(cx, &atom))
+    if (!XDRAtom(xdr, &atom))
         return false;
 
     uint8_t closedOver;
@@ -190,29 +190,31 @@ XDRBindingName(XDRState<XDR_DECODE>* xdr, BindingName* bindingName)
     return true;
 }
 
-template <typename Scope, XDRMode mode>
-static bool
-XDRSizedBindingData(XDRState<mode>* xdr, Handle<Scope*> scope, Scope::BindingData** data)
+template <typename ConcreteScope, XDRMode mode>
+/* static */ bool
+Scope::XDRSizedBindingData(XDRState<mode>* xdr, Handle<ConcreteScope*> scope,
+                           typename ConcreteScope::BindingData** data)
 {
     JSContext* cx = xdr->cx();
 
     uint32_t length;
     if (mode == XDR_ENCODE)
-        length = scope->data().length;
+        length = scope->bindingData().length;
     if (!xdr->codeUint32(&length))
         return false;
 
     if (mode == XDR_ENCODE) {
-        *data = &scope->data();
+        *data = &scope->bindingData();
     } else {
-        *data = NewEmptyScopeData<Scope::BindingData>(cx, Scope::sizeOfData(length));
+        size_t size = ConcreteScope::sizeOfBindingData(length);
+        *data = NewEmptyScopeData<typename ConcreteScope::BindingData>(cx, size);
         if (!*data)
             return false;
         (*data)->length = length;
     }
 
     for (uint32_t i = 0; i < length; i++) {
-        if (!XDRBindingName(xdr, &data->names[i]))
+        if (!XDRBindingName(xdr, &(*data)->names[i]))
             return false;
     }
 
@@ -300,7 +302,7 @@ Scope::finalize(FreeOp* fop)
 {
     if (data_) {
         if (is<FunctionScope>()) {
-            as<FunctionScope>().data().bindings->release(fop);
+            as<FunctionScope>().bindingData().release(fop);
             fop->free_(reinterpret_cast<void*>(data_));
         } else {
             reinterpret_cast<RefCountedData*>(data_)->release(fop);
@@ -374,7 +376,7 @@ LexicalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, HandleScope enclosing,
     JSContext* cx = xdr->cx();
 
     BindingData* data;
-    if (!XDRSizedBindingData<LexicalScope>(xdr, scope, &data))
+    if (!XDRSizedBindingData<LexicalScope>(xdr, scope.as<LexicalScope>(), &data))
         return false;
 
     if (!xdr->codeUint32(&data->constStart))
@@ -391,6 +393,17 @@ LexicalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, HandleScope enclosing,
 
     return true;
 }
+
+template
+/* static */ bool
+LexicalScope::XDR(XDRState<XDR_ENCODE>* xdr, ScopeKind kind, HandleScope enclosing,
+                  MutableHandleScope scope);
+
+template
+/* static */ bool
+LexicalScope::XDR(XDRState<XDR_DECODE>* xdr, ScopeKind kind, HandleScope enclosing,
+                  MutableHandleScope scope);
+
 
 /* static */ FunctionScope*
 FunctionScope::create(ExclusiveContext* cx, BindingData* bindings, uint32_t firstFrameSlot,
@@ -481,10 +494,10 @@ FunctionScope::XDR(XDRState<mode>* xdr, HandleFunction fun, HandleScope enclosin
     JSContext* cx = xdr->cx();
 
     BindingData* data;
-    if (!XDRSizedBindingData<FunctionScope>(xdr, scope, &data))
+    if (!XDRSizedBindingData<FunctionScope>(xdr, scope.as<FunctionScope>(), &data))
         return false;
 
-    if (!xdr->codeUint16(&data->nonPositionalParamStart))
+    if (!xdr->codeUint16(&data->nonPositionalFormalStart))
         return false;
     if (!xdr->codeUint16(&data->varStart))
         return false;
@@ -492,7 +505,7 @@ FunctionScope::XDR(XDRState<mode>* xdr, HandleFunction fun, HandleScope enclosin
         return false;
 
     if (mode == XDR_DECODE) {
-        scope.set(create(cx, data, computeFirstFrameSlot(enclosing), fun, enclosing));
+        scope.set(create(cx, data, computeNextFrameSlot(enclosing), fun, enclosing));
         if (!scope)
             return false;
         js_free(data);
@@ -500,6 +513,16 @@ FunctionScope::XDR(XDRState<mode>* xdr, HandleFunction fun, HandleScope enclosin
 
     return true;
 }
+
+template
+/* static */ bool
+FunctionScope::XDR(XDRState<XDR_ENCODE>* xdr, HandleFunction fun, HandleScope enclosing,
+                   MutableHandleScope scope);
+
+template
+/* static */ bool
+FunctionScope::XDR(XDRState<XDR_DECODE>* xdr, HandleFunction fun, HandleScope enclosing,
+                   MutableHandleScope scope);
 
 /* static */ GlobalScope*
 GlobalScope::create(ExclusiveContext* cx, ScopeKind kind, BindingData* data)
@@ -534,7 +557,7 @@ GlobalScope::clone(JSContext* cx, Handle<GlobalScope*> scope, ScopeKind kind)
     if (!clone)
         return nullptr;
 
-    scope->data().addRef();
+    scope->bindingData().addRef();
     return &clone->as<GlobalScope>();
 }
 
@@ -545,7 +568,7 @@ GlobalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, MutableHandleScope scope)
     JSContext* cx = xdr->cx();
 
     BindingData* data;
-    if (!XDRSizedBindingData<GlobalScope>(xdr, scope, &data))
+    if (!XDRSizedBindingData<GlobalScope>(xdr, scope.as<GlobalScope>(), &data))
         return false;
 
     if (!xdr->codeUint32(&data->letStart))
@@ -562,6 +585,14 @@ GlobalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, MutableHandleScope scope)
 
     return true;
 }
+
+template
+/* static */ bool
+GlobalScope::XDR(XDRState<XDR_ENCODE>* xdr, ScopeKind kind, MutableHandleScope scope);
+
+template
+/* static */ bool
+GlobalScope::XDR(XDRState<XDR_DECODE>* xdr, ScopeKind kind, MutableHandleScope scope);
 
 /* static */ WithScope*
 WithScope::create(ExclusiveContext* cx, HandleScope enclosing)
@@ -632,7 +663,7 @@ EvalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, HandleScope enclosing,
     JSContext* cx = xdr->cx();
 
     BindingData* data;
-    if (!XDRSizedBindingData<EvalScope>(xdr, scope, &data))
+    if (!XDRSizedBindingData<EvalScope>(xdr, scope.as<EvalScope>(), &data))
         return false;
 
     if (!xdr->codeUint32(&data->nextFrameSlot))
@@ -647,6 +678,16 @@ EvalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, HandleScope enclosing,
 
     return true;
 }
+
+template
+/* static */ bool
+EvalScope::XDR(XDRState<XDR_ENCODE>* xdr, ScopeKind kind, HandleScope enclosing,
+               MutableHandleScope scope);
+
+template
+/* static */ bool
+EvalScope::XDR(XDRState<XDR_DECODE>* xdr, ScopeKind kind, HandleScope enclosing,
+               MutableHandleScope scope);
 
 bool
 ScopeIter::hasSyntacticEnvironment() const

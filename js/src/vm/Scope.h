@@ -223,6 +223,10 @@ class Scope : public js::gc::TenuredCell
     static Scope* create(ExclusiveContext* cx, ScopeKind kind, HandleScope enclosing,
                          HandleShape envShape, uintptr_t data);
 
+    template <typename ConcreteScope, XDRMode mode>
+    static bool XDRSizedBindingData(XDRState<mode>* xdr, Handle<ConcreteScope*> scope,
+                                    typename ConcreteScope::BindingData** data);
+
     Shape* maybeCloneEnvironmentShape(JSContext* cx);
 
   public:
@@ -320,11 +324,11 @@ class LexicalScope : public Scope
                     MutableHandleScope scope);
 
   protected:
-    BindingData& data() {
+    BindingData& bindingData() {
         return *reinterpret_cast<BindingData*>(data_);
     }
 
-    const BindingData& data() const {
+    const BindingData& bindingData() const {
         return *reinterpret_cast<BindingData*>(data_);
     }
 
@@ -336,7 +340,7 @@ class LexicalScope : public Scope
     }
 
     uint32_t nextFrameSlot() const {
-        return data().nextFrameSlot;
+        return bindingData().nextFrameSlot;
     }
 
     // For frontend use. Implemented in BytecodeEmitter.cpp
@@ -433,6 +437,14 @@ class FunctionScope : public Scope
         return *reinterpret_cast<Data*>(data_);
     }
 
+    BindingData& bindingData() {
+        return *data().bindings;
+    }
+
+     const BindingData& bindingData() const {
+        return *data().bindings;
+    }
+
     static uint32_t computeNextFrameSlot(Scope* start) {
         // A function scope's first frame slot may be non-0 when a formal
         // parameter default expression scope is present. In that case, if the
@@ -452,7 +464,7 @@ class FunctionScope : public Scope
     }
 
     uint32_t nextFrameSlot() const {
-        return data().bindings->nextFrameSlot;
+        return bindingData().nextFrameSlot;
     }
 
     JSFunction* canonicalFunction() const {
@@ -462,7 +474,7 @@ class FunctionScope : public Scope
     JSScript* script() const;
 
     uint32_t numPositionalFormalParameters() const {
-        return data().bindings->nonPositionalFormalStart;
+        return bindingData().nonPositionalFormalStart;
     }
 
     static Shape* getEmptyEnvironmentShape(JSContext* cx);
@@ -514,11 +526,11 @@ class GlobalScope : public Scope
     static bool XDR(XDRState<mode>* xdr, ScopeKind kind, MutableHandleScope scope);
 
   private:
-    BindingData& data() {
+    BindingData& bindingData() {
         return *reinterpret_cast<BindingData*>(data_);
     }
 
-    const BindingData& data() const {
+    const BindingData& bindingData() const {
         return *reinterpret_cast<BindingData*>(data_);
     }
 
@@ -530,7 +542,7 @@ class GlobalScope : public Scope
     }
 
     bool hasBindings() const {
-        return data().length > 0;
+        return bindingData().length > 0;
     }
 };
 
@@ -587,11 +599,11 @@ class EvalScope : public Scope
                     MutableHandleScope scope);
 
   private:
-    BindingData& data() {
+    BindingData& bindingData() {
         return *reinterpret_cast<BindingData*>(data_);
     }
 
-    const BindingData& data() const {
+    const BindingData& bindingData() const {
         return *reinterpret_cast<BindingData*>(data_);
     }
 
@@ -601,7 +613,7 @@ class EvalScope : public Scope
     static Scope* nearestVarScopeForDirectEval(Scope* scope);
 
     uint32_t nextFrameSlot() const {
-        return data().nextFrameSlot;
+        return bindingData().nextFrameSlot;
     }
 
     bool strict() const {
@@ -609,7 +621,7 @@ class EvalScope : public Scope
     }
 
     bool hasBindings() const {
-        return data().length > 0;
+        return bindingData().length > 0;
     }
 
     bool isNonGlobal() const {
@@ -717,23 +729,23 @@ class BindingIter
           case ScopeKind::ParameterDefaults:
           case ScopeKind::Lexical:
           case ScopeKind::Catch:
-            init(scope->as<LexicalScope>().data(),
+            init(scope->as<LexicalScope>().bindingData(),
                  scope->as<LexicalScope>().computeFirstFrameSlot());
             break;
           case ScopeKind::With:
             MOZ_CRASH("With scopes do not have bindings");
             break;
           case ScopeKind::Function:
-            init(*scope->as<FunctionScope>().data().bindings,
+            init(scope->as<FunctionScope>().bindingData(),
                  scope->as<FunctionScope>().computeFirstFrameSlot());
             break;
           case ScopeKind::Eval:
           case ScopeKind::StrictEval:
-            init(scope->as<EvalScope>().data(), scope->kind() == ScopeKind::StrictEval);
+            init(scope->as<EvalScope>().bindingData(), scope->kind() == ScopeKind::StrictEval);
             break;
           case ScopeKind::Global:
           case ScopeKind::NonSyntactic:
-            init(scope->as<GlobalScope>().data());
+            init(scope->as<GlobalScope>().bindingData());
             break;
           case ScopeKind::Module:
             MOZ_CRASH("NYI");
@@ -1037,6 +1049,10 @@ class RootedBase<Scope*> : public ScopeCastOperation<JS::Rooted<Scope*>>
 
 template <>
 class HandleBase<Scope*> : public ScopeCastOperation<JS::Handle<Scope*>>
+{ };
+
+template <>
+class MutableHandleBase<Scope*> : public ScopeCastOperation<JS::MutableHandle<Scope*>>
 { };
 
 //
