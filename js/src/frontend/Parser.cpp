@@ -4559,7 +4559,7 @@ bool
 Parser<ParseHandler>::forHeadStart(YieldHandling yieldHandling,
                                    ParseNodeKind* forHeadKind,
                                    Node* forInitialPart,
-                                   Maybe<ParseContext::Scope>& forLetImpliedScope,
+                                   Maybe<ParseContext::Scope>& forLoopLexicalScope,
                                    Node* forInOrOfExpression)
 {
     MOZ_ASSERT(tokenStream.isCurrentTokenType(TOK_LP));
@@ -4610,8 +4610,8 @@ Parser<ParseHandler>::forHeadStart(YieldHandling yieldHandling,
     }
 
     if (parsingLexicalDeclaration) {
-        forLetImpliedScope.emplace(pc);
-        if (!forLetImpliedScope->init(pc))
+        forLoopLexicalScope.emplace(pc);
+        if (!forLoopLexicalScope->init(pc))
             return null();
 
         *forInitialPart = declarationList(yieldHandling, tt == TOK_CONST ? PNK_CONST : PNK_LET,
@@ -4720,7 +4720,7 @@ Parser<ParseHandler>::forStatement(YieldHandling yieldHandling)
     // Both variables remain null/none if the loop is any other form.
 
     // The static block scope for the implicit block scope.
-    Maybe<ParseContext::Scope> forLetImpliedScope;
+    Maybe<ParseContext::Scope> forLoopLexicalScope;
 
     // The expression being iterated over, for for-in/of loops only.  Unused
     // for for(;;) loops.
@@ -4739,7 +4739,7 @@ Parser<ParseHandler>::forStatement(YieldHandling yieldHandling)
     //
     // In either case the subsequent token can be consistently accessed using
     // TokenStream::None semantics.
-    if (!forHeadStart(yieldHandling, &headKind, &startNode, forLetImpliedScope,
+    if (!forHeadStart(yieldHandling, &headKind, &startNode, forLoopLexicalScope,
                       &iteratedExpr))
     {
         return null();
@@ -4791,7 +4791,7 @@ Parser<ParseHandler>::forStatement(YieldHandling yieldHandling)
             if (!pn2)
                 return null();
         } else {
-            MOZ_ASSERT(!forLetImpliedScope);
+            MOZ_ASSERT(!forLoopLexicalScope);
             pn1 = null();
             pn2 = target;
 
@@ -4870,8 +4870,8 @@ Parser<ParseHandler>::forStatement(YieldHandling yieldHandling)
     if (!forLoop)
         return null();
 
-    if (forLetImpliedScope)
-        return finishLexicalScope(*forLetImpliedScope, forLoop);
+    if (forLoopLexicalScope)
+        return finishLexicalScope(*forLoopLexicalScope, forLoop);
 
     return forLoop;
 }
