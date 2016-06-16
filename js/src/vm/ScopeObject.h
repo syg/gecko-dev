@@ -24,7 +24,6 @@ class FunctionBox;
 class ModuleBox;
 }
 
-class StaticWithScope;
 class StaticEvalScope;
 class StaticNonSyntacticScope;
 
@@ -306,20 +305,6 @@ class StaticBlockScope : public NestedStaticScope
     static Shape* addVar(ExclusiveContext* cx, Handle<StaticBlockScope*> block, HandleId id,
                          bool constant, unsigned index, bool* redeclared);
 };
-
-// Represents the lexical scope of a 'with' statement.
-class StaticWithScope : public NestedStaticScope
-{
-  public:
-    static const Class class_;
-
-    static StaticWithScope* create(ExclusiveContext* cx);
-};
-
-template <XDRMode mode>
-bool
-XDRStaticWithScope(XDRState<mode>* xdr, HandleObject enclosingScope,
-                   MutableHandle<StaticWithScope*> objp);
 
 /*
  * Static eval scope placeholder objects on the static scope chain. Created at
