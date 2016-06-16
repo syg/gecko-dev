@@ -342,6 +342,18 @@ InterpreterFrame::freshenBlock(JSContext* cx)
     return true;
 }
 
+bool
+InterpreterFrame::recreateBlock(JSContext* cx)
+{
+    Rooted<LexicalEnvironmentObject*> env(cx, &envChain_->as<LexicalEnvironmentObject>());
+    LexicalEnvironmentObject* fresh = LexicalEnvironmentObject::recreate(cx, env);
+    if (!fresh)
+        return false;
+
+    replaceInnermostEnvironment(*fresh);
+    return true;
+}
+
 void
 InterpreterFrame::popBlock(JSContext* cx)
 {

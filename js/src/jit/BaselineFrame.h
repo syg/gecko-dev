@@ -263,6 +263,7 @@ class BaselineFrame
     inline MOZ_MUST_USE bool pushBlock(JSContext* cx, Handle<LexicalScope*> scope);
     inline void popBlock(JSContext* cx);
     inline MOZ_MUST_USE bool freshenBlock(JSContext* cx);
+    inline MOZ_MUST_USE bool recreateBlock(JSContext* cx);
 
     MOZ_MUST_USE bool initStrictEvalEnvironmentObjects(JSContext* cx);
     MOZ_MUST_USE bool initFunctionEnvironmentObjects(JSContext* cx);

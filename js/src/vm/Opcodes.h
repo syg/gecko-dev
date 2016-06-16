@@ -1963,13 +1963,24 @@
      */ \
     macro(JSOP_FRESHENBLOCKSCOPE,197,"freshenblockscope", NULL, 1, 0, 0, JOF_BYTE) \
     /*
+     * Recreates the current block on the scope chain with a fresh block
+     * with uninitialized bindings.  This operation implements the behavior of
+     * inducing a fresh block scope for every iteration of a for-in/of loop
+     * whose loop-head has a (captured) lexical declaration.
+     *   Category: Variables and Scopes
+     *   Type: Block-local Scope
+     *   Operands:
+     *   Stack: =>
+     */ \
+    macro(JSOP_RECREATEBLOCKSCOPE,198,"recreateblockscope",NULL,1,0,0,JOF_BYTE) \
+    /*
      * Pushes block onto the scope chain.
      *   Category: Variables and Scopes
      *   Type: Block-local Scope
      *   Operands: uint32_t staticBlockObjectIndex
      *   Stack: =>
      */ \
-    macro(JSOP_PUSHBLOCKSCOPE,198,"pushblockscope", NULL, 5,  0,  0,  JOF_SCOPE) \
+    macro(JSOP_PUSHBLOCKSCOPE,199,"pushblockscope", NULL, 5,  0,  0,  JOF_SCOPE) \
     /*
      * Pops block from the scope chain.
      *   Category: Variables and Scopes
@@ -1977,7 +1988,7 @@
      *   Operands:
      *   Stack: =>
      */ \
-    macro(JSOP_POPBLOCKSCOPE, 199,"popblockscope", NULL,  1,  0,  0,  JOF_BYTE) \
+    macro(JSOP_POPBLOCKSCOPE, 200,"popblockscope", NULL,  1,  0,  0,  JOF_BYTE) \
     /*
      * The opcode to assist the debugger.
      *   Category: Statements
@@ -1985,17 +1996,8 @@
      *   Operands:
      *   Stack: =>
      */ \
-    macro(JSOP_DEBUGLEAVEBLOCK, 200,"debugleaveblock", NULL, 1,  0,  0,  JOF_BYTE) \
+    macro(JSOP_DEBUGLEAVEBLOCK, 201,"debugleaveblock", NULL, 1,  0,  0,  JOF_BYTE) \
     \
-    /*
-     * Initializes generator frame, creates a generator and pushes it on the
-     * stack.
-     *   Category: Statements
-     *   Type: Generator
-     *   Operands:
-     *   Stack: => generator
-     */ \
-    macro(JSOP_GENERATOR,     201,"generator",   NULL,    1,  0,  1,  JOF_BYTE) \
     /*
      * Pops the generator from the top of the stack, suspends it and stops
      * interpretation.
@@ -2068,7 +2070,15 @@
     macro(JSOP_UNUSED209,     209, "unused209",    NULL,  1,  0,  0,  JOF_BYTE) \
     macro(JSOP_UNUSED210,     210, "unused210",    NULL,  1,  0,  0,  JOF_BYTE) \
     macro(JSOP_UNUSED211,     211, "unused211",    NULL,  1,  0,  0,  JOF_BYTE) \
-    macro(JSOP_UNUSED212,     212, "unused212",    NULL,  1,  0,  0,  JOF_BYTE) \
+    /*
+     * Initializes generator frame, creates a generator and pushes it on the
+     * stack.
+     *   Category: Statements
+     *   Type: Generator
+     *   Operands:
+     *   Stack: => generator
+     */ \
+    macro(JSOP_GENERATOR,     212,"generator",   NULL,    1,  0,  1,  JOF_BYTE) \
     /*
      * Pushes the nearest 'var' environment.
      *
