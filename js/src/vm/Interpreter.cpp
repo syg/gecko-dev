@@ -3194,7 +3194,7 @@ END_CASE(JSOP_REST)
 CASE(JSOP_GETALIASEDVAR)
 {
     ScopeCoordinate sc = ScopeCoordinate(REGS.pc);
-    ReservedRooted<Value> val(&rootValue0, REGS.fp()->aliasedEnvironment(sc).aliasedVar(sc));
+    ReservedRooted<Value> val(&rootValue0, REGS.fp()->aliasedEnvironment(sc).aliasedBinding(sc));
 #ifdef DEBUG
     // Only the .this slot can hold the TDZ MagicValue.
     if (IsUninitializedLexical(val)) {
@@ -3213,7 +3213,7 @@ END_CASE(JSOP_GETALIASEDVAR)
 CASE(JSOP_SETALIASEDVAR)
 {
     ScopeCoordinate sc = ScopeCoordinate(REGS.pc);
-    ScopeObject& obj = REGS.fp()->aliasedEnvironment(sc);
+    EnvironmentObject& obj = REGS.fp()->aliasedEnvironment(sc);
     SetAliasedVarOperation(cx, script, REGS.pc, obj, sc, REGS.sp[-1], CheckTDZ);
 }
 END_CASE(JSOP_SETALIASEDVAR)
@@ -3246,7 +3246,7 @@ END_CASE(JSOP_INITLEXICAL)
 CASE(JSOP_CHECKALIASEDLEXICAL)
 {
     ScopeCoordinate sc = ScopeCoordinate(REGS.pc);
-    ReservedRooted<Value> val(&rootValue0, REGS.fp()->aliasedEnvironment(sc).aliasedVar(sc));
+    ReservedRooted<Value> val(&rootValue0, REGS.fp()->aliasedEnvironment(sc).aliasedBinding(sc));
     if (!CheckUninitializedLexical(cx, script, REGS.pc, val))
         goto error;
 }
@@ -3255,7 +3255,7 @@ END_CASE(JSOP_CHECKALIASEDLEXICAL)
 CASE(JSOP_INITALIASEDLEXICAL)
 {
     ScopeCoordinate sc = ScopeCoordinate(REGS.pc);
-    ScopeObject& obj = REGS.fp()->aliasedEnvironment(sc);
+    EnvironmentObject& obj = REGS.fp()->aliasedEnvironment(sc);
     SetAliasedVarOperation(cx, script, REGS.pc, obj, sc, REGS.sp[-1], DontCheckTDZ);
 }
 END_CASE(JSOP_INITALIASEDLEXICAL)

@@ -1760,7 +1760,7 @@ GetExistingProperty(JSContext* cx,
         vp.set(obj->getSlot(shape->slot()));
         MOZ_ASSERT_IF(!vp.isMagic(JS_UNINITIALIZED_LEXICAL) &&
                       !obj->isSingleton() &&
-                      !obj->template is<ScopeObject>() &&
+                      !obj->template is<EnvironmentObject>() &&
                       shape->hasDefaultGetter(),
                       ObjectGroupHasProperty(cx, obj->group(), shape->propid(), vp));
     } else {
@@ -2255,7 +2255,7 @@ SetNonexistentProperty(JSContext* cx, HandleId id, HandleValue v, HandleValue re
                        QualifiedBool qualified, ObjectOpResult& result)
 {
     // We should never add properties to lexical blocks.
-    MOZ_ASSERT_IF(receiver.isObject(), !receiver.toObject().is<ClonedBlockObject>());
+    MOZ_ASSERT_IF(receiver.isObject(), !receiver.toObject().is<LexicalEnvironmentObject>());
 
     if (!qualified && receiver.isObject() && receiver.toObject().isUnqualifiedVarObj()) {
         if (!MaybeReportUndeclaredVarAssignment(cx, JSID_TO_STRING(id)))

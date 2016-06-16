@@ -348,7 +348,7 @@ LexicalScope::create(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
     BindingData* copy;
     BindingIter bi(*data, firstFrameSlot);
     copy = CopyBindingData(cx, bi, data, sizeOfBindingData(data->length),
-                           &ClonedBlockObject::class_,
+                           &LexicalEnvironmentObject::class_,
                            BaseShape::NOT_EXTENSIBLE | BaseShape::DELEGATE,
                            &envShape);
     if (!copy)
@@ -730,7 +730,7 @@ BindingIter::init(LexicalScope::BindingData& data, uint32_t firstFrameSlot)
     // assert.
     init(0, 0, 0, data.constStart,
          (firstFrameSlot == LOCALNO_LIMIT ? 0 : CanHaveFrameSlots) | CanHaveEnvironmentSlots,
-         firstFrameSlot, JSSLOT_FREE(&ClonedBlockObject::class_),
+         firstFrameSlot, JSSLOT_FREE(&LexicalEnvironmentObject::class_),
          data.names, data.length);
 }
 

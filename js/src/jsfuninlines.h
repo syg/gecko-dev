@@ -26,12 +26,8 @@ SkipEnvironmentObjects(JSObject* env)
 {
     if (!env)
         return nullptr;
-    while (env->is<ScopeObject>() || env->is<EnvironmentObject>()) {
-        if (env->is<ScopeObject>())
-            env = &env->as<ScopeObject>().enclosingScope();
-        else
-            env = &env->as<EnvironmentObject>().enclosingEnvironment();
-    }
+    while (env->is<EnvironmentObject>())
+        env = &env->as<EnvironmentObject>().enclosingEnvironment();
     return env;
 }
 

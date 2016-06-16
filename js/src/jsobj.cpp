@@ -2243,7 +2243,7 @@ js::LookupNameUnqualified(JSContext* cx, HandlePropertyName name, HandleObject e
             env = RuntimeLexicalErrorObject::create(cx, env, JSMSG_UNINITIALIZED_LEXICAL);
             if (!env)
                 return false;
-        } else if (env->is<ScopeObject>() && !env->is<DeclEnvObject>() && !shape->writable()) {
+        } else if (env->is<EnvironmentObject>() && !shape->writable()) {
             MOZ_ASSERT(name != cx->names().dotThis);
             env = RuntimeLexicalErrorObject::create(cx, env, JSMSG_BAD_CONST_ASSIGN);
             if (!env)
@@ -3212,8 +3212,8 @@ js::GetThisValue(JSObject* obj)
     if (obj->is<GlobalObject>())
         return ObjectValue(*ToWindowProxyIfWindow(obj));
 
-    if (obj->is<ClonedBlockObject>())
-        return obj->as<ClonedBlockObject>().thisValue();
+    if (obj->is<LexicalEnvironmentObject>())
+        return obj->as<LexicalEnvironmentObject>().thisValue();
 
     if (obj->is<ModuleEnvironmentObject>())
         return UndefinedValue();
@@ -3266,15 +3266,6 @@ GetObjectSlotNameFunctor::operator()(JS::CallbackTracer* trc, char* buf, size_t 
 #undef TEST_SLOT_MATCHES_PROTOTYPE
             } else {
                 pattern = "%s";
-                if (obj->is<ScopeObject>()) {
-                    if (slot == ScopeObject::enclosingScopeSlot()) {
-                        slotname = "enclosing_environment";
-                    } else if (obj->is<DeclEnvObject>()) {
-                        if (slot == DeclEnvObject::lambdaSlot())
-                            slotname = "named_lambda";
-                    }
-                }
-
                 if (obj->is<EnvironmentObject>()) {
                     if (slot == EnvironmentObject::enclosingEnvironmentSlot()) {
                         slotname = "enclosing_environment";

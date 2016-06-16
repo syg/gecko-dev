@@ -347,8 +347,6 @@ class StaticEvalScope : public StaticScope
     bool isStrict() const {
         return getReservedSlot(STRICT_SLOT).isTrue();
     }
-
-    inline bool isNonGlobal() const;
 };
 
 /*
@@ -479,7 +477,7 @@ class StaticNonSyntacticScope : public StaticScope
  * accessed by the ALIASEDVAR op at 'pc'.
  */
 extern Shape*
-ScopeCoordinateToStaticScopeShape(JSScript* script, jsbytecode* pc);
+ScopeCoordinateToEnvironmentShape(JSScript* script, jsbytecode* pc);
 
 /* Return the name being accessed by the given ALIASEDVAR op. */
 extern PropertyName*
@@ -679,7 +677,7 @@ class CallObject : public VarEnvironmentObject
     static CallObject* createSingleton(JSContext* cx, HandleShape shape);
 
     static CallObject* createTemplateObject(JSContext* cx, HandleScript script,
-                                            gc::InitialHeap heap);
+                                            HandleObject enclosing, gc::InitialHeap heap);
 
     static CallObject* createForFunction(JSContext* cx, HandleObject enclosing,
                                          HandleFunction callee);
@@ -787,9 +785,8 @@ class LexicalEnvironmentObject : public EnvironmentObject
 
   private:
     static LexicalEnvironmentObject* create(JSContext* cx, HandleShape shape,
-                                            HandleObject enclosing);
-    static LexicalEnvironmentObject* create(JSContext* cx, Handle<LexicalScope*> scope,
-                                            HandleObject enclosing);
+                                            HandleObject enclosing,
+                                            gc::InitialHeap heap);
 
     void initThisValue(JSObject* obj) {
         MOZ_ASSERT(isGlobal() || !isSyntactic());
@@ -803,8 +800,10 @@ class LexicalEnvironmentObject : public EnvironmentObject
 
   public:
     static LexicalEnvironmentObject* create(JSContext* cx, Handle<LexicalScope*> scope,
-                                            AbstractFramePtr frame);
+                                            HandleObject enclosing, gc::InitialHeap heap);
 
+    static LexicalEnvironmentObject* create(JSContext* cx, Handle<LexicalScope*> scope,
+                                            AbstractFramePtr frame);
     static LexicalEnvironmentObject* createGlobal(JSContext* cx, Handle<GlobalObject*> global);
     static LexicalEnvironmentObject* createNonSyntactic(JSContext* cx, HandleObject enclosing);
     static LexicalEnvironmentObject* createHollowForDebug(JSContext* cx,
@@ -850,23 +849,19 @@ class LexicalEnvironmentObject : public EnvironmentObject
     Value thisValue() const;
 };
 
-class DeclEnvObject : public ScopeObject
+class DeclEnvObject : public LexicalEnvironmentObject
 {
-    // Pre-allocated slot for the named lambda.
-    static const uint32_t LAMBDA_SLOT = 1;
+    static DeclEnvObject* create(JSContext* cx, HandleFunction canonicalFun,
+                                 HandleObject enclosing, gc::InitialHeap heap);
 
   public:
-    static const uint32_t RESERVED_SLOTS = 2;
-    static const Class class_;
+    static DeclEnvObject* createTemplateObject(JSContext* cx, HandleFunction canonicalFun,
+                                               gc::InitialHeap heap);
 
-    static DeclEnvObject*
-    createTemplateObject(JSContext* cx, HandleFunction fun, NewObjectKind newKind);
+    static DeclEnvObject* create(JSContext* cx, HandleFunction fun);
 
-    static DeclEnvObject* create(JSContext* cx, HandleObject enclosing, HandleFunction callee);
-
-    static inline size_t lambdaSlot() {
-        return LAMBDA_SLOT;
-    }
+    // For JITs.
+    static size_t lambdaSlot();
 };
 
 // A non-syntactic dynamic scope object that captures non-lexical
@@ -890,7 +885,7 @@ class NestedScopeObject : public ScopeObject
   public:
     // Return the static scope corresponding to this scope chain object.
     inline NestedStaticScope* staticScope() {
-        return &staticPrototype()->as<NestedStaticScope>();
+        return nullptr;
     }
 
     void initEnclosingScope(JSObject* obj) {
@@ -989,7 +984,7 @@ class ClonedBlockObject : public NestedScopeObject
   public:
     /* The static block from which this block was cloned. */
     StaticBlockScope& staticBlock() const {
-        return staticPrototype()->as<StaticBlockScope>();
+        return *((StaticBlockScope*)(staticPrototype()));
     }
 
     /* Assuming 'put' has been called, return the value of the ith let var. */
@@ -1053,7 +1048,7 @@ class ClonedBlockObject : public NestedScopeObject
 //
 // ES6 'const' bindings induce a runtime error when assigned to outside
 // of initialization, regardless of strictness.
-class RuntimeLexicalErrorObject : public ScopeObject
+class RuntimeLexicalErrorObject : public EnvironmentObject
 {
     static const unsigned ERROR_SLOT = 1;
 
@@ -1405,64 +1400,6 @@ class DebugEnvironments
 
 }  /* namespace js */
 
-template<>
-inline bool
-JSObject::is<js::StaticBlockScope>() const
-{
-    return hasClass(&js::ClonedBlockObject::class_) && !staticPrototype();
-}
-
-template<>
-inline bool
-JSObject::is<js::NestedStaticScope>() const
-{
-    return is<js::StaticBlockScope>() ||
-           is<js::StaticWithScope>();
-}
-
-template<>
-inline bool
-JSObject::is<js::StaticScope>() const
-{
-    return is<js::NestedStaticScope>() ||
-           is<js::StaticEvalScope>() ||
-           is<js::StaticNonSyntacticScope>();
-}
-
-template<>
-inline bool
-JSObject::is<js::ClonedBlockObject>() const
-{
-    return hasClass(&js::ClonedBlockObject::class_) && staticPrototype();
-}
-
-template<>
-inline bool
-JSObject::is<js::NestedScopeObject>() const
-{
-    return is<js::ClonedBlockObject>() ||
-           is<js::WithEnvironmentObject>();
-}
-
-template<>
-inline bool
-JSObject::is<js::LexicalScopeBase>() const
-{
-    return is<js::CallObject>() ||
-           is<js::ModuleEnvironmentObject>();
-}
-
-template<>
-inline bool
-JSObject::is<js::ScopeObject>() const
-{
-    return is<js::LexicalScopeBase>() ||
-           is<js::DeclEnvObject>() ||
-           is<js::NestedScopeObject>() ||
-           is<js::RuntimeLexicalErrorObject>() ||
-           is<js::NonSyntacticVariablesObject>();
-}
-
 template <>
 inline bool
 JSObject::is<js::VarEnvironmentObject>() const
@@ -1503,12 +1440,6 @@ IsSyntacticEnvironment(JSObject* scope)
 }
 
 inline bool
-IsStaticGlobalLexicalScope(JSObject* scope)
-{
-    return scope->is<StaticBlockScope>() && scope->as<StaticBlockScope>().isGlobal();
-}
-
-inline bool
 IsExtensibleLexicalEnvironment(JSObject* env)
 {
     return env->is<LexicalEnvironmentObject>() &&
@@ -1525,24 +1456,12 @@ IsGlobalLexicalEnvironment(JSObject* env)
 inline NestedStaticScope*
 NestedStaticScope::enclosingNestedScope() const
 {
-    JSObject* obj = getReservedSlot(ENCLOSING_SCOPE_SLOT).toObjectOrNull();
-    return obj && obj->is<NestedStaticScope>()
-           ? &obj->as<NestedStaticScope>()
-           : nullptr;
-}
-
-inline bool
-StaticEvalScope::isNonGlobal() const
-{
-    if (isStrict())
-        return true;
-    return !IsStaticGlobalLexicalScope(&getReservedSlot(ENCLOSING_SCOPE_SLOT).toObject());
+    return nullptr;
 }
 
 inline const Value&
 ScopeObject::aliasedVar(ScopeCoordinate sc)
 {
-    MOZ_ASSERT(is<LexicalScopeBase>() || is<ClonedBlockObject>());
     return getSlot(sc.slot());
 }
 

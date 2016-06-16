@@ -6176,7 +6176,7 @@ IonBuilder::createDeclEnvObject(MDefinition* callee, MDefinition* env)
 {
     // Get a template CallObject that we'll use to generate inline object
     // creation.
-    DeclEnvObject* templateObj = inspector->templateDeclEnvObject();
+    LexicalEnvironmentObject* templateObj = inspector->templateDeclEnvObject();
 
     // One field is added to the function to handle its name.  This cannot be a
     // dynamic slot because there is still plenty of room on the DeclEnv object.
@@ -6192,8 +6192,10 @@ IonBuilder::createDeclEnvObject(MDefinition* callee, MDefinition* env)
     // the object will be allocated in the nursery if possible, and if the
     // tenured heap is used instead, a minor collection will have been performed
     // that moved env/callee to the tenured heap.
-    current->add(MStoreFixedSlot::New(alloc(), declEnvObj, DeclEnvObject::enclosingScopeSlot(), env));
-    current->add(MStoreFixedSlot::New(alloc(), declEnvObj, DeclEnvObject::lambdaSlot(), callee));
+    current->add(MStoreFixedSlot::New(alloc(), declEnvObj,
+                                      DeclEnvObject::enclosingEnvironmentSlot(), env));
+    current->add(MStoreFixedSlot::New(alloc(), declEnvObj,
+                                      DeclEnvObject::lambdaSlot(), callee));
 
     return declEnvObj;
 }
@@ -8451,7 +8453,7 @@ NumFixedSlots(JSObject* object)
 static bool
 IsUninitializedGlobalLexicalSlot(JSObject* obj, PropertyName* name)
 {
-    ClonedBlockObject &globalLexical = obj->as<ClonedBlockObject>();
+    LexicalEnvironmentObject &globalLexical = obj->as<LexicalEnvironmentObject>();
     MOZ_ASSERT(globalLexical.isGlobal());
     Shape* shape = globalLexical.lookupPure(name);
     if (!shape)
@@ -8467,11 +8469,11 @@ IonBuilder::getStaticName(JSObject* staticObject, PropertyName* name, bool* psuc
 
     jsid id = NameToId(name);
 
-    bool isGlobalLexical = staticObject->is<ClonedBlockObject>() &&
-                           staticObject->as<ClonedBlockObject>().isGlobal();
+    bool isGlobalLexical = staticObject->is<LexicalEnvironmentObject>() &&
+                           staticObject->as<LexicalEnvironmentObject>().isGlobal();
     MOZ_ASSERT(isGlobalLexical ||
                staticObject->is<GlobalObject>() ||
-               staticObject->is<LexicalScopeBase>());
+               staticObject->is<VarEnvironmentObject>());
     MOZ_ASSERT(staticObject->isSingleton());
 
     *psucceeded = true;
@@ -8580,8 +8582,8 @@ IonBuilder::setStaticName(JSObject* staticObject, PropertyName* name)
 {
     jsid id = NameToId(name);
 
-    bool isGlobalLexical = staticObject->is<ClonedBlockObject>() &&
-                           staticObject->as<ClonedBlockObject>().isGlobal();
+    bool isGlobalLexical = staticObject->is<LexicalEnvironmentObject>() &&
+                           staticObject->as<LexicalEnvironmentObject>().isGlobal();
     MOZ_ASSERT(isGlobalLexical ||
                staticObject->is<GlobalObject>() ||
                staticObject->is<CallObject>());
@@ -13614,7 +13616,7 @@ IonBuilder::getAliasedVar(ScopeCoordinate sc)
 {
     MDefinition* obj = walkEnvironmentChain(sc.hops());
 
-    Shape* shape = ScopeCoordinateToStaticScopeShape(script(), pc);
+    Shape* shape = ScopeCoordinateToEnvironmentShape(script(), pc);
 
     MInstruction* load;
     if (shape->numFixedSlots() <= sc.slot()) {
@@ -13683,7 +13685,7 @@ IonBuilder::jsop_setaliasedvar(ScopeCoordinate sc)
     MDefinition* rval = current->peek(-1);
     MDefinition* obj = walkEnvironmentChain(sc.hops());
 
-    Shape* shape = ScopeCoordinateToStaticScopeShape(script(), pc);
+    Shape* shape = ScopeCoordinateToEnvironmentShape(script(), pc);
 
     if (NeedsPostBarrier(rval))
         current->add(MPostWriteBarrier::New(alloc(), obj, rval));

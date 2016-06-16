@@ -4722,8 +4722,9 @@ GenerateEnvironmentChainGuards(MacroAssembler& masm, JSObject* envChain, JSObjec
             break;
 
         // Load the next link.
-        tobj = &tobj->as<ScopeObject>().enclosingScope();
-        masm.extractObject(Address(outputReg, ScopeObject::offsetOfEnclosingScope()), outputReg);
+        tobj = &tobj->as<EnvironmentObject>().enclosingEnvironment();
+        masm.extractObject(Address(outputReg, EnvironmentObject::offsetOfEnclosingEnvironment()),
+                           outputReg);
     }
 }
 
@@ -4744,8 +4745,9 @@ BindNameIC::attachNonGlobal(JSContext* cx, HandleScript outerScript, IonScript* 
                                    holder != envChain ? &failures : nullptr);
 
     if (holder != envChain) {
-        JSObject* parent = &envChain->as<ScopeObject>().enclosingScope();
-        masm.extractObject(Address(environmentChainReg(), ScopeObject::offsetOfEnclosingScope()),
+        JSObject* parent = &envChain->as<EnvironmentObject>().enclosingEnvironment();
+        masm.extractObject(Address(environmentChainReg(),
+                                   EnvironmentObject::offsetOfEnclosingEnvironment()),
                            outputReg());
 
         GenerateEnvironmentChainGuards(masm, parent, holder, outputReg(), &failures);
@@ -4778,7 +4780,7 @@ IsCacheableNonGlobalEnvironmentChain(JSObject* envChain, JSObject* holder)
         if (envChain == holder)
             return true;
 
-        envChain = &envChain->as<ScopeObject>().enclosingScope();
+        envChain = &envChain->as<EnvironmentObject>().enclosingEnvironment();
         if (!envChain) {
             JitSpew(JitSpew_IonIC, "env chain indirect hit");
             return false;
@@ -4963,8 +4965,9 @@ NameIC::attachTypeOfNoProperty(JSContext* cx, HandleScript outerScript, IonScrip
             break;
 
         // Load the next link.
-        tobj = &tobj->as<ScopeObject>().enclosingScope();
-        masm.extractObject(Address(scratchReg, ScopeObject::offsetOfEnclosingScope()), scratchReg);
+        tobj = &tobj->as<EnvironmentObject>().enclosingEnvironment();
+        masm.extractObject(Address(scratchReg, EnvironmentObject::offsetOfEnclosingEnvironment()),
+                           scratchReg);
     }
 
     masm.moveValue(UndefinedValue(), outputReg().valueReg());

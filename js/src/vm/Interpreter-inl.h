@@ -239,10 +239,10 @@ SetIntrinsicOperation(JSContext* cx, JSScript* script, jsbytecode* pc, HandleVal
 
 inline void
 SetAliasedVarOperation(JSContext* cx, JSScript* script, jsbytecode* pc,
-                       ScopeObject& obj, ScopeCoordinate sc, const Value& val,
+                       EnvironmentObject& obj, ScopeCoordinate sc, const Value& val,
                        MaybeCheckTDZ checkTDZ)
 {
-    MOZ_ASSERT_IF(checkTDZ, !IsUninitializedLexical(obj.aliasedVar(sc)));
+    MOZ_ASSERT_IF(checkTDZ, !IsUninitializedLexical(obj.aliasedBinding(sc)));
 
     // Avoid computing the name if no type updates are needed, as this may be
     // expensive on scopes with large numbers of variables.
@@ -250,7 +250,7 @@ SetAliasedVarOperation(JSContext* cx, JSScript* script, jsbytecode* pc,
                          ? ScopeCoordinateName(cx->runtime()->scopeCoordinateNameCache, script, pc)
                          : nullptr;
 
-    obj.setAliasedVar(cx, sc, name, val);
+    obj.setAliasedBinding(cx, sc, name, val);
 }
 
 inline bool

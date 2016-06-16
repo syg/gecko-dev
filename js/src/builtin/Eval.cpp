@@ -250,7 +250,7 @@ EvalKernel(JSContext* cx, HandleValue v, EvalType evalType, AbstractFramePtr cal
     // way so that the compiler can make assumptions about what bindings may or
     // may not exist in the current frame if it doesn't see 'eval'.)
     MOZ_ASSERT_IF(evalType != DIRECT_EVAL,
-                  cx->global() == &env->as<ClonedBlockObject>().global());
+                  cx->global() == &env->as<LexicalEnvironmentObject>().global());
 
     RootedLinearString linearStr(cx, str->ensureLinear(cx));
     if (!linearStr)

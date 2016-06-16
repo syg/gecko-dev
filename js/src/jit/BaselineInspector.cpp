@@ -651,16 +651,16 @@ BaselineInspector::getTemplateObjectForSimdCtor(jsbytecode* pc, SimdType simdTyp
     return nullptr;
 }
 
-DeclEnvObject*
+LexicalEnvironmentObject*
 BaselineInspector::templateDeclEnvObject()
 {
     if (!hasBaselineScript())
         return nullptr;
 
-    JSObject* res = &templateCallObject()->as<ScopeObject>().enclosingScope();
+    JSObject* res = &templateCallObject()->enclosingEnvironment();
     MOZ_ASSERT(res);
 
-    return &res->as<DeclEnvObject>();
+    return &res->as<LexicalEnvironmentObject>();
 }
 
 CallObject*
@@ -669,7 +669,7 @@ BaselineInspector::templateCallObject()
     if (!hasBaselineScript())
         return nullptr;
 
-    JSObject* res = baselineScript()->templateScope();
+    JSObject* res = baselineScript()->templateEnvironment();
     MOZ_ASSERT(res);
 
     return &res->as<CallObject>();

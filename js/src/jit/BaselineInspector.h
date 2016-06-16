@@ -125,7 +125,7 @@ class BaselineInspector
 
     JSFunction* getSingleCallee(jsbytecode* pc);
 
-    DeclEnvObject* templateDeclEnvObject();
+    LexicalEnvironmentObject* templateDeclEnvObject();
     CallObject* templateCallObject();
 
     MOZ_MUST_USE bool commonGetPropFunction(jsbytecode* pc, JSObject** holder, Shape** holderShape,

@@ -35,8 +35,7 @@ namespace js {
 static inline bool
 IsCacheableNonGlobalEnvironment(JSObject* obj)
 {
-    bool cacheable =
-        obj->is<CallObject>() || obj->is<ClonedBlockObject>() || obj->is<DeclEnvObject>();
+    bool cacheable = obj->is<CallObject>() || obj->is<LexicalEnvironmentObject>();
 
     MOZ_ASSERT_IF(cacheable, !obj->getOpsLookupProperty());
     return cacheable;
@@ -179,13 +178,13 @@ InterpreterFrame::initArgsObj(ArgumentsObject& argsobj)
     argsObj_ = &argsobj;
 }
 
-inline ScopeObject&
+inline EnvironmentObject&
 InterpreterFrame::aliasedEnvironment(ScopeCoordinate sc) const
 {
-    JSObject* env = &environmentChain()->as<ScopeObject>();
+    JSObject* env = &environmentChain()->as<EnvironmentObject>();
     for (unsigned i = sc.hops(); i; i--)
-        env = &env->as<ScopeObject>().enclosingScope();
-    return env->as<ScopeObject>();
+        env = &env->as<EnvironmentObject>().enclosingEnvironment();
+    return env->as<EnvironmentObject>();
 }
 
 inline void
@@ -205,7 +204,7 @@ InterpreterFrame::pushOnEnvironmentChain(EnvironmentObject& env)
 inline void
 InterpreterFrame::popOffEnvironmentChain()
 {
-    envChain_ = &envChain_->as<ScopeObject>().enclosingScope();
+    envChain_ = &envChain_->as<EnvironmentObject>().enclosingEnvironment();
 }
 
 inline void

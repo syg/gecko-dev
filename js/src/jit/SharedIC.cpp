@@ -2357,7 +2357,7 @@ UpdateExistingGetPropCallStubs(ICFallbackStub* fallbackStub,
                 MOZ_ASSERT(getPropStub->holderShape() != holder->lastProperty() ||
                            !getPropStub->receiverGuard().matches(receiverGuard) ||
                            getPropStub->toGetProp_CallNativeGlobal()->globalShape() !=
-                           receiver->as<ClonedBlockObject>().global().lastProperty(),
+                           receiver->as<LexicalEnvironmentObject>().global().lastProperty(),
                            "Why didn't we end up using this stub?");
 
                 // We want to update the holder shape to match the new one no
@@ -2372,7 +2372,7 @@ UpdateExistingGetPropCallStubs(ICFallbackStub* fallbackStub,
                     ICGetProp_CallNativeGlobal* globalStub =
                         getPropStub->toGetProp_CallNativeGlobal();
                     globalStub->globalShape() =
-                        receiver->as<ClonedBlockObject>().global().lastProperty();
+                        receiver->as<LexicalEnvironmentObject>().global().lastProperty();
                 }
 
                 if (getPropStub->receiverGuard().matches(receiverGuard))
@@ -2918,7 +2918,7 @@ ICGetPropNativeCompiler::getStub(ICStubSpace* space)
       case ICStub::GetName_Global: {
         MOZ_ASSERT(obj_ != holder_);
         Shape* holderShape = holder_->as<NativeObject>().lastProperty();
-        Shape* globalShape = obj_->as<ClonedBlockObject>().global().lastProperty();
+        Shape* globalShape = obj_->as<LexicalEnvironmentObject>().global().lastProperty();
         return newStub<ICGetName_Global>(space, getStubCode(), firstMonitorStub_, guard,
                                          offset_, holder_, holderShape, globalShape);
       }
@@ -3008,7 +3008,8 @@ ICGetPropNativeCompiler::generateStubCode(MacroAssembler& masm)
 
     // If we are generating a non-lexical GETGNAME stub, we must also
     // guard on the shape of the GlobalObject.
-    MOZ_ASSERT(obj_->is<ClonedBlockObject>() && obj_->as<ClonedBlockObject>().isGlobal());
+    MOZ_ASSERT(obj_->is<LexicalEnvironmentObject>() &&
+               obj_->as<LexicalEnvironmentObject>().isGlobal());
     GuardGlobalObject(masm, holder_, objReg, holderReg, scratch,
                       ICGetName_Global::offsetOfGlobalShape(), &failure);
 
@@ -3209,8 +3210,8 @@ ICGetPropCallNativeCompiler::generateStubCode(MacroAssembler& masm)
         // If we are generating a non-lexical GETGNAME stub, we must also
         // guard on the shape of the GlobalObject.
         if (kind == ICStub::GetProp_CallNativeGlobal) {
-            MOZ_ASSERT(receiver_->is<ClonedBlockObject>() &&
-                       receiver_->as<ClonedBlockObject>().isGlobal());
+            MOZ_ASSERT(receiver_->is<LexicalEnvironmentObject>() &&
+                       receiver_->as<LexicalEnvironmentObject>().isGlobal());
             GuardGlobalObject(masm, holder_, objReg, holderReg, scratch,
                               ICGetProp_CallNativeGlobal::offsetOfGlobalShape(), &failure);
         }
@@ -3277,7 +3278,7 @@ ICGetPropCallNativeCompiler::getStub(ICStubSpace* space)
                                              getter_, pcOffset_);
 
       case ICStub::GetProp_CallNativeGlobal: {
-        Shape* globalShape = receiver_->as<ClonedBlockObject>().global().lastProperty();
+        Shape* globalShape = receiver_->as<LexicalEnvironmentObject>().global().lastProperty();
         return newStub<ICGetProp_CallNativeGlobal>(space, getStubCode(), firstMonitorStub_,
                                                    guard, holder_, holderShape, globalShape,
                                                    getter_, pcOffset_);

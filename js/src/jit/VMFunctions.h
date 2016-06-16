@@ -17,7 +17,7 @@
 namespace js {
 
 class DeclEnvObject;
-class StaticWithScope;
+class WithScope;
 class InlineTypedObject;
 class GeneratorObject;
 
@@ -282,7 +282,7 @@ template <> struct TypeToDataType<Handle<InlineTypedObject*> > { static const Da
 template <> struct TypeToDataType<Handle<ArrayObject*> > { static const DataType result = Type_Handle; };
 template <> struct TypeToDataType<Handle<GeneratorObject*> > { static const DataType result = Type_Handle; };
 template <> struct TypeToDataType<Handle<PlainObject*> > { static const DataType result = Type_Handle; };
-template <> struct TypeToDataType<Handle<StaticWithScope*> > { static const DataType result = Type_Handle; };
+template <> struct TypeToDataType<Handle<WithScope*> > { static const DataType result = Type_Handle; };
 template <> struct TypeToDataType<Handle<StaticBlockScope*> > { static const DataType result = Type_Handle; };
 template <> struct TypeToDataType<HandleScript> { static const DataType result = Type_Handle; };
 template <> struct TypeToDataType<HandleValue> { static const DataType result = Type_Handle; };
@@ -323,8 +323,8 @@ template <> struct TypeToArgProperties<Handle<GeneratorObject*> > {
 template <> struct TypeToArgProperties<Handle<PlainObject*> > {
     static const uint32_t result = TypeToArgProperties<PlainObject*>::result | VMFunction::ByRef;
 };
-template <> struct TypeToArgProperties<Handle<StaticWithScope*> > {
-    static const uint32_t result = TypeToArgProperties<StaticWithScope*>::result | VMFunction::ByRef;
+template <> struct TypeToArgProperties<Handle<WithScope*> > {
+    static const uint32_t result = TypeToArgProperties<WithScope*>::result | VMFunction::ByRef;
 };
 template <> struct TypeToArgProperties<Handle<StaticBlockScope*> > {
     static const uint32_t result = TypeToArgProperties<StaticBlockScope*>::result | VMFunction::ByRef;

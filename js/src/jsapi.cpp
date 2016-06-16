@@ -4269,9 +4269,8 @@ JS_GetFunctionScript(JSContext* cx, HandleFunction fun)
 }
 
 /*
- * enclosingScope is a static enclosing scope, if any (e.g. a
- * StaticWithScope).  If the enclosing scope is the global scope, this must be
- * null.
+ * enclosingScope is a static enclosing scope, if any (e.g. a WithScope).  If
+ * the enclosing scope is the global scope, this must be null.
  *
  * enclosingDynamicScope is a dynamic scope to use, if it's not the global.
  */

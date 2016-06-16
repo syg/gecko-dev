@@ -3684,7 +3684,8 @@ UpdateExistingSetPropCallStubs(ICSetProp_Fallback* fallbackStub,
 // Attach an optimized stub for a GETGNAME/CALLGNAME slot-read op.
 static bool
 TryAttachGlobalNameValueStub(JSContext* cx, HandleScript script, jsbytecode* pc,
-                             ICGetName_Fallback* stub, Handle<ClonedBlockObject*> globalLexical,
+                             ICGetName_Fallback* stub,
+                             Handle<LexicalEnvironmentObject*> globalLexical,
                              HandlePropertyName name, bool* attached)
 {
     MOZ_ASSERT(globalLexical->isGlobal());
@@ -3757,7 +3758,8 @@ TryAttachGlobalNameValueStub(JSContext* cx, HandleScript script, jsbytecode* pc,
 // Attach an optimized stub for a GETGNAME/CALLGNAME getter op.
 static bool
 TryAttachGlobalNameAccessorStub(JSContext* cx, HandleScript script, jsbytecode* pc,
-                                ICGetName_Fallback* stub, Handle<ClonedBlockObject*> globalLexical,
+                                ICGetName_Fallback* stub,
+                                Handle<LexicalEnvironmentObject*> globalLexical,
                                 HandlePropertyName name, bool* attached,
                                 bool* isTemporarilyUnoptimizable)
 {
@@ -3855,7 +3857,7 @@ TryAttachEnvNameStub(JSContext* cx, HandleScript script, ICGetName_Fallback* stu
             return true;
         }
 
-        if (!envChain->is<ScopeObject>() || envChain->is<WithEnvironmentObject>())
+        if (!envChain->is<EnvironmentObject>() || envChain->is<WithEnvironmentObject>())
             return true;
 
         // Check for an 'own' property on the scope. There is no need to
@@ -3965,7 +3967,7 @@ DoGetNameFallback(JSContext* cx, BaselineFrame* frame, ICGetName_Fallback* stub_
 
     if (!attached && IsGlobalOp(JSOp(*pc)) && !script->hasNonSyntacticScope()) {
         if (!TryAttachGlobalNameAccessorStub(cx, script, pc, stub,
-                                             envChain.as<ClonedBlockObject>(),
+                                             envChain.as<LexicalEnvironmentObject>(),
                                              name, &attached, &isTemporarilyUnoptimizable))
         {
             return false;
@@ -3995,7 +3997,7 @@ DoGetNameFallback(JSContext* cx, BaselineFrame* frame, ICGetName_Fallback* stub_
         return true;
 
     if (IsGlobalOp(JSOp(*pc)) && !script->hasNonSyntacticScope()) {
-        Handle<ClonedBlockObject*> globalLexical = envChain.as<ClonedBlockObject>();
+        Handle<LexicalEnvironmentObject*> globalLexical = envChain.as<LexicalEnvironmentObject>();
         if (!TryAttachGlobalNameValueStub(cx, script, pc, stub, globalLexical, name, &attached))
             return false;
     } else {
@@ -4075,8 +4077,10 @@ ICGetName_Env<NumHops>::Compiler::generateStubCode(MacroAssembler& masm)
         masm.loadPtr(Address(ICStubReg, ICGetName_Env::offsetOfShape(index)), scratch);
         masm.branchTestObjShape(Assembler::NotEqual, scope, scratch, &failure);
 
-        if (index < numHops)
-            masm.extractObject(Address(scope, ScopeObject::offsetOfEnclosingScope()), walker);
+        if (index < numHops) {
+            masm.extractObject(Address(scope, EnvironmentObject::offsetOfEnclosingEnvironment()),
+                               walker);
+        }
     }
 
     Register scope = NumHops ? walker : obj;
@@ -4552,7 +4556,7 @@ DoSetPropFallback(JSContext* cx, BaselineFrame* frame, ICSetProp_Fallback* stub_
         if (!SetNameOperation(cx, script, pc, obj, rhs))
             return false;
     } else if (op == JSOP_SETALIASEDVAR || op == JSOP_INITALIASEDLEXICAL) {
-        obj->as<ScopeObject>().setAliasedVar(cx, ScopeCoordinate(pc), name, rhs);
+        obj->as<EnvironmentObject>().setAliasedBinding(cx, ScopeCoordinate(pc), name, rhs);
     } else if (op == JSOP_INITGLEXICAL) {
         RootedValue v(cx, rhs);
         LexicalEnvironmentObject* lexicalEnv;

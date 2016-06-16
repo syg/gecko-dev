@@ -38,7 +38,7 @@ BaselineFrame::pushOnEnvironmentChain(EnvironmentObject& env)
 inline void
 BaselineFrame::popOffEnvironmentChain()
 {
-    envChain_ = &envChain_->as<ScopeObject>().enclosingScope();
+    envChain_ = &envChain_->as<EnvironmentObject>().enclosingEnvironment();
 }
 
 inline void

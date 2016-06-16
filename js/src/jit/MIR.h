@@ -13356,9 +13356,9 @@ class MPostWriteElementBarrier : public MTernaryInstruction
 
 class MNewDeclEnvObject : public MNullaryInstruction
 {
-    CompilerGCPointer<DeclEnvObject*> templateObj_;
+    CompilerGCPointer<LexicalEnvironmentObject*> templateObj_;
 
-    explicit MNewDeclEnvObject(DeclEnvObject* templateObj)
+    explicit MNewDeclEnvObject(LexicalEnvironmentObject* templateObj)
       : MNullaryInstruction(),
         templateObj_(templateObj)
     {
@@ -13368,11 +13368,11 @@ class MNewDeclEnvObject : public MNullaryInstruction
   public:
     INSTRUCTION_HEADER(NewDeclEnvObject)
 
-    static MNewDeclEnvObject* New(TempAllocator& alloc, DeclEnvObject* templateObj) {
+    static MNewDeclEnvObject* New(TempAllocator& alloc, LexicalEnvironmentObject* templateObj) {
         return new(alloc) MNewDeclEnvObject(templateObj);
     }
 
-    DeclEnvObject* templateObj() {
+    LexicalEnvironmentObject* templateObj() {
         return templateObj_;
     }
     AliasSet getAliasSet() const override {

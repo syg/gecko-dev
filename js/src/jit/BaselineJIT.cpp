@@ -58,7 +58,7 @@ BaselineScript::BaselineScript(uint32_t prologueOffset, uint32_t epilogueOffset,
                                uint32_t traceLoggerExitToggleOffset,
                                uint32_t postDebugPrologueOffset)
   : method_(nullptr),
-    templateScope_(nullptr),
+    templateEnv_(nullptr),
     fallbackStubSpace_(),
     dependentWasmModules_(nullptr),
     prologueOffset_(prologueOffset),
@@ -463,7 +463,7 @@ void
 BaselineScript::trace(JSTracer* trc)
 {
     TraceEdge(trc, &method_, "baseline-method");
-    TraceNullableEdge(trc, &templateScope_, "baseline-template-scope");
+    TraceNullableEdge(trc, &templateEnv_, "baseline-template-environment");
 
     // Mark all IC stub codes hanging off the IC stub entries.
     for (size_t i = 0; i < numICEntries(); i++) {

@@ -133,21 +133,22 @@ BaselineCompiler::compile()
     if (!code)
         return Method_Error;
 
-    JSObject* templateScope = nullptr;
+    Rooted<EnvironmentObject*> templateEnv(cx);
     if (script->functionNonDelazifying()) {
         RootedFunction fun(cx, script->functionNonDelazifying());
         if (fun->needsCallObject()) {
             RootedScript scriptRoot(cx, script);
-            templateScope = CallObject::createTemplateObject(cx, scriptRoot, gc::TenuredHeap);
-            if (!templateScope)
-                return Method_Error;
 
             if (fun->isNamedLambda()) {
-                RootedObject declEnvObject(cx, DeclEnvObject::createTemplateObject(cx, fun, TenuredObject));
-                if (!declEnvObject)
+                templateEnv = DeclEnvObject::createTemplateObject(cx, fun, gc::TenuredHeap);
+                if (!templateEnv)
                     return Method_Error;
-                templateScope->as<ScopeObject>().setEnclosingScope(declEnvObject);
             }
+
+            templateEnv = CallObject::createTemplateObject(cx, scriptRoot, templateEnv,
+                                                           gc::TenuredHeap);
+            if (!templateEnv)
+                return Method_Error;
         }
     }
 
@@ -216,7 +217,7 @@ BaselineCompiler::compile()
     }
 
     baselineScript->setMethod(code);
-    baselineScript->setTemplateScope(templateScope);
+    baselineScript->setTemplateEnvironment(templateEnv);
 
     JitSpew(JitSpew_BaselineScripts, "Created BaselineScript %p (raw %p) for %s:%d",
             (void*) baselineScript.get(), (void*) code->raw(),
@@ -2427,7 +2428,7 @@ Address
 BaselineCompiler::getScopeCoordinateAddressFromObject(Register objReg, Register reg)
 {
     ScopeCoordinate sc(pc);
-    Shape* shape = ScopeCoordinateToStaticScopeShape(script, pc);
+    Shape* shape = ScopeCoordinateToEnvironmentShape(script, pc);
 
     Address addr;
     if (shape->numFixedSlots() <= sc.slot()) {
@@ -3484,7 +3485,7 @@ static const VMFunction EnterWithInfo = FunctionInfo<EnterWithFn>(jit::EnterWith
 bool
 BaselineCompiler::emit_JSOP_ENTERWITH()
 {
-    StaticWithScope& withScope = script->getObject(pc)->as<StaticWithScope>();
+    WithScope& withScope = script->getScope(pc)->as<WithScope>();
 
     // Pop "with" object to R0.
     frame.popRegsAndSync(1);

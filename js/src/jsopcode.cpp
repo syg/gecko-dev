@@ -775,6 +775,7 @@ ToDisassemblySource(JSContext* cx, HandleValue v, JSAutoByteString* bytes)
 
     if (v.isObject()) {
         JSObject& obj = v.toObject();
+        /* TODOshu
         if (obj.is<StaticBlockScope>()) {
             Rooted<StaticBlockScope*> block(cx, &obj.as<StaticBlockScope>());
             char* source = JS_sprintf_append(nullptr, "depth %d {", block->localOffset());
@@ -814,6 +815,7 @@ ToDisassemblySource(JSContext* cx, HandleValue v, JSAutoByteString* bytes)
             bytes->initBytes(source);
             return true;
         }
+        */
 
         if (obj.is<JSFunction>()) {
             RootedFunction fun(cx, &obj.as<JSFunction>());

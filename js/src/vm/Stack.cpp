@@ -118,8 +118,8 @@ AssertDynamicScopeMatchesStaticScope(JSContext* cx, JSScript* script, JSObject* 
         if (i.type() == StaticScopeIter<NoGC>::NonSyntactic) {
             while (scope->is<WithEnvironmentObject>() ||
                    scope->is<NonSyntacticVariablesObject>() ||
-                   (scope->is<ClonedBlockObject>() &&
-                    !scope->as<ClonedBlockObject>().isSyntactic()))
+                   (scope->is<LexicalEnvironmentObject>() &&
+                    !scope->as<LexicalEnvironmentObject>().isSyntactic()))
             {
                 MOZ_ASSERT(!IsSyntacticEnvironment(scope));
                 scope = &scope->as<ScopeObject>().enclosingScope();
@@ -135,8 +135,8 @@ AssertDynamicScopeMatchesStaticScope(JSContext* cx, JSScript* script, JSObject* 
                 scope = &scope->as<CallObject>().enclosingScope();
                 break;
               case StaticScopeIter<NoGC>::Block:
-                MOZ_ASSERT(&i.block() == scope->as<ClonedBlockObject>().staticScope());
-                scope = &scope->as<ClonedBlockObject>().enclosingScope();
+                MOZ_ASSERT(&i.block() == scope->as<LexicalEnvironmentObject>().staticScope());
+                scope = &scope->as<LexicalEnvironmentObject>().enclosingScope();
                 break;
               case StaticScopeIter<NoGC>::With:
                 MOZ_ASSERT(&i.staticWith() == scope->as<WithEnvironmentObject>().staticScope());

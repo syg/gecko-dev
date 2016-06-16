@@ -31,9 +31,11 @@ class BaseShape;
 class ClonedBlockObject;
 class DebugEnvironmentProxy;
 class ExportEntryObject;
+class EnvironmentObject;
 class GlobalObject;
 class ImportEntryObject;
 class LazyScript;
+class LexicalEnvironmentObject;
 class ModuleEnvironmentObject;
 class ModuleNamespaceObject;
 class ModuleObject;
@@ -88,9 +90,11 @@ class JitCode;
     D(js::ClonedBlockObject*) \
     D(js::DebugEnvironmentProxy*) \
     D(js::ExportEntryObject*) \
+    D(js::EnvironmentObject*) \
     D(js::GlobalObject*) \
     D(js::ImportEntryObject*) \
     D(js::LazyScript*) \
+    D(js::LexicalEnvironmentObject*) \
     D(js::ModuleEnvironmentObject*) \
     D(js::ModuleNamespaceObject*) \
     D(js::ModuleObject*) \

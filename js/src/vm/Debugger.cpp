@@ -9302,7 +9302,7 @@ DebuggerEnv_getOptimizedOut(JSContext* cx, unsigned argc, Value* vp)
         return false;
     Rooted<Env*> env(cx, static_cast<Env*>(envobj->getPrivate()));
     MOZ_ASSERT(env);
-    MOZ_ASSERT(!env->is<ScopeObject>());
+    MOZ_ASSERT(!env->is<EnvironmentObject>());
 
     args.rval().setBoolean(env->is<DebugEnvironmentProxy>() &&
                            env->as<DebugEnvironmentProxy>().isOptimizedOut());
