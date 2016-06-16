@@ -283,7 +283,7 @@ template <> struct TypeToDataType<Handle<ArrayObject*> > { static const DataType
 template <> struct TypeToDataType<Handle<GeneratorObject*> > { static const DataType result = Type_Handle; };
 template <> struct TypeToDataType<Handle<PlainObject*> > { static const DataType result = Type_Handle; };
 template <> struct TypeToDataType<Handle<WithScope*> > { static const DataType result = Type_Handle; };
-template <> struct TypeToDataType<Handle<StaticBlockScope*> > { static const DataType result = Type_Handle; };
+template <> struct TypeToDataType<Handle<LexicalScope*> > { static const DataType result = Type_Handle; };
 template <> struct TypeToDataType<HandleScript> { static const DataType result = Type_Handle; };
 template <> struct TypeToDataType<HandleValue> { static const DataType result = Type_Handle; };
 template <> struct TypeToDataType<MutableHandleValue> { static const DataType result = Type_Handle; };
@@ -326,8 +326,8 @@ template <> struct TypeToArgProperties<Handle<PlainObject*> > {
 template <> struct TypeToArgProperties<Handle<WithScope*> > {
     static const uint32_t result = TypeToArgProperties<WithScope*>::result | VMFunction::ByRef;
 };
-template <> struct TypeToArgProperties<Handle<StaticBlockScope*> > {
-    static const uint32_t result = TypeToArgProperties<StaticBlockScope*>::result | VMFunction::ByRef;
+template <> struct TypeToArgProperties<Handle<LexicalScope*> > {
+    static const uint32_t result = TypeToArgProperties<LexicalScope*>::result | VMFunction::ByRef;
 };
 template <> struct TypeToArgProperties<HandleScript> {
     static const uint32_t result = TypeToArgProperties<JSScript*>::result | VMFunction::ByRef;

@@ -44,7 +44,6 @@ class EnvironmentObject;
 class ScriptFrameIter;
 class SPSProfiler;
 class InterpreterFrame;
-class StaticBlockScope;
 class LexicalEnvironmentObject;
 
 class EnvironmentCoordinate;

@@ -27,8 +27,6 @@ NearestEnclosingExtensibleLexicalEnvironment(JSObject* env)
 inline void
 ScopeObject::setAliasedVar(JSContext* cx, ScopeCoordinate sc, PropertyName* name, const Value& v)
 {
-    JS_STATIC_ASSERT(CallObject::RESERVED_SLOTS == ClonedBlockObject::RESERVED_SLOTS);
-
     // name may be null if we don't need to track side effects on the object.
     MOZ_ASSERT_IF(isSingleton(), name);
 
