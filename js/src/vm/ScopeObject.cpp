@@ -710,25 +710,6 @@ const Class WithEnvironmentObject::class_ = {
     &WithEnvironmentObjectOps
 };
 
-/* static */ StaticEvalScope*
-StaticEvalScope::create(JSContext* cx, HandleObject enclosing)
-{
-    StaticEvalScope* obj =
-        NewObjectWithNullTaggedProto<StaticEvalScope>(cx, TenuredObject, BaseShape::DELEGATE);
-    if (!obj)
-        return nullptr;
-
-    obj->setReservedSlot(ENCLOSING_SCOPE_SLOT, ObjectOrNullValue(enclosing));
-    obj->setReservedSlot(STRICT_SLOT, BooleanValue(false));
-    return obj;
-}
-
-const Class StaticEvalScope::class_ = {
-    "StaticEval",
-    JSCLASS_HAS_RESERVED_SLOTS(StaticEvalScope::RESERVED_SLOTS) |
-    JSCLASS_IS_ANONYMOUS
-};
-
 /* static */ StaticNonSyntacticScope*
 StaticNonSyntacticScope::create(JSContext*cx, HandleObject enclosing)
 {

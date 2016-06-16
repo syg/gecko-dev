@@ -24,7 +24,6 @@ class FunctionBox;
 class ModuleBox;
 }
 
-class StaticEvalScope;
 class StaticNonSyntacticScope;
 
 class ModuleObject;
@@ -304,34 +303,6 @@ class StaticBlockScope : public NestedStaticScope
 
     static Shape* addVar(ExclusiveContext* cx, Handle<StaticBlockScope*> block, HandleId id,
                          bool constant, unsigned index, bool* redeclared);
-};
-
-/*
- * Static eval scope placeholder objects on the static scope chain. Created at
- * the time of compiling the eval script, and set as its static enclosing
- * scope.
- */
-class StaticEvalScope : public StaticScope
-{
-    static const uint32_t STRICT_SLOT = StaticScope::RESERVED_SLOTS;
-    static const unsigned RESERVED_SLOTS = STRICT_SLOT + 1;
-
-  public:
-    static const Class class_;
-
-    static StaticEvalScope* create(JSContext* cx, HandleObject enclosing);
-
-    JSObject* enclosingScopeForStaticScopeIter() {
-        return getReservedSlot(ENCLOSING_SCOPE_SLOT).toObjectOrNull();
-    }
-
-    void setStrict() {
-        setReservedSlot(STRICT_SLOT, BooleanValue(true));
-    }
-
-    bool isStrict() const {
-        return getReservedSlot(STRICT_SLOT).isTrue();
-    }
 };
 
 /*
