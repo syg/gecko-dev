@@ -19,13 +19,6 @@
 
 namespace js {
 
-namespace frontend {
-class FunctionBox;
-class ModuleBox;
-}
-
-class StaticNonSyntacticScope;
-
 class ModuleObject;
 typedef Handle<ModuleObject*> HandleModuleObject;
 
@@ -89,30 +82,6 @@ class StaticScope : public NativeObject
     }
 
     void setEnclosingScope(HandleObject obj);
-};
-
-class NestedStaticScope : public StaticScope
-{
-  public:
-    /*
-     * A refinement of enclosingScope that returns nullptr if the enclosing
-     * scope is not a NestedScopeObject.
-     */
-    inline NestedStaticScope* enclosingNestedScope() const;
-
-    /*
-     * Note: in the case of hoisting, this prev-link will not ultimately be
-     * the same as enclosingNestedScope; initEnclosingNestedScope must be
-     * called separately in the emitter. 'reset' is just for asserting
-     * stackiness.
-     */
-    void initEnclosingScopeFromParser(JSObject* prev) {
-        setReservedSlot(ENCLOSING_SCOPE_SLOT, ObjectOrNullValue(prev));
-    }
-
-    void resetEnclosingScopeFromParser() {
-        setReservedSlot(ENCLOSING_SCOPE_SLOT, UndefinedValue());
-    }
 };
 
 /*
@@ -222,18 +191,6 @@ class NestedStaticScope : public StaticScope
  *   ClonedBlockObject
  *
  */
-class StaticNonSyntacticScope : public StaticScope
-{
-  public:
-    static const unsigned RESERVED_SLOTS = StaticScope::RESERVED_SLOTS;
-    static const Class class_;
-
-    static StaticNonSyntacticScope* create(JSContext* cx, HandleObject enclosing);
-
-    JSObject* enclosingScopeForStaticScopeIter() {
-        return getReservedSlot(ENCLOSING_SCOPE_SLOT).toObjectOrNull();
-    }
-};
 
 
 /*****************************************************************************/
@@ -646,20 +603,6 @@ class NonSyntacticVariablesObject : public EnvironmentObject
     static NonSyntacticVariablesObject* create(JSContext* cx);
 };
 
-class NestedScopeObject : public ScopeObject
-{
-  public:
-    // Return the static scope corresponding to this scope chain object.
-    inline NestedStaticScope* staticScope() {
-        return nullptr;
-    }
-
-    void initEnclosingScope(JSObject* obj) {
-        MOZ_ASSERT(getReservedSlot(SCOPE_CHAIN_SLOT).isUndefined());
-        setReservedSlot(SCOPE_CHAIN_SLOT, ObjectOrNullValue(obj));
-    }
-};
-
 // With environment objects on the run-time environment chain.
 class WithEnvironmentObject : public EnvironmentObject
 {
@@ -736,10 +679,6 @@ class RuntimeLexicalErrorObject : public EnvironmentObject
         return getReservedSlot(ERROR_SLOT).toInt32();
     }
 };
-
-extern JSObject*
-CloneNestedScopeObject(JSContext* cx, HandleObject enclosingScope,
-                       Handle<NestedStaticScope*> src);
 
 
 /*****************************************************************************/
@@ -1119,12 +1058,6 @@ IsGlobalLexicalEnvironment(JSObject* env)
 {
     return env->is<LexicalEnvironmentObject>() &&
            env->as<LexicalEnvironmentObject>().isGlobal();
-}
-
-inline NestedStaticScope*
-NestedStaticScope::enclosingNestedScope() const
-{
-    return nullptr;
 }
 
 inline const Value&

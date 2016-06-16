@@ -710,25 +710,6 @@ const Class WithEnvironmentObject::class_ = {
     &WithEnvironmentObjectOps
 };
 
-/* static */ StaticNonSyntacticScope*
-StaticNonSyntacticScope::create(JSContext*cx, HandleObject enclosing)
-{
-    StaticNonSyntacticScope* obj =
-        NewObjectWithNullTaggedProto<StaticNonSyntacticScope>(cx, TenuredObject,
-                                                              BaseShape::DELEGATE);
-    if (!obj)
-        return nullptr;
-
-    obj->setReservedSlot(ENCLOSING_SCOPE_SLOT, ObjectOrNullValue(enclosing));
-    return obj;
-}
-
-const Class StaticNonSyntacticScope::class_ = {
-    "StaticNonSyntacticScope",
-    JSCLASS_HAS_RESERVED_SLOTS(StaticNonSyntacticScope::RESERVED_SLOTS) |
-    JSCLASS_IS_ANONYMOUS
-};
-
 /* static */ NonSyntacticVariablesObject*
 NonSyntacticVariablesObject::create(JSContext* cx)
 {

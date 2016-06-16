@@ -205,7 +205,6 @@ class ModuleObject;
 class ModuleEnvironmentObject;
 class ModuleNamespaceObject;
 class NativeObject;
-class NestedScopeObject;
 class PlainObject;
 class PropertyName;
 class SavedFrame;
@@ -878,7 +877,6 @@ struct DefaultHasher<ReadBarriered<T>> : ReadBarrieredHasher<T> { };
 
 class ArrayObject;
 class ArrayBufferObject;
-class NestedScopeObject;
 class GlobalObject;
 class Scope;
 class ScriptSourceObject;

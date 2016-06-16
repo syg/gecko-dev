@@ -269,20 +269,6 @@ XDRRelazificationInfo(XDRState<mode>* xdr, HandleFunction fun, HandleScript scri
 }
 
 static inline uint32_t
-FindScopeObjectIndex(JSScript* script, NestedStaticScope& scope)
-{
-    ObjectArray* objects = script->objects();
-    GCPtrObject* vector = objects->vector;
-    unsigned length = objects->length;
-    for (unsigned i = 0; i < length; ++i) {
-        if (vector[i] == &scope)
-            return i;
-    }
-
-    MOZ_CRASH("Scope not found");
-}
-
-static inline uint32_t
 FindScopeIndex(JSScript* script, Scope& scope)
 {
     ScopeArray* scopes = script->scopes();
@@ -744,7 +730,7 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope, HandleScrip
 
     /*
      * Here looping from 0-to-length to xdr objects is essential to ensure that
-     * all references to enclosing blocks (via FindScopeObjectIndex below) happen
+     * all references to enclosing blocks (via FindScopeIndex below) happen
      * after the enclosing block has been XDR'd.
      */
     for (i = 0; i != nobjects; ++i) {

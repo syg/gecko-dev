@@ -50,7 +50,6 @@ class BreakpointSite;
 class Debugger;
 class LazyScript;
 class ModuleObject;
-class NestedStaticScope;
 class StaticScope;
 class RegExpObject;
 struct SourceCompressionTask;

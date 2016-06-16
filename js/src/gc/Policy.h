@@ -39,7 +39,6 @@ class ModuleEnvironmentObject;
 class ModuleNamespaceObject;
 class ModuleObject;
 class NativeObject;
-class NestedScopeObject;
 class ObjectGroup;
 class PlainObject;
 class PropertyName;
@@ -97,7 +96,6 @@ class JitCode;
     D(js::ModuleNamespaceObject*) \
     D(js::ModuleObject*) \
     D(js::NativeObject*) \
-    D(js::NestedScopeObject*) \
     D(js::ObjectGroup*) \
     D(js::PlainObject*) \
     D(js::PropertyName*) \
