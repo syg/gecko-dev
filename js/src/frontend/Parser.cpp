@@ -3560,13 +3560,6 @@ Parser<ParseHandler>::declarationPattern(Node decl, DeclarationKind declKind, To
         }
 
         if (*forHeadKind != PNK_FORHEAD) {
-            // |for (const ... in ...);| and |for (const ... of ...);| are
-            // syntax errors for now.  We'll fix this in bug 449811.
-            if (declKind == DeclarationKind::Const) {
-                report(ParseError, false, pattern, JSMSG_BAD_CONST_DECL);
-                return null();
-            }
-
             if (!checkDestructuringPattern(pattern, Some(declKind)))
                 return null();
 
@@ -3624,7 +3617,6 @@ Parser<ParseHandler>::initializerInNameDeclaration(Node decl, Node binding,
     if (!initializer)
         return false;
 
-    bool performAssignment = true;
     if (forHeadKind) {
         if (initialDeclaration) {
             bool isForIn, isForOf;
@@ -3653,7 +3645,6 @@ Parser<ParseHandler>::initializerInNameDeclaration(Node decl, Node binding,
                 // web.  *Don't* assign, and warn about this invalid syntax to
                 // incrementally move to ES6 semantics.
                 *forHeadKind = PNK_FORIN;
-                performAssignment = false;
                 if (!report(ParseWarning, pc->sc()->strict(), initializer,
                             JSMSG_INVALID_FOR_IN_DECL_WITH_INIT))
                 {
@@ -3661,28 +3652,21 @@ Parser<ParseHandler>::initializerInNameDeclaration(Node decl, Node binding,
                 }
 
                 *forInOrOfExpression = expressionAfterForInOrOf(PNK_FORIN, yieldHandling);
-                if (!*forInOrOfExpression)
-                    return null();
-            } else {
-                *forHeadKind = PNK_FORHEAD;
+                return *forInOrOfExpression != null();
             }
+
+            *forHeadKind = PNK_FORHEAD;
+        } else {
+            MOZ_ASSERT(*forHeadKind = PNK_FORHEAD);
         }
 
-        if (*forHeadKind == PNK_FORHEAD) {
-            // Per Parser::forHeadStart, the semicolon in |for (;| is
-            // ultimately gotten as Operand.  But initializer expressions
-            // terminate with the absence of an operator gotten as None, so we
-            // need an exception.
-            tokenStream.addModifierException(TokenStream::OperandIsNone);
-        }
+        // Per Parser::forHeadStart, the semicolon in |for (;| is ultimately
+        // gotten as Operand.  But initializer expressions terminate with the
+        // absence of an operator gotten as None, so we need an exception.
+        tokenStream.addModifierException(TokenStream::OperandIsNone);
     }
 
-    if (performAssignment) {
-        if (!handler.finishInitializerAssignment(binding, initializer))
-            return false;
-    }
-
-    return true;
+    return handler.finishInitializerAssignment(binding, initializer);
 }
 
 template <typename ParseHandler>
@@ -3738,9 +3722,7 @@ Parser<ParseHandler>::declarationName(Node decl, DeclarationKind declKind, Token
                 return null();
 
             if (isForIn) {
-                // XXX Uncomment this when fixing bug 449811.  Until then,
-                //     |for (const ... in/of ...)| remains an error.
-                //constRequiringInitializer = false;
+                constRequiringInitializer = false;
 
                 *forHeadKind = PNK_FORIN;
             } else if (isForOf) {
@@ -4670,13 +4652,6 @@ Parser<ParseHandler>::forHeadStart(YieldHandling yieldHandling,
 
 template <class ParseHandler>
 typename ParseHandler::Node
-Parser<ParseHandler>::cloneForInOrOfDeclarationForAssignment(Node decl)
-{
-    return cloneLeftHandSide(handler.singleBindingFromDeclaration(decl));
-}
-
-template <class ParseHandler>
-typename ParseHandler::Node
 Parser<ParseHandler>::forStatement(YieldHandling yieldHandling)
 {
     MOZ_ASSERT(tokenStream.isCurrentTokenType(TOK_FOR));
@@ -4751,61 +4726,7 @@ Parser<ParseHandler>::forStatement(YieldHandling yieldHandling)
     Node pn2;
     Node pn3;
     TokenStream::Modifier modifier;
-    if (headKind == PNK_FOROF || headKind == PNK_FORIN) {
-        // |target| is the LeftHandSideExpression or declaration to which the
-        // per-iteration value (an arbitrary value exposed by the iteration
-        // protocol, or a string naming a property) is assigned.
-        Node target = startNode;
-
-        /*
-         * Parse the rest of the for/in or for/of head.
-         *
-         * Here pn1 is everything to the left of 'in' or 'of'. At the end of
-         * this block, pn1 is a decl or nullptr, pn2 is the assignment target
-         * that receives the enumeration value each iteration, and pn3 is the
-         * rhs of 'in'.
-         */
-        if (headKind == PNK_FOROF) {
-            stmt.refineForKind(StatementKind::ForOfLoop);
-            if (isForEach) {
-                report(ParseError, false, startNode, JSMSG_BAD_FOR_EACH_LOOP);
-                return null();
-            }
-        } else {
-            stmt.refineForKind(StatementKind::ForInLoop);
-            iflags |= JSITER_ENUMERATE;
-        }
-
-        /*
-         * After the following if-else, pn2 will point to the name or
-         * destructuring pattern on in's left. pn1 will point to the decl, if
-         * any, else nullptr. Note that the "declaration with initializer" case
-         * rewrites the loop-head, moving the decl and setting pn1 to nullptr.
-         */
-        if (handler.isDeclarationList(target)) {
-            pn1 = target;
-
-            // Make a copy of the declaration that can be passed to
-            // BytecodeEmitter::emitAssignment.
-            pn2 = cloneForInOrOfDeclarationForAssignment(target);
-            if (!pn2)
-                return null();
-        } else {
-            MOZ_ASSERT(!forLoopLexicalScope);
-            pn1 = null();
-            pn2 = target;
-
-            if (!checkAndMarkAsAssignmentLhs(pn2, PlainAssignment))
-                return null();
-        }
-
-        pn3 = iteratedExpr;
-
-        // Parser::declaration consumed everything up to the closing ')'.  That
-        // token follows an {Assignment,}Expression, so the next token must be
-        // consumed as if an operator continued the expression, i.e. as None.
-        modifier = TokenStream::None;
-    } else {
+    if (headKind == PNK_FORHEAD) {
         Node init = startNode;
 
         if (isForEach) {
@@ -4853,6 +4774,59 @@ Parser<ParseHandler>::forStatement(YieldHandling yieldHandling)
         pn1 = init;
         pn2 = test;
         pn3 = update;
+    } else {
+        MOZ_ASSERT(headKind == PNK_FORIN || headKind == PNK_FOROF);
+
+        // |target| is the LeftHandSideExpression or declaration to which the
+        // per-iteration value (an arbitrary value exposed by the iteration
+        // protocol, or a string naming a property) is assigned.
+        Node target = startNode;
+
+        // Parse the rest of the for-in/of head.
+        //
+        // Here pn1 is everything to the left of 'in/of'.  At the end of this
+        // block, pn1 is a decl or nullptr, pn2 is the assignment target that
+        // receives the enumeration value each iteration, and pn3 is the rhs of
+        // 'in/of'.
+        if (headKind == PNK_FORIN) {
+            stmt.refineForKind(StatementKind::ForInLoop);
+            iflags |= JSITER_ENUMERATE;
+        } else {
+            if (isForEach) {
+                report(ParseError, false, startNode, JSMSG_BAD_FOR_EACH_LOOP);
+                return null();
+            }
+
+            stmt.refineForKind(StatementKind::ForOfLoop);
+        }
+
+        // After the following if-else, pn2 will point to the name or
+        // destructuring pattern on in's left. pn1 will point to the decl, if
+        // any, else nullptr. Note that the "declaration with initializer" case
+        // rewrites the loop-head, moving the decl and setting pn1 to nullptr.
+        if (handler.isDeclarationList(target)) {
+            pn1 = target;
+
+            // Make a copy of the declaration that can be passed to
+            // BytecodeEmitter::emitAssignment.
+            pn2 = cloneLeftHandSide(handler.singleBindingFromDeclaration(target));
+            if (!pn2)
+                return null();
+        } else {
+            MOZ_ASSERT(!forLoopLexicalScope);
+            pn1 = null();
+            pn2 = target;
+
+            if (!checkAndMarkAsAssignmentLhs(pn2, PlainAssignment))
+                return null();
+        }
+
+        pn3 = iteratedExpr;
+
+        // Parser::declaration consumed everything up to the closing ')'.  That
+        // token follows an {Assignment,}Expression, so the next token must be
+        // consumed as if an operator continued the expression, i.e. as None.
+        modifier = TokenStream::None;
     }
 
     MUST_MATCH_TOKEN_MOD(TOK_RP, modifier, JSMSG_PAREN_AFTER_FOR_CTRL);

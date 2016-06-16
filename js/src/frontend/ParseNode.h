@@ -284,8 +284,8 @@ IsDeleteKind(ParseNodeKind kind)
  * PNK_CONTINUE name        pn_atom: label or null
  * PNK_WITH     binary      pn_left: head expr; pn_right: body;
  * PNK_VAR,     list        pn_head: list of PNK_NAME or PNK_ASSIGN nodes
- * PNK_CONST                         each name node has either
- *                                     pn_used: false
+ * PNK_LET,                          each name node has either
+ * PNK_CONST                           pn_used: false
  *                                     pn_atom: variable name
  *                                     pn_expr: initializer or null
  *                                   or
@@ -688,6 +688,17 @@ class ParseNode
 
     /* Return true if this node appears in a Directive Prologue. */
     bool isDirectivePrologueMember() const { return pn_prologue; }
+
+    // True iff this is a for-in/of loop variable declaration (var/let/const).
+    bool isForLoopDeclaration() const {
+        if (isKind(PNK_VAR) || isKind(PNK_LET) || isKind(PNK_CONST)) {
+            MOZ_ASSERT(isArity(PN_LIST));
+            MOZ_ASSERT(pn_count > 0);
+            return true;
+        }
+
+        return false;
+    }
 
     ParseNode* generatorExpr() const {
         MOZ_ASSERT(isKind(PNK_GENEXP));
