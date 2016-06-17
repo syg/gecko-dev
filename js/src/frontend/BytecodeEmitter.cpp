@@ -817,44 +817,12 @@ BytecodeEmitter::EmitterScope::enterParameterDefaults(BytecodeEmitter* bce, Func
 }
 
 bool
-LexicalScope::optimizeParameterDefaultsFrameSlots(FunctionBox* funbox)
-{
-    MOZ_ASSERT(kind() == ScopeKind::ParameterDefaults);
-
-    // If there are parameter default expression, see if the frame slots for
-    // parameters line up exactly between the defaults scope and the body
-    // scope if both start at frame slot 0. If so, we can omit generating
-    // superfluous moves and wasting frame slots and start the body scope at
-    // frame slot 0.
-    BindingIter fbi(*funbox->funScopeBindings, 0);
-    for (BindingIter dbi(bindingData(), 0); dbi; dbi++, fbi++) {
-        if (dbi.name() != fbi.name() ||
-            (dbi.location().kind() == BindingLocation::Kind::Frame &&
-             dbi.location() != fbi.location()))
-        {
-            return false;
-        }
-    }
-
-    bindingData().nextFrameSlot = 0;
-    return true;
-}
-
-bool
 BytecodeEmitter::EmitterScope::enterFunctionBody(BytecodeEmitter* bce, FunctionBox* funbox)
 {
     MOZ_ASSERT(this == bce->innermostEmitterScope);
 
     if (!ensureCache(bce))
         return false;
-
-    if (funbox->defaultsScopeBindings) {
-        LexicalScope& defaultsScope = enclosingInFrame()->scope(bce)->as<LexicalScope>();
-        if (defaultsScope.optimizeParameterDefaultsFrameSlots(funbox)) {
-            MOZ_ASSERT(defaultsScope.nextFrameSlot() == 0);
-            enclosingInFrame()->nextFrameSlot_ = 0;
-        }
-    }
 
     // Resolve body-level bindings, if there are any.
     uint32_t firstFrameSlot = frameSlotStart();
@@ -8096,29 +8064,28 @@ BytecodeEmitter::emitFunctionFormalParametersAndBody(ParseNode *pn)
         }
     }
 
-    // After emitting default expressions for all parameters, copy them into
-    // the body scope.
+    // After emitting default expressions for all parameters, copy over any
+    // formal parameters which have been redeclared as vars. For example, in
+    // the following, the var y in the body scope is 42:
+    //
+    //   function f(x, y = 42) { var y; }
+    //
     if (hasDefaults) {
         popBodyScope.reset();
 
-        EmitterScope* defaultsScope = innermostEmitterScope->enclosingInFrame();
+        EmitterScope* varScope = innermostEmitterScope;
+        EmitterScope* defaultsScope = varScope->enclosingInFrame();
         for (BindingIter bi(*sc->asFunctionBox()->defaultsScopeBindings, 0); bi; bi++) {
             JSAtom* name = bi.name();
-            NameLocation defaultLoc = locationOfNameBoundInScope(name, defaultsScope);
 
-            // If all formal parameter that live on the frame have their slots
-            // match perfectly, the defaults scope is given no frame slots.
-            // In this case we don't need to emit superfluous moves.
-            //
-            // See EmitterScope::enterFunctionBody for this optimization.
-            if (defaultLoc.kind() == NameLocation::Kind::FrameSlot &&
-                defaultsScope->numFrameSlots() == 0)
-            {
+            NameLocation varLoc = locationOfNameBoundInScope(name, varScope);
+            if (varLoc.bindingKind() != BindingKind::Var)
                 continue;
-            }
 
-            auto emitRhs = [name, defaultLoc](BytecodeEmitter* bce, const NameLocation&, bool) {
-                return EmitGetNameAtLocation(bce, name, defaultLoc);
+            NameLocation defaultsLoc = locationOfNameBoundInScope(name, defaultsScope);
+
+            auto emitRhs = [name, defaultsLoc](BytecodeEmitter* bce, const NameLocation&, bool) {
+                return EmitGetNameAtLocation(bce, name, defaultsLoc);
             };
 
             if (!emitInitializeName(name, emitRhs))

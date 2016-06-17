@@ -850,7 +850,18 @@ Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind 
         {
             AddDeclaredNamePtr p = scope->lookupDeclaredNameForAdd(name);
             if (p) {
-                if (p->value()->kind() != DeclarationKind::Var) {
+                if (p->value()->kind() == DeclarationKind::PositionalFormalParameter) {
+                    // In sloppy mode, positional formal parameters may be
+                    // redeclared.
+                    if (pc->sc()->strict()) {
+                        reportRedeclaration(name, p->value()->kind());
+                        return false;
+                    }
+
+                    // Update the redeclared params' DeclarationKind for
+                    // defaults handling.
+                    p->value() = DeclaredNameInfo(DeclarationKind::Var);
+                } else if (p->value()->kind() != DeclarationKind::Var) {
                     reportRedeclaration(name, p->value()->kind());
                     return false;
                 }
@@ -863,8 +874,8 @@ Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind 
         break;
 
       case DeclarationKind::FormalParameter: {
-        // It is an early error if any non-simple formal parameter name (e.g.,
-        // destructuring formal parameter) is duplicated.
+        // It is an early error if any non-positional formal parameter name
+        // (e.g., destructuring formal parameter) is duplicated.
 
         AddDeclaredNamePtr p = pc->varScope().lookupDeclaredNameForAdd(name);
         if (p) {
@@ -1157,9 +1168,9 @@ Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope, bool 
         JSAtom* name = pc->positionalFormalParameterNames[i];
 
         // If there are default expressions, no formal parameters may be
-        // considered positional (i.e. accessed via argument slots), as after
-        // defaults initialization the values of the arguments are copied into
-        // to the body scope.
+        // considered positional (i.e. accessed via argument slots), as
+        // defaults initialization have TDZ and after initialization the
+        // values of the arguments are in frame slots.
         if (hasDefaults)
             name = nullptr;
 
@@ -1174,23 +1185,49 @@ Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope, bool 
             return Nothing();
     }
 
-    for (BindingIter bi = scope.bindings(pc); bi; bi++) {
-        BindingName binding(bi.name(), closeOverAllBindings || bi.closedOver());
-        switch (bi.kind()) {
-          case BindingKind::FormalParameter:
-            // Positional parameter names are already handled above when there
-            // are no default expressions.
-            if (hasDefaults || bi.declarationKind() == DeclarationKind::FormalParameter) {
-                if (!formals.append(binding))
-                    return Nothing();
+    if (hasDefaults) {
+        // If there are default expressions, we don't have any formal
+        // parameters in the function scope anymore.
+        ParseContext::Scope& defaultsScope = *scope.enclosing();
+
+        for (BindingIter bi = scope.bindings(pc); bi; bi++) {
+            BindingName binding(bi.name(), closeOverAllBindings || bi.closedOver());
+            switch (bi.kind()) {
+              case BindingKind::Var: {
+                // As an optimization, if a var redeclares a formal parameter
+                // in the defaults scope, only keep the binding if either
+                // binding is closed over. If it is not closed over, it will
+                // live on the frame and the two bindings will be
+                // indistinguishable, so do not waste a frame slot.
+                DeclaredNamePtr defaultsPtr = defaultsScope.lookupDeclaredName(bi.name());
+                if (binding.closedOver() || !defaultsPtr || defaultsPtr->value()->closedOver()) {
+                    if (!vars.append(binding))
+                        return Nothing();
+                }
+                break;
+              }
+              default:
+                break;
             }
-            break;
-          case BindingKind::Var:
-            if (!vars.append(binding))
-                return Nothing();
-            break;
-          default:
-            break;
+        }
+    } else {
+        for (BindingIter bi = scope.bindings(pc); bi; bi++) {
+            BindingName binding(bi.name(), closeOverAllBindings || bi.closedOver());
+            switch (bi.kind()) {
+              case BindingKind::FormalParameter:
+                // Positional parameter names are already handled above.
+                if (bi.declarationKind() == DeclarationKind::FormalParameter) {
+                    if (!formals.append(binding))
+                        return Nothing();
+                }
+                break;
+              case BindingKind::Var:
+                if (!vars.append(binding))
+                    return Nothing();
+                break;
+              default:
+                break;
+            }
         }
     }
 
@@ -2153,9 +2190,9 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
         }
 
         if (hasDefaults) {
-            // If we had default expressions, declare all formal parameters in
-            // the defaults scope as 'let' bindings, as the defaults scope has
-            // TDZ.
+            // If we had default expressions, move all all formal parameter
+            // declarations from the var scope to the defaults scope as 'let'
+            // bindings, as the defaults scope has TDZ.
             ParseContext::Scope& defaultsScope = pc->defaultsScope();
             for (BindingIter bi = pc->varScope().bindings(pc); bi; bi++) {
                 DeclarationKind declKind = bi.declarationKind();
@@ -2167,8 +2204,6 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
                     if (!defaultsScope.addDeclaredName(pc, p, bi.name(), DeclarationKind::Let))
                         return false;
                 }
-
-                // FIXMEshu for defaults not copying
             }
         } else {
             funbox->length = positionalFormals.length() - hasRest;

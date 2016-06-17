@@ -343,13 +343,6 @@ class LexicalScope : public Scope
         return bindingData().nextFrameSlot;
     }
 
-    // For frontend use. Implemented in BytecodeEmitter.cpp
-    //
-    // See if the frame slots for parameters line up exactly between the
-    // defaults scope and the body scope. If so, we can omit wasting frame
-    // slots and start the body scope at frame slot 0.
-    bool optimizeParameterDefaultsFrameSlots(frontend::FunctionBox* funbox);
-
     // Returns an empty shape for extensible global and non-syntactic lexical
     // scopes.
     static Shape* getEmptyExtensibleEnvironmentShape(JSContext* cx);
@@ -657,7 +650,6 @@ class BindingIter
 
     uint32_t index_;
 
-    // TODOshu make 3 bools
     enum CanHaveSlots : uint8_t {
         CannotHaveSlots = 0,
         CanHaveArgumentSlots = 1 << 0,
