@@ -1189,26 +1189,22 @@ Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope, bool 
         // If there are default expressions, we don't have any formal
         // parameters in the function scope anymore.
         ParseContext::Scope& defaultsScope = *scope.enclosing();
-
         for (BindingIter bi = scope.bindings(pc); bi; bi++) {
+            if (bi.kind() != BindingKind::Var)
+                continue;
+
+            // As an optimization, if a var redeclares a formal parameter
+            // in the defaults scope, only keep the binding if either
+            // binding is closed over. If it is not closed over, it will
+            // live on the frame and the two bindings will be
+            // indistinguishable, so do not waste a frame slot.
+            DeclaredNamePtr defaultsPtr = defaultsScope.lookupDeclaredName(bi.name());
             BindingName binding(bi.name(), closeOverAllBindings || bi.closedOver());
-            switch (bi.kind()) {
-              case BindingKind::Var: {
-                // As an optimization, if a var redeclares a formal parameter
-                // in the defaults scope, only keep the binding if either
-                // binding is closed over. If it is not closed over, it will
-                // live on the frame and the two bindings will be
-                // indistinguishable, so do not waste a frame slot.
-                DeclaredNamePtr defaultsPtr = defaultsScope.lookupDeclaredName(bi.name());
-                if (binding.closedOver() || !defaultsPtr || defaultsPtr->value()->closedOver()) {
-                    if (!vars.append(binding))
-                        return Nothing();
-                }
-                break;
-              }
-              default:
-                break;
-            }
+            if (!binding.closedOver() && defaultsPtr && !defaultsPtr->value()->closedOver())
+                continue;
+
+            if (!vars.append(binding))
+                return Nothing();
         }
     } else {
         for (BindingIter bi = scope.bindings(pc); bi; bi++) {
