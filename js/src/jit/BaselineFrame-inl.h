@@ -22,13 +22,6 @@ namespace js {
 namespace jit {
 
 inline void
-BaselineFrame::pushOnEnvironmentChain(ScopeObject& env)
-{
-    MOZ_ASSERT(*environmentChain() == env.enclosingScope());
-    envChain_ = &env;
-}
-
-inline void
 BaselineFrame::pushOnEnvironmentChain(EnvironmentObject& env)
 {
     MOZ_ASSERT(*environmentChain() == env.enclosingEnvironment());

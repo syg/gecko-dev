@@ -2972,7 +2972,7 @@ GuardGlobalObject(MacroAssembler& masm, HandleObject holder, Register globalLexi
 {
     if (holder->is<GlobalObject>())
         return;
-    masm.extractObject(Address(globalLexicalReg, ScopeObject::offsetOfEnclosingScope()),
+    masm.extractObject(Address(globalLexicalReg, EnvironmentObject::offsetOfEnclosingEnvironment()),
                        holderReg);
     masm.loadPtr(Address(ICStubReg, globalShapeOffset), scratch);
     masm.branchTestObjShape(Assembler::NotEqual, holderReg, scratch, failure);
@@ -3241,7 +3241,8 @@ ICGetPropCallNativeCompiler::generateStubCode(MacroAssembler& masm)
     // If we're calling a getter on the global, inline the logic for the
     // 'this' hook on the global lexical scope and manually push the global.
     if (kind == ICStub::GetProp_CallNativeGlobal)
-        masm.extractObject(Address(objReg, ScopeObject::offsetOfEnclosingScope()), objReg);
+        masm.extractObject(Address(objReg, EnvironmentObject::offsetOfEnclosingEnvironment()),
+                           objReg);
 
     // Push args for vm call.
     masm.Push(objReg);

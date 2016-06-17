@@ -440,7 +440,7 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
         return bce->sc->compilationEnclosingScope();
     }
 
-    NameLocation searchInEnclosingScope(JSAtom* name, Scope* scope, uint8_t hops);
+    static NameLocation searchInEnclosingScope(JSAtom* name, Scope* scope, uint8_t hops);
     NameLocation searchAndCache(BytecodeEmitter* bce, JSAtom* name);
 
     template <typename ScopeCreator>
@@ -597,7 +597,7 @@ BytecodeEmitter::EmitterScope::appendScopeNote(BytecodeEmitter* bce)
                                                         : ScopeNote::NoScopeNoteIndex);
 }
 
-NameLocation
+/* static */ NameLocation
 BytecodeEmitter::EmitterScope::searchInEnclosingScope(JSAtom* name, Scope* scope, uint8_t hops)
 {
     for (ScopeIter si(scope); si; si++) {
@@ -2733,9 +2733,6 @@ BytecodeEmitter::emitSetOrInitializeName(JSAtom* name, RHSEmitter emitRhs, bool 
         if (loc.isLexical()) {
             if (initialize) {
                 op = JSOP_INITLEXICAL;
-
-                if (!innermostTDZCheckCache->noteEmittedTDZCheck(name))
-                    return false;
             } else {
                 if (loc.isConst())
                     op = JSOP_THROWSETCONST;
@@ -2748,6 +2745,8 @@ BytecodeEmitter::emitSetOrInitializeName(JSAtom* name, RHSEmitter emitRhs, bool 
             return false;
         if (!emitLocalOp(op, loc.frameSlot()))
             return false;
+        if (op == JSOP_INITLEXICAL && !innermostTDZCheckCache->noteEmittedTDZCheck(name))
+            return false;
         break;
       }
 
@@ -2757,9 +2756,6 @@ BytecodeEmitter::emitSetOrInitializeName(JSAtom* name, RHSEmitter emitRhs, bool 
             if (initialize) {
                 MOZ_ASSERT(loc.scopeCoordinate().hops() == 0);
                 op = JSOP_INITALIASEDLEXICAL;
-
-                if (!innermostTDZCheckCache->noteEmittedTDZCheck(name))
-                    return false;
             } else {
                 if (loc.isConst())
                     op = JSOP_THROWSETALIASEDCONST;
@@ -2771,6 +2767,8 @@ BytecodeEmitter::emitSetOrInitializeName(JSAtom* name, RHSEmitter emitRhs, bool 
         if (!emitRhs(this, loc, emittedBindOp))
             return false;
         if (!emitScopeCoordOp(op, loc.scopeCoordinate()))
+            return false;
+        if (op == JSOP_INITALIASEDLEXICAL && !innermostTDZCheckCache->noteEmittedTDZCheck(name))
             return false;
         break;
       }

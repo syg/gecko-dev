@@ -2421,7 +2421,7 @@ BaselineCompiler::getScopeCoordinateObject(Register reg)
 
     masm.loadPtr(frame.addressOfEnvironmentChain(), reg);
     for (unsigned i = sc.hops(); i; i--)
-        masm.extractObject(Address(reg, ScopeObject::offsetOfEnclosingScope()), reg);
+        masm.extractObject(Address(reg, EnvironmentObject::offsetOfEnclosingEnvironment()), reg);
 }
 
 Address

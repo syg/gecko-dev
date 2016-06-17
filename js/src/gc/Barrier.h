@@ -208,7 +208,7 @@ class NativeObject;
 class PlainObject;
 class PropertyName;
 class SavedFrame;
-class ScopeObject;
+class EnvironmentObject;
 class ScriptSourceObject;
 class Shape;
 class UnownedBaseShape;

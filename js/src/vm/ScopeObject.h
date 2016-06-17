@@ -200,43 +200,6 @@ ScopeCoordinateFunctionScript(JSScript* script, jsbytecode* pc);
  * See also "Debug scope objects" below.
  */
 
-class ScopeObject : public NativeObject
-{
-  protected:
-    static const uint32_t SCOPE_CHAIN_SLOT = 0;
-
-  public:
-    /*
-     * Since every scope chain terminates with a global object and GlobalObject
-     * does not derive ScopeObject (it has a completely different layout), the
-     * enclosing scope of a ScopeObject is necessarily non-null.
-     */
-    inline JSObject& enclosingScope() const {
-        return getFixedSlot(SCOPE_CHAIN_SLOT).toObject();
-    }
-
-    void setEnclosingScope(HandleObject obj);
-
-    /*
-     * Get or set an aliased variable contained in this scope. Unaliased
-     * variables should instead access the stack frame. Aliased variable access
-     * is primarily made through JOF_SCOPECOORD ops which is why these members
-     * take a ScopeCoordinate instead of just the slot index.
-     */
-    inline const Value& aliasedVar(ScopeCoordinate sc);
-
-    inline void setAliasedVar(JSContext* cx, ScopeCoordinate sc, PropertyName* name, const Value& v);
-
-    /* For jit access. */
-    static size_t offsetOfEnclosingScope() {
-        return getFixedSlotOffset(SCOPE_CHAIN_SLOT);
-    }
-
-    static size_t enclosingScopeSlot() {
-        return SCOPE_CHAIN_SLOT;
-    }
-};
-
 class EnvironmentObject : public NativeObject
 {
   protected:
@@ -286,31 +249,6 @@ class EnvironmentObject : public NativeObject
 };
 
 class VarEnvironmentObject : public EnvironmentObject { };
-
-class LexicalScopeBase : public ScopeObject
-{
-  public:
-    /* Get/set the aliased argument referred to by 'bi'. */
-    const Value& aliasedVar(const BindingIter& bi) {
-        MOZ_ASSERT(bi.location().kind() == BindingLocation::Kind::Environment);
-        return getSlot(bi.location().slot());
-    }
-    inline void setAliasedVar(JSContext* cx, const BindingIter& bi, const Value& v);
-
-    /*
-     * When an aliased var (var accessed by nested closures) is also aliased by
-     * the arguments object, it must of course exist in one canonical location
-     * and that location is always the CallObject. For this to work, the
-     * ArgumentsObject stores special MagicValue in its array for forwarded-to-
-     * CallObject variables. This MagicValue's payload is the slot of the
-     * CallObject to access.
-     */
-    const Value& aliasedVarFromArguments(const Value& argsValue) {
-        return getSlot(ArgumentsObject::SlotFromMagicScopeSlotValue(argsValue));
-    }
-    inline void setAliasedVarFromArguments(JSContext* cx, const Value& argsValue, jsid id,
-                                           const Value& v);
-};
 
 class CallObject : public VarEnvironmentObject
 {
@@ -390,7 +328,7 @@ class CallObject : public VarEnvironmentObject
     }
 };
 
-class ModuleEnvironmentObject : public LexicalScopeBase
+class ModuleEnvironmentObject : public VarEnvironmentObject
 {
     static const uint32_t MODULE_SLOT = 1;
 
@@ -797,25 +735,26 @@ class LiveEnvironmentVal
  * Debug scope objects
  *
  * The debugger effectively turns every opcode into a potential direct eval.
- * Naively, this would require creating a ScopeObject for every call/block
- * scope and using JSOP_GETALIASEDVAR for every access. To optimize this, the
- * engine assumes there is no debugger and optimizes scope access and creation
- * accordingly. When the debugger wants to perform an unexpected eval-in-frame
- * (or other, similar dynamic-scope-requiring operations), fp->scopeChain is
- * now incomplete: it may not contain all, or any, of the ScopeObjects to
- * represent the current scope.
+ * Naively, this would require creating a EnvironmentObject for every
+ * call/block scope and using JSOP_GETALIASEDVAR for every access. To optimize
+ * this, the engine assumes there is no debugger and optimizes scope access
+ * and creation accordingly. When the debugger wants to perform an unexpected
+ * eval-in-frame (or other, similar dynamic-scope-requiring operations),
+ * fp->scopeChain is now incomplete: it may not contain all, or any, of the
+ * EnvironmentObjects to represent the current scope.
  *
- * To resolve this, the debugger first calls GetDebugEnvironmentFor* to synthesize a
- * "debug scope chain". A debug scope chain is just a chain of objects that
- * fill in missing scopes and protect the engine from unexpected access. (The
- * latter means that some debugger operations, like redefining a lexical
- * binding, can fail when a true eval would succeed.) To do both of these
- * things, GetDebugEnvironmentFor* creates a new proxy DebugEnvironmentProxy to sit in
- * front of every existing ScopeObject.
+ * To resolve this, the debugger first calls GetDebugEnvironmentFor* to
+ * synthesize a "debug scope chain". A debug scope chain is just a chain of
+ * objects that fill in missing scopes and protect the engine from unexpected
+ * access. (The latter means that some debugger operations, like redefining a
+ * lexical binding, can fail when a true eval would succeed.) To do both of
+ * these things, GetDebugEnvironmentFor* creates a new proxy
+ * DebugEnvironmentProxy to sit in front of every existing EnvironmentObject.
  *
- * GetDebugEnvironmentFor* ensures the invariant that the same DebugEnvironmentProxy is
- * always produced for the same underlying scope (optimized or not!). This is
- * maintained by some bookkeeping information stored in DebugEnvironments.
+ * GetDebugEnvironmentFor* ensures the invariant that the same
+ * DebugEnvironmentProxy is always produced for the same underlying scope
+ * (optimized or not!). This is maintained by some bookkeeping information
+ * stored in DebugEnvironments.
  */
 
 extern JSObject*
@@ -832,7 +771,7 @@ class DebugEnvironmentProxy : public ProxyObject
 {
     /*
      * The enclosing scope on the dynamic scope chain. This slot is analogous
-     * to the SCOPE_CHAIN_SLOT of a ScopeObject.
+     * to the SCOPE_CHAIN_SLOT of a EnvironmentObject.
      */
     static const unsigned ENCLOSING_EXTRA = 0;
 
@@ -865,7 +804,7 @@ class DebugEnvironmentProxy : public ProxyObject
     bool isFunctionEnvironmentWithThis();
 
     // Does this debug scope not have a dynamic counterpart or was never live
-    // (and thus does not have a synthesized ScopeObject or a snapshot)?
+    // (and thus does not have a synthesized EnvironmentObject or a snapshot)?
     bool isOptimizedOut() const;
 };
 
@@ -997,12 +936,6 @@ IsGlobalLexicalEnvironment(JSObject* env)
 {
     return env->is<LexicalEnvironmentObject>() &&
            env->as<LexicalEnvironmentObject>().isGlobal();
-}
-
-inline const Value&
-ScopeObject::aliasedVar(ScopeCoordinate sc)
-{
-    return getSlot(sc.slot());
 }
 
 extern bool

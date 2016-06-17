@@ -126,7 +126,6 @@ class BaselineFrame
         return reinterpret_cast<Value*>(&loScratchValue_);
     }
 
-    inline void pushOnEnvironmentChain(ScopeObject& env);
     inline void pushOnEnvironmentChain(EnvironmentObject& env);
     inline void popOffEnvironmentChain();
     inline void replaceInnermostEnvironment(EnvironmentObject& env);

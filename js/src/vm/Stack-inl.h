@@ -188,13 +188,6 @@ InterpreterFrame::aliasedEnvironment(ScopeCoordinate sc) const
 }
 
 inline void
-InterpreterFrame::pushOnEnvironmentChain(ScopeObject& env)
-{
-    MOZ_ASSERT(*environmentChain() == env.enclosingScope());
-    envChain_ = &env;
-}
-
-inline void
 InterpreterFrame::pushOnEnvironmentChain(EnvironmentObject& env)
 {
     MOZ_ASSERT(*environmentChain() == env.enclosingEnvironment());
@@ -454,16 +447,6 @@ AbstractFramePtr::environmentChain() const
     if (isBaselineFrame())
         return asBaselineFrame()->environmentChain();
     return asRematerializedFrame()->environmentChain();
-}
-
-inline void
-AbstractFramePtr::pushOnEnvironmentChain(ScopeObject& env)
-{
-    if (isInterpreterFrame()) {
-        asInterpreterFrame()->pushOnEnvironmentChain(env);
-        return;
-    }
-    asBaselineFrame()->pushOnEnvironmentChain(env);
 }
 
 inline void

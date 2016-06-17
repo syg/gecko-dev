@@ -102,7 +102,6 @@ class JitCode;
     D(js::RegExpObject*) \
     D(js::SavedFrame*) \
     D(js::Scope*) \
-    D(js::ScopeObject*) \
     D(js::ScriptSourceObject*) \
     D(js::Shape*) \
     D(js::SharedArrayBufferObject*) \

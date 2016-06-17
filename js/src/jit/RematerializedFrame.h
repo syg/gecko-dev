@@ -120,7 +120,6 @@ class RematerializedFrame
     JSObject* environmentChain() const {
         return envChain_;
     }
-    void pushOnEnvironmentChain(ScopeObject& env);
     void pushOnEnvironmentChain(EnvironmentObject& env);
     bool initFunctionEnvironmentObjects(JSContext* cx);
 

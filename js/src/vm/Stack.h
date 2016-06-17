@@ -197,7 +197,6 @@ class AbstractFramePtr
     inline JSObject* environmentChain() const;
     inline CallObject& callObj() const;
     inline bool initFunctionEnvironmentObjects(JSContext* cx);
-    inline void pushOnEnvironmentChain(ScopeObject& env);
     inline void pushOnEnvironmentChain(EnvironmentObject& env);
 
     inline JSCompartment* compartment() const;
@@ -548,7 +547,6 @@ class InterpreterFrame
     inline JSObject& varObj() const;
     inline LexicalEnvironmentObject& extensibleLexicalEnvironment() const;
 
-    inline void pushOnEnvironmentChain(ScopeObject& env);
     inline void pushOnEnvironmentChain(EnvironmentObject& env);
     inline void popOffEnvironmentChain();
     inline void replaceInnermostEnvironment(EnvironmentObject& env);

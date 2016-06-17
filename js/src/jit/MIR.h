@@ -13460,7 +13460,7 @@ class MNewStringObject :
 class MEnclosingEnvironment : public MLoadFixedSlot
 {
     explicit MEnclosingEnvironment(MDefinition* obj)
-      : MLoadFixedSlot(obj, ScopeObject::enclosingScopeSlot())
+      : MLoadFixedSlot(obj, EnvironmentObject::enclosingEnvironmentSlot())
     {
         setResultType(MIRType::Object);
     }

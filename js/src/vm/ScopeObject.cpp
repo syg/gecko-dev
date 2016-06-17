@@ -1284,7 +1284,7 @@ ReportOptimizedOut(JSContext* cx, HandleId id)
  * DebugEnvironmentProxy is the handler for DebugEnvironmentProxy proxy
  * objects. Having a custom handler (rather than trying to reuse js::Wrapper)
  * gives us several important abilities:
- *  - We want to pass the ScopeObject as the receiver to forwarded scope
+ *  - We want to pass the EnvironmentObject as the receiver to forwarded scope
  *    property ops on aliased variables so that Call/Block/With ops do not all
  *    require a 'normalization' step.
  *  - The debug scope proxy can directly manipulate the stack frame to allow

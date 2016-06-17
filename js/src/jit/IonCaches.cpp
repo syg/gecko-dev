@@ -1101,7 +1101,8 @@ GenerateCallGetter(JSContext* cx, IonScript* ion, MacroAssembler& masm,
     // If we're calling a getter on the global, inline the logic for the
     // 'this' hook on the global lexical env and manually push the global.
     if (IsGlobalLexicalEnvironment(obj))
-        masm.extractObject(Address(object, ScopeObject::offsetOfEnclosingScope()), object);
+        masm.extractObject(Address(object, EnvironmentObject::offsetOfEnclosingEnvironment()),
+                           object);
 
     // Save off the object register if it aliases the scratchReg
     if (spillObjReg) {

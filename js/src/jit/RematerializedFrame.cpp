@@ -134,13 +134,6 @@ RematerializedFrame::callObj() const
 }
 
 void
-RematerializedFrame::pushOnEnvironmentChain(ScopeObject& env)
-{
-    MOZ_ASSERT(*environmentChain() == env.enclosingScope());
-    envChain_ = &env;
-}
-
-void
 RematerializedFrame::pushOnEnvironmentChain(EnvironmentObject& env)
 {
     MOZ_ASSERT(*environmentChain() == env.enclosingEnvironment());
