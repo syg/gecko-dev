@@ -3809,6 +3809,9 @@ JSScript::argumentsOptimizationFailed(JSContext* cx, HandleScript script)
 bool
 JSScript::formalIsAliased(unsigned argSlot)
 {
+    if (hasDefaults())
+        return false;
+
     for (BindingIter bi(this); bi; bi++) {
         if (bi.argumentSlot() == argSlot)
             return bi.closedOver();
