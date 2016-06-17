@@ -372,7 +372,7 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
     template <typename BindingIter>
     MOZ_MUST_USE bool checkSlotLimits(BytecodeEmitter* bce, const BindingIter& bi) {
         if (bi.nextFrameSlot() >= LOCALNO_LIMIT ||
-            bi.nextEnvironmentSlot() >= SCOPECOORD_SLOT_LIMIT)
+            bi.nextEnvironmentSlot() >= ENVCOORD_SLOT_LIMIT)
         {
             return bce->reportError(nullptr, JSMSG_TOO_MANY_LOCALS);
         }
@@ -385,7 +385,7 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
             hops = emitterScope->environmentChainLength_;
         else
             hops = bce->sc->compilationEnclosingScope()->environmentChainLength();
-        if (hops > SCOPECOORD_HOPS_LIMIT - 1)
+        if (hops > ENVCOORD_HOPS_LIMIT - 1)
             return bce->reportError(nullptr, JSMSG_TOO_DEEP, js_function_str);
         environmentChainLength_ = mozilla::AssertedCast<uint8_t>(hops + 1);
         return true;
@@ -604,7 +604,7 @@ BytecodeEmitter::EmitterScope::searchInEnclosingScope(JSAtom* name, Scope* scope
         bool hasEnv = si.hasSyntacticEnvironment();
 
         if (hasEnv) {
-            MOZ_ASSERT(hops < SCOPECOORD_HOPS_LIMIT - 1);
+            MOZ_ASSERT(hops < ENVCOORD_HOPS_LIMIT - 1);
             hops++;
         }
 
@@ -1882,7 +1882,7 @@ BytecodeEmitter::emitRegExp(uint32_t index)
 bool
 BytecodeEmitter::emitLocalOp(JSOp op, uint32_t slot)
 {
-    MOZ_ASSERT(JOF_OPTYPE(op) != JOF_SCOPECOORD);
+    MOZ_ASSERT(JOF_OPTYPE(op) != JOF_ENVCOORD);
     MOZ_ASSERT(IsLocalOp(op));
 
     ptrdiff_t off;
@@ -1908,9 +1908,9 @@ BytecodeEmitter::emitArgOp(JSOp op, uint16_t slot)
 bool
 BytecodeEmitter::emitScopeCoordOp(JSOp op, ScopeCoordinate sc)
 {
-    MOZ_ASSERT(JOF_OPTYPE(op) == JOF_SCOPECOORD);
+    MOZ_ASSERT(JOF_OPTYPE(op) == JOF_ENVCOORD);
 
-    unsigned n = SCOPECOORD_HOPS_LEN + SCOPECOORD_SLOT_LEN;
+    unsigned n = ENVCOORD_HOPS_LEN + ENVCOORD_SLOT_LEN;
     MOZ_ASSERT(int(n) + 1 /* op */ == CodeSpec[op].length);
 
     ptrdiff_t off;
@@ -1918,10 +1918,10 @@ BytecodeEmitter::emitScopeCoordOp(JSOp op, ScopeCoordinate sc)
         return false;
 
     jsbytecode* pc = code(off);
-    SET_SCOPECOORD_HOPS(pc, sc.hops());
-    pc += SCOPECOORD_HOPS_LEN;
-    SET_SCOPECOORD_SLOT(pc, sc.slot());
-    pc += SCOPECOORD_SLOT_LEN;
+    SET_ENVCOORD_HOPS(pc, sc.hops());
+    pc += ENVCOORD_HOPS_LEN;
+    SET_ENVCOORD_SLOT(pc, sc.slot());
+    pc += ENVCOORD_SLOT_LEN;
     checkTypeSet(op);
     return true;
 }

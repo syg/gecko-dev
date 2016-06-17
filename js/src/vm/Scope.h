@@ -116,7 +116,7 @@ class BindingLocation
     }
 
     static BindingLocation Environment(uint32_t slot) {
-        MOZ_ASSERT(slot < SCOPECOORD_SLOT_LIMIT);
+        MOZ_ASSERT(slot < ENVCOORD_SLOT_LIMIT);
         return BindingLocation(Kind::Environment, slot);
     }
 
@@ -155,27 +155,27 @@ class ScopeCoordinate
     uint32_t slot_;
 
     /*
-     * Technically, hops_/slot_ are SCOPECOORD_(HOPS|SLOT)_BITS wide.  Since
+     * Technically, hops_/slot_ are ENVCOORD_(HOPS|SLOT)_BITS wide.  Since
      * ScopeCoordinate is a temporary value, don't bother with a bitfield as
      * this only adds overhead.
      */
-    static_assert(SCOPECOORD_HOPS_BITS <= 32, "We have enough bits below");
-    static_assert(SCOPECOORD_SLOT_BITS <= 32, "We have enough bits below");
+    static_assert(ENVCOORD_HOPS_BITS <= 32, "We have enough bits below");
+    static_assert(ENVCOORD_SLOT_BITS <= 32, "We have enough bits below");
 
   public:
     explicit inline ScopeCoordinate(jsbytecode* pc)
-      : hops_(GET_SCOPECOORD_HOPS(pc)), slot_(GET_SCOPECOORD_SLOT(pc + SCOPECOORD_HOPS_LEN))
+      : hops_(GET_ENVCOORD_HOPS(pc)), slot_(GET_ENVCOORD_SLOT(pc + ENVCOORD_HOPS_LEN))
     {
-        MOZ_ASSERT(JOF_OPTYPE(JSOp(*pc)) == JOF_SCOPECOORD);
+        MOZ_ASSERT(JOF_OPTYPE(JSOp(*pc)) == JOF_ENVCOORD);
     }
 
     inline ScopeCoordinate() {}
 
-    void setHops(uint32_t hops) { MOZ_ASSERT(hops < SCOPECOORD_HOPS_LIMIT); hops_ = hops; }
-    void setSlot(uint32_t slot) { MOZ_ASSERT(slot < SCOPECOORD_SLOT_LIMIT); slot_ = slot; }
+    void setHops(uint32_t hops) { MOZ_ASSERT(hops < ENVCOORD_HOPS_LIMIT); hops_ = hops; }
+    void setSlot(uint32_t slot) { MOZ_ASSERT(slot < ENVCOORD_SLOT_LIMIT); slot_ = slot; }
 
-    uint32_t hops() const { MOZ_ASSERT(hops_ < SCOPECOORD_HOPS_LIMIT); return hops_; }
-    uint32_t slot() const { MOZ_ASSERT(slot_ < SCOPECOORD_SLOT_LIMIT); return slot_; }
+    uint32_t hops() const { MOZ_ASSERT(hops_ < ENVCOORD_HOPS_LIMIT); return hops_; }
+    uint32_t slot() const { MOZ_ASSERT(slot_ < ENVCOORD_SLOT_LIMIT); return slot_; }
 
     bool operator==(const ScopeCoordinate& rhs) const {
         return hops() == rhs.hops() && slot() == rhs.slot();

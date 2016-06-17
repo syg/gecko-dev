@@ -890,7 +890,7 @@ js::Disassemble1(JSContext* cx, HandleScript script, jsbytecode* pc,
         break;
       }
 
-      case JOF_SCOPECOORD: {
+      case JOF_ENVCOORD: {
           /*
         RootedValue v(cx,
             StringValue(ScopeCoordinateName(cx->runtime()->scopeCoordinateNameCache, script, pc)));

@@ -140,11 +140,11 @@ class NameLocation
     // If the name is closed over and accessed via EnvironmentCoordinate, the
     // slot on the environment.
     //
-    // Otherwise LOCALNO_LIMIT/SCOPECOORD_SLOT_LIMIT.
-    uint32_t slot_ : SCOPECOORD_SLOT_BITS;
+    // Otherwise LOCALNO_LIMIT/ENVCOORD_SLOT_LIMIT.
+    uint32_t slot_ : ENVCOORD_SLOT_BITS;
 
     NameLocation(Kind kind, BindingKind bindingKind,
-                 uint8_t hops = UINT8_MAX, uint32_t slot = SCOPECOORD_SLOT_LIMIT)
+                 uint8_t hops = UINT8_MAX, uint32_t slot = ENVCOORD_SLOT_LIMIT)
       : kind_(kind),
         bindingKind_(bindingKind),
         hops_(hops),
@@ -182,7 +182,7 @@ class NameLocation
     }
 
     static NameLocation EnvironmentCoordinate(BindingKind bindKind, uint8_t hops, uint32_t slot) {
-        MOZ_ASSERT(slot < SCOPECOORD_SLOT_LIMIT);
+        MOZ_ASSERT(slot < ENVCOORD_SLOT_LIMIT);
         return NameLocation(Kind::EnvironmentCoordinate, bindKind, hops, slot);
     }
 
@@ -225,7 +225,7 @@ class NameLocation
     }
 
     NameLocation addHops(uint8_t more) {
-        MOZ_ASSERT(hops_ < SCOPECOORD_HOPS_LIMIT - more);
+        MOZ_ASSERT(hops_ < ENVCOORD_HOPS_LIMIT - more);
         MOZ_ASSERT(kind_ == Kind::EnvironmentCoordinate);
         return NameLocation(kind_, bindingKind_, hops_ + more, slot_);
     }
@@ -260,7 +260,7 @@ class NameLocation
     }
 };
 
-static_assert(LOCALNO_BITS == SCOPECOORD_SLOT_BITS,
+static_assert(LOCALNO_BITS == ENVCOORD_SLOT_BITS,
               "Frame and environment slots must be same sized.");
 
 template <typename Wrapped>

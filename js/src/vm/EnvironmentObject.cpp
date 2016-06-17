@@ -44,7 +44,7 @@ typedef MutableHandle<ArgumentsObject*> MutableHandleArgumentsObject;
 Shape*
 js::ScopeCoordinateToEnvironmentShape(JSScript* script, jsbytecode* pc)
 {
-    MOZ_ASSERT(JOF_OPTYPE(JSOp(*pc)) == JOF_SCOPECOORD);
+    MOZ_ASSERT(JOF_OPTYPE(JSOp(*pc)) == JOF_ENVCOORD);
     ScopeIter si(script->innermostScope(pc));
     uint32_t hops = ScopeCoordinate(pc).hops();
     while (true) {
@@ -109,7 +109,7 @@ js::ScopeCoordinateName(ScopeCoordinateNameCache& cache, JSScript* script, jsbyt
 JSScript*
 js::ScopeCoordinateFunctionScript(JSScript* script, jsbytecode* pc)
 {
-    MOZ_ASSERT(JOF_OPTYPE(JSOp(*pc)) == JOF_SCOPECOORD);
+    MOZ_ASSERT(JOF_OPTYPE(JSOp(*pc)) == JOF_ENVCOORD);
     ScopeIter si(script->innermostScope(pc));
     uint32_t hops = ScopeCoordinate(pc).hops();
     while (true) {
