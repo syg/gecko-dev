@@ -25,7 +25,7 @@
 #include "jit/TypedObjectPrediction.h"
 #include "jit/TypePolicy.h"
 #include "vm/ArrayObject.h"
-#include "vm/ScopeObject.h"
+#include "vm/EnvironmentObject.h"
 #include "vm/SharedMem.h"
 #include "vm/TypedArrayCommon.h"
 #include "vm/UnboxedObject.h"
@@ -13471,7 +13471,7 @@ class MEnclosingEnvironment : public MLoadFixedSlot
     }
 
     AliasSet getAliasSet() const override {
-        // ScopeObject reserved slots are immutable.
+        // EnvironmentObject reserved slots are immutable.
         return AliasSet::None();
     }
 };

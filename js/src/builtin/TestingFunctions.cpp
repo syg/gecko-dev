@@ -48,7 +48,7 @@
 #include "jsobjinlines.h"
 
 #include "vm/NativeObject-inl.h"
-#include "vm/ScopeObject-inl.h"
+#include "vm/EnvironmentObject-inl.h"
 
 using namespace js;
 

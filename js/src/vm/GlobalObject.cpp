@@ -40,7 +40,7 @@
 #include "vm/PIC.h"
 #include "vm/RegExpStatics.h"
 #include "vm/RegExpStaticsObject.h"
-#include "vm/ScopeObject.h"
+#include "vm/EnvironmentObject.h"
 #include "vm/StopIterationObject.h"
 
 #include "jscompartmentinlines.h"

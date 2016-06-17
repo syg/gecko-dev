@@ -22,7 +22,7 @@
 #include "jit/VMFunctions.h"
 #include "js/UniquePtr.h"
 #include "vm/Interpreter.h"
-#include "vm/ScopeObject.h"
+#include "vm/EnvironmentObject.h"
 #include "vm/TraceLogging.h"
 
 #include "jsscriptinlines.h"

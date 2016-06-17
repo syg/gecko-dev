@@ -9,7 +9,7 @@
 #include "jsscript.h"
 #include "gc/Allocator.h"
 #include "vm/Runtime.h"
-#include "vm/ScopeObject.h"
+#include "vm/EnvironmentObject.h"
 
 using namespace js;
 

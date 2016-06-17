@@ -78,7 +78,7 @@
 #include "vm/RegExpStatics.h"
 #include "vm/Runtime.h"
 #include "vm/SavedStacks.h"
-#include "vm/ScopeObject.h"
+#include "vm/EnvironmentObject.h"
 #include "vm/SelfHosting.h"
 #include "vm/Shape.h"
 #include "vm/StopIterationObject.h"

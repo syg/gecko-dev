@@ -12,7 +12,7 @@
 #include "asmjs/AsmJS.h"
 #include "jit/BaselineJIT.h"
 #include "jit/IonAnalysis.h"
-#include "vm/ScopeObject.h"
+#include "vm/EnvironmentObject.h"
 
 #include "jscompartmentinlines.h"
 

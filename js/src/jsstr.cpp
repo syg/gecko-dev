@@ -44,7 +44,7 @@
 #include "vm/Printer.h"
 #include "vm/RegExpObject.h"
 #include "vm/RegExpStatics.h"
-#include "vm/ScopeObject.h"
+#include "vm/EnvironmentObject.h"
 #include "vm/StringBuffer.h"
 
 #include "vm/Interpreter-inl.h"

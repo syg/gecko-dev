@@ -54,7 +54,7 @@
 #include "jit/JitFrames-inl.h"
 #include "jit/shared/Lowering-shared-inl.h"
 #include "vm/Debugger-inl.h"
-#include "vm/ScopeObject-inl.h"
+#include "vm/EnvironmentObject-inl.h"
 #include "vm/Stack-inl.h"
 
 using namespace js;

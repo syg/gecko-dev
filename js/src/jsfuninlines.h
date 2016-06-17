@@ -9,7 +9,7 @@
 
 #include "jsfun.h"
 
-#include "vm/ScopeObject.h"
+#include "vm/EnvironmentObject.h"
 
 namespace js {
 

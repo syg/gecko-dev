@@ -12,7 +12,7 @@
 #include "jit/JitAllocPolicy.h"
 #include "jit/JitFrames.h"
 #include "jit/Registers.h"
-#include "vm/ScopeObject.h"
+#include "vm/EnvironmentObject.h"
 
 namespace js {
 namespace jit {

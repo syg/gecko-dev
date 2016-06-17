@@ -4,8 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef vm_ScopeObject_h
-#define vm_ScopeObject_h
+#ifndef vm_EnvironmentObject_h
+#define vm_EnvironmentObject_h
 
 #include "jscntxt.h"
 #include "jsobj.h"
@@ -968,4 +968,4 @@ AnalyzeEntrainedVariables(JSContext* cx, HandleScript script);
 
 } // namespace js
 
-#endif /* vm_ScopeObject_h */
+#endif /* vm_EnvironmentObject_h */

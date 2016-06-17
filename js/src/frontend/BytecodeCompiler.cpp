@@ -21,7 +21,7 @@
 #include "jsobjinlines.h"
 #include "jsscriptinlines.h"
 
-#include "vm/ScopeObject-inl.h"
+#include "vm/EnvironmentObject-inl.h"
 
 #include <time.h>
 

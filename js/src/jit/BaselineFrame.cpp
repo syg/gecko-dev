@@ -9,7 +9,7 @@
 #include "jit/BaselineJIT.h"
 #include "jit/Ion.h"
 #include "vm/Debugger.h"
-#include "vm/ScopeObject.h"
+#include "vm/EnvironmentObject.h"
 
 #include "jit/JitFrames-inl.h"
 #include "vm/Stack-inl.h"

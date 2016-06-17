@@ -14,7 +14,7 @@
 #include "jsscript.h"
 
 #include "vm/Debugger.h"
-#include "vm/ScopeObject.h"
+#include "vm/EnvironmentObject.h"
 
 using namespace js;
 using mozilla::PodEqual;

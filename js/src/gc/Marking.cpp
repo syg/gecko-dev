@@ -24,7 +24,7 @@
 #include "vm/ArgumentsObject.h"
 #include "vm/ArrayObject.h"
 #include "vm/Scope.h"
-#include "vm/ScopeObject.h"
+#include "vm/EnvironmentObject.h"
 #include "vm/Shape.h"
 #include "vm/Symbol.h"
 #include "vm/TypedArrayObject.h"

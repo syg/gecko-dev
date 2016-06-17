@@ -12,11 +12,11 @@
 #include "jscntxt.h"
 #include "jscompartment.h"
 
-#include "vm/ScopeObject.h"
+#include "vm/EnvironmentObject.h"
 
 #include "jsscriptinlines.h"
 
-#include "vm/ScopeObject-inl.h"
+#include "vm/EnvironmentObject-inl.h"
 
 namespace js {
 namespace jit {

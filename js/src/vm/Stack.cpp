@@ -18,12 +18,11 @@
 #include "js/GCAPI.h"
 #include "vm/Debugger.h"
 #include "vm/Opcodes.h"
-#include "vm/ScopeObject.h"
 
 #include "jit/JitFrameIterator-inl.h"
 #include "vm/Interpreter-inl.h"
 #include "vm/Probes-inl.h"
-#include "vm/ScopeObject-inl.h"
+#include "vm/EnvironmentObject-inl.h"
 
 using namespace js;
 

@@ -21,7 +21,7 @@
 #include "vm/DateObject.h"
 #include "vm/NumberObject.h"
 #include "vm/Probes.h"
-#include "vm/ScopeObject.h"
+#include "vm/EnvironmentObject.h"
 #include "vm/StringObject.h"
 #include "vm/TypedArrayCommon.h"
 

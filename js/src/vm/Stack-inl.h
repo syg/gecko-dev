@@ -18,7 +18,7 @@
 #include "jit/RematerializedFrame.h"
 #include "js/Debug.h"
 #include "vm/GeneratorObject.h"
-#include "vm/ScopeObject.h"
+#include "vm/EnvironmentObject.h"
 
 #include "jsobjinlines.h"
 #include "jsscriptinlines.h"

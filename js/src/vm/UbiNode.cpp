@@ -27,7 +27,7 @@
 #include "vm/Debugger.h"
 #include "vm/GlobalObject.h"
 #include "vm/Scope.h"
-#include "vm/ScopeObject.h"
+#include "vm/EnvironmentObject.h"
 #include "vm/Shape.h"
 #include "vm/String.h"
 #include "vm/Symbol.h"

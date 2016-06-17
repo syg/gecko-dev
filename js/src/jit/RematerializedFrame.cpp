@@ -14,7 +14,7 @@
 
 #include "jsscriptinlines.h"
 #include "jit/JitFrames-inl.h"
-#include "vm/ScopeObject-inl.h"
+#include "vm/EnvironmentObject-inl.h"
 
 using namespace js;
 using namespace jit;

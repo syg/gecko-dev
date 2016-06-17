@@ -15,7 +15,7 @@
 #include "gc/Zone.h"
 #include "js/HashTable.h"
 #include "js/Value.h"
-#include "vm/ScopeObject.h"
+#include "vm/EnvironmentObject.h"
 #include "vm/SharedArrayObject.h"
 #include "vm/Symbol.h"
 

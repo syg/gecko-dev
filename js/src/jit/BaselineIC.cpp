@@ -40,7 +40,7 @@
 #include "jit/MacroAssembler-inl.h"
 #include "jit/shared/Lowering-shared-inl.h"
 #include "vm/Interpreter-inl.h"
-#include "vm/ScopeObject-inl.h"
+#include "vm/EnvironmentObject-inl.h"
 #include "vm/StringObject-inl.h"
 #include "vm/UnboxedObject-inl.h"
 
