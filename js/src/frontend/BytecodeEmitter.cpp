@@ -2703,8 +2703,9 @@ BytecodeEmitter::emitSetOrInitializeName(JSAtom* name, RHSEmitter emitRhs, bool 
         if (!emitRhs(this, loc, emittedBindOp))
             return false;
         MOZ_ASSERT(loc.isConst());
-        // TODOshu doesn't throw in sloppy mode
-        if (!emit1(JSOP_THROWSETCALLEE))
+        // Unlike regular consts, assigning to the named lambda does not throw
+        // in sloppy mode.
+        if (sc->strict() && !emit1(JSOP_THROWSETCALLEE))
             return false;
         break;
 
