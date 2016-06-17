@@ -20,7 +20,6 @@ class LazyScript;
 class LifoAlloc;
 class ModuleObject;
 class ScriptSourceObject;
-class StaticScope;
 struct SourceCompressionTask;
 
 namespace frontend {
@@ -52,18 +51,13 @@ CompileModule(ExclusiveContext* cx, const ReadOnlyCompileOptions& options,
 MOZ_MUST_USE bool
 CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy, const char16_t* chars, size_t length);
 
-/*
- * enclosingStaticScope is a static enclosing scope (e.g. a StaticWithScope).
- * Must be null if the enclosing scope is a global.
- */
 MOZ_MUST_USE bool
 CompileFunctionBody(JSContext* cx, MutableHandleFunction fun,
                     const ReadOnlyCompileOptions& options,
                     Handle<PropertyNameVector> formals, JS::SourceBufferHolder& srcBuf,
                     HandleScope enclosingScope);
 
-// As above, but defaults to the global lexical scope as the enclosing static
-// scope.
+// As above, but defaults to the global lexical scope as the enclosing scope.
 MOZ_MUST_USE bool
 CompileFunctionBody(JSContext* cx, MutableHandleFunction fun,
                     const ReadOnlyCompileOptions& options,

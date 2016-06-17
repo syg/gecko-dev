@@ -13555,7 +13555,7 @@ IonBuilder::walkEnvironmentChain(unsigned hops)
 }
 
 bool
-IonBuilder::hasStaticScopeObject(ScopeCoordinate sc, JSObject** pcall)
+IonBuilder::hasStaticEnvironmentObject(ScopeCoordinate sc, JSObject** pcall)
 {
     JSScript* outerScript = ScopeCoordinateFunctionScript(script(), pc);
     if (!outerScript || !outerScript->treatAsRunOnce())
@@ -13636,7 +13636,7 @@ bool
 IonBuilder::jsop_getaliasedvar(ScopeCoordinate sc)
 {
     JSObject* call = nullptr;
-    if (hasStaticScopeObject(sc, &call) && call) {
+    if (hasStaticEnvironmentObject(sc, &call) && call) {
         PropertyName* name = ScopeCoordinateName(scopeCoordinateNameCache, script(), pc);
         bool emitted = false;
         if (!getStaticName(call, name, &emitted, takeLexicalCheck()) || emitted)
@@ -13657,7 +13657,7 @@ bool
 IonBuilder::jsop_setaliasedvar(ScopeCoordinate sc)
 {
     JSObject* call = nullptr;
-    if (hasStaticScopeObject(sc, &call)) {
+    if (hasStaticEnvironmentObject(sc, &call)) {
         uint32_t depth = current->stackDepth() + 1;
         if (depth > current->nslots()) {
             if (!current->increaseSlots(depth - current->nslots()))

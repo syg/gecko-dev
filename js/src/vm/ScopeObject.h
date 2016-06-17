@@ -23,67 +23,6 @@ class ModuleObject;
 typedef Handle<ModuleObject*> HandleModuleObject;
 
 
-/*** Static scopes *******************************************************************************/
-
-/*
- * The static scope chain is the canonical truth for lexical scope contour of
- * a program. The dynamic scope chain is derived from the static scope chain:
- * it is the chain of scopes whose static scopes have a runtime
- * representation, for example, due to aliased bindings.
- *
- * Static scopes roughly correspond to a scope in the program text. They are
- * divided into scopes that have direct correspondence to program text (i.e.,
- * syntactic) and ones used internally for scope walking (i.e., non-syntactic).
- *
- * The following are syntactic static scopes:
- *
- * StaticBlockScope
- *   Scope for non-function body blocks. e.g., |{ let x; }|
- *
- * JSFunction
- *   Scope for function bodies. e.g., |function f() { var x; let y; }|
- *
- * ModuleObject
- *   Scope for moddules.
- *
- * StaticWithScope
- *   Scope for |with|. e.g., |with ({}) { ... }|
- *
- * StaticEvalScope
- *   Scope for |eval|. e.g., |eval(...)|
- *
- * The following are non-syntactic static scopes:
- *
- * StaticNonSyntacticScope
- *   Signals presence of "polluting" scopes. Used by Gecko.
- *
- * There is an additional scope for named lambdas without a static scope
- * object. E.g., in:
- *
- *   (function f() { var x; function g() { } })
- *
- * All static scope objects are StaticScope objects with the exception of
- * JSFunction and ModuleObject, which keep their enclosing scope link on
- * |JSScript::enclosingStaticScope()|.
- */
-class StaticScope : public NativeObject
-{
-  public:
-    static const uint32_t ENCLOSING_SCOPE_SLOT = 0;
-    static const unsigned RESERVED_SLOTS = ENCLOSING_SCOPE_SLOT + 1;
-
-    inline JSObject* enclosingScope() const {
-        return getFixedSlot(ENCLOSING_SCOPE_SLOT).toObjectOrNull();
-    }
-
-    void initEnclosingScope(JSObject* obj) {
-        MOZ_ASSERT(getReservedSlot(ENCLOSING_SCOPE_SLOT).isUndefined());
-        setReservedSlot(ENCLOSING_SCOPE_SLOT, ObjectOrNullValue(obj));
-    }
-
-    void setEnclosingScope(HandleObject obj);
-};
-
 /*
  * Non-syntactic scopes
  *
