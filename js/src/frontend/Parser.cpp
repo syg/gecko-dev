@@ -2167,6 +2167,8 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
                     if (!defaultsScope.addDeclaredName(pc, p, bi.name(), DeclarationKind::Let))
                         return false;
                 }
+
+                // FIXMEshu for defaults not copying
             }
         } else {
             funbox->length = positionalFormals.length() - hasRest;

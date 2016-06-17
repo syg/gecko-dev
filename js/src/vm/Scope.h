@@ -297,8 +297,8 @@ class LexicalScope : public Scope
     {
         // Bindings are sorted by kind in both frames and environments.
         //
-        //   lets - [0, varStart)
-        // consts - [varStart, length)
+        //   lets - [0, constStart)
+        // consts - [constStart, length)
         uint32_t constStart;
         uint32_t length;
 
@@ -653,9 +653,11 @@ class BindingIter
     uint16_t varStart_;
     uint32_t letStart_;
     uint32_t constStart_;
+    uint32_t length_;
 
     uint32_t index_;
 
+    // TODOshu make 3 bools
     enum CanHaveSlots : uint8_t {
         CannotHaveSlots = 0,
         CanHaveArgumentSlots = 1 << 0,
@@ -668,7 +670,6 @@ class BindingIter
     uint32_t frameSlot_;
     uint32_t environmentSlot_;
 
-    uint32_t length_;
     BindingName* names_;
 
     void init(uint16_t nonPositionalFormalStart, uint16_t varStart,
@@ -680,12 +681,12 @@ class BindingIter
         varStart_ = varStart;
         letStart_ = letStart;
         constStart_ = constStart;
+        length_ = length;
         index_ = 0;
         canHaveSlots_ = canHaveSlots;
         argumentSlot_ = 0;
         frameSlot_ = firstFrameSlot;
         environmentSlot_ = firstEnvironmentSlot;
-        length_ = length;
         names_ = names;
 
         settle();
@@ -775,12 +776,12 @@ class BindingIter
         varStart_(bi.varStart_),
         letStart_(bi.letStart_),
         constStart_(bi.constStart_),
+        length_(bi.length_),
         index_(bi.index_),
         canHaveSlots_(bi.canHaveSlots_),
         argumentSlot_(bi.argumentSlot_),
         frameSlot_(bi.frameSlot_),
         environmentSlot_(bi.environmentSlot_),
-        length_(bi.length_),
         names_(bi.names_)
     { }
 

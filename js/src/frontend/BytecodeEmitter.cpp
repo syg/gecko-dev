@@ -2735,17 +2735,19 @@ BytecodeEmitter::emitSetOrInitializeName(JSAtom* name, RHSEmitter emitRhs, bool 
         if (!emitRhs(this, loc, emittedBindOp))
             return false;
         MOZ_ASSERT(loc.isConst());
+        // TODOshu doesn't throw in sloppy mode
         if (!emit1(JSOP_THROWSETCALLEE))
             return false;
         break;
 
       case NameLocation::Kind::ArgumentSlot: {
-        // If we assign to a simple formal parameter and the arguments object
-        // is unmapped (strict mode or function with default/rest/destructing
-        // args), parameters do not alias arguments[i], and to make the
-        // arguments object reflect initial parameter values prior to any
-        // mutation we create it eagerly whenever parameters are (or might, in
-        // the case of calls to eval) assigned.
+        // If we assign to a positional formal parameter and the arguments
+        // object is unmapped (strict mode or function with
+        // default/rest/destructing args), parameters do not alias
+        // arguments[i], and to make the arguments object reflect initial
+        // parameter values prior to any mutation we create it eagerly
+        // whenever parameters are (or might, in the case of calls to eval)
+        // assigned.
         FunctionBox* funbox = sc->asFunctionBox();
         if (funbox->argumentsHasLocalBinding() && !funbox->hasMappedArgsObj())
             funbox->setDefinitelyNeedsArgsObj();
