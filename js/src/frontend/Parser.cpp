@@ -3715,32 +3715,30 @@ Parser<ParseHandler>::declarationName(Node decl, DeclarationKind declKind, Token
     } else {
         tokenStream.addModifierException(TokenStream::NoneIsOperand);
 
-        bool constRequiringInitializer = declKind == DeclarationKind::Const;
         if (initialDeclaration && forHeadKind) {
             bool isForIn, isForOf;
             if (!matchInOrOf(&isForIn, &isForOf))
                 return null();
 
-            if (isForIn) {
-                constRequiringInitializer = false;
-
+            if (isForIn)
                 *forHeadKind = PNK_FORIN;
-            } else if (isForOf) {
+            else if (isForOf)
                 *forHeadKind = PNK_FOROF;
-            } else {
+            else
                 *forHeadKind = PNK_FORHEAD;
-            }
-        }
-
-        if (constRequiringInitializer) {
-            report(ParseError, false, binding, JSMSG_BAD_CONST_DECL);
-            return null();
         }
 
         if (forHeadKind && *forHeadKind != PNK_FORHEAD) {
             *forInOrOfExpression = expressionAfterForInOrOf(*forHeadKind, yieldHandling);
             if (!*forInOrOfExpression)
                 return null();
+        } else {
+            // Normal const declarations, and const declarations in for(;;)
+            // heads, must be initialized.
+            if (declKind == DeclarationKind::Const) {
+                report(ParseError, false, binding, JSMSG_BAD_CONST_DECL);
+                return null();
+            }
         }
     }
 
