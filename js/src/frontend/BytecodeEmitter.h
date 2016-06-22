@@ -304,7 +304,7 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     // requires accessing names that would otherwise be shadowed. This method
     // returns the access location of a name that is known to be bound in a
     // target scope.
-    NameLocation locationOfNameBoundInScope(JSAtom* name, EmitterScope* target);
+    mozilla::Maybe<NameLocation> locationOfNameBoundInScope(JSAtom* name, EmitterScope* target);
 
     Scope* bodyScope() const { return scopeList.vector[bodyScopeIndex]; }
     Scope* outermostScope() const { return scopeList.vector[0]; }

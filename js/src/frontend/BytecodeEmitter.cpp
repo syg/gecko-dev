@@ -516,7 +516,8 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
         return searchAndCache(bce, name);
     }
 
-    NameLocation locationBoundInScope(BytecodeEmitter* bce, JSAtom* name, EmitterScope* target);
+    Maybe<NameLocation> locationBoundInScope(BytecodeEmitter* bce, JSAtom* name,
+                                             EmitterScope* target);
 };
 
 void
@@ -695,7 +696,7 @@ BytecodeEmitter::EmitterScope::searchAndCache(BytecodeEmitter* bce, JSAtom* name
     return *loc;
 }
 
-NameLocation
+Maybe<NameLocation>
 BytecodeEmitter::EmitterScope::locationBoundInScope(BytecodeEmitter* bce, JSAtom* name,
                                                     EmitterScope* target)
 {
@@ -707,9 +708,17 @@ BytecodeEmitter::EmitterScope::locationBoundInScope(BytecodeEmitter* bce, JSAtom
             extraHops++;
     }
 
-    NameLocation loc = target->lookup(bce, name);
-    if (loc.kind() == NameLocation::Kind::EnvironmentCoordinate)
-        return loc.addHops(extraHops);
+    // Caches are prepopulated with bound names. So if the name is bound in a
+    // particular scope, it must already be in the cache. Furthermore, don't
+    // consult the fallback location as we only care about binding names.
+    Maybe<NameLocation> loc;
+    if (NameLocationMap::Ptr p = nameCache().lookup(name)) {
+        NameLocation l = p->value().wrapped;
+        if (l.kind() == NameLocation::Kind::EnvironmentCoordinate)
+            loc = Some(l.addHops(extraHops));
+        else
+            loc = Some(l);
+    }
     return loc;
 }
 
@@ -1234,7 +1243,7 @@ BytecodeEmitter::lookupName(JSAtom* name)
     return innermostEmitterScope->lookup(this, name);
 }
 
-NameLocation
+Maybe<NameLocation>
 BytecodeEmitter::locationOfNameBoundInScope(JSAtom* name, EmitterScope* target)
 {
     return innermostEmitterScope->locationBoundInScope(this, name, target);
@@ -8159,11 +8168,12 @@ BytecodeEmitter::emitFunctionFormalParametersAndBody(ParseNode *pn)
         for (BindingIter bi(*sc->asFunctionBox()->defaultsScopeBindings, 0); bi; bi++) {
             JSAtom* name = bi.name();
 
-            NameLocation varLoc = locationOfNameBoundInScope(name, varScope);
-            if (varLoc.bindingKind() != BindingKind::Var)
+            // There may not be a var binding of the same name.
+            Maybe<NameLocation> varLoc = locationOfNameBoundInScope(name, varScope);
+            if (!varLoc || varLoc->bindingKind() != BindingKind::Var)
                 continue;
 
-            NameLocation defaultsLoc = locationOfNameBoundInScope(name, defaultsScope);
+            NameLocation defaultsLoc = *locationOfNameBoundInScope(name, defaultsScope);
 
             auto emitRhs = [name, defaultsLoc](BytecodeEmitter* bce, const NameLocation&, bool) {
                 return EmitGetNameAtLocation(bce, name, defaultsLoc);

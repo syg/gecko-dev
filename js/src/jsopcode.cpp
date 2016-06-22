@@ -775,47 +775,6 @@ ToDisassemblySource(JSContext* cx, HandleValue v, JSAutoByteString* bytes)
 
     if (v.isObject()) {
         JSObject& obj = v.toObject();
-        /* TODOshu
-        if (obj.is<StaticBlockScope>()) {
-            Rooted<StaticBlockScope*> block(cx, &obj.as<StaticBlockScope>());
-            char* source = JS_sprintf_append(nullptr, "depth %d {", block->localOffset());
-            if (!source) {
-                ReportOutOfMemory(cx);
-                return false;
-            }
-
-            Shape::Range<CanGC> r(cx, block->lastProperty());
-
-            while (!r.empty()) {
-                Rooted<Shape*> shape(cx, &r.front());
-                JSAtom* atom = JSID_IS_INT(shape->propid())
-                               ? cx->names().empty
-                               : JSID_TO_ATOM(shape->propid());
-
-                JSAutoByteString bytes;
-                if (!AtomToPrintableString(cx, atom, &bytes))
-                    return false;
-
-                r.popFront();
-                source = JS_sprintf_append(source, "%s: %d%s",
-                                           bytes.ptr(),
-                                           block->shapeToIndex(*shape),
-                                           !r.empty() ? ", " : "");
-                if (!source) {
-                    ReportOutOfMemory(cx);
-                    return false;
-                }
-            }
-
-            source = JS_sprintf_append(source, "}");
-            if (!source) {
-                ReportOutOfMemory(cx);
-                return false;
-            }
-            bytes->initBytes(source);
-            return true;
-        }
-        */
 
         if (obj.is<JSFunction>()) {
             RootedFunction fun(cx, &obj.as<JSFunction>());
@@ -834,6 +793,61 @@ ToDisassemblySource(JSContext* cx, HandleValue v, JSAutoByteString* bytes)
     }
 
     return !!ValueToPrintable(cx, v, bytes, true);
+}
+
+static bool
+ToDisassemblySource(JSContext* cx, HandleScope scope, JSAutoByteString* bytes)
+{
+    char* source = JS_sprintf_append(nullptr, "%s scope {", ScopeKindString(scope->kind()));
+    if (!source) {
+        ReportOutOfMemory(cx);
+        return false;
+    }
+
+    for (Rooted<BindingIter> bi(cx, BindingIter(scope)); bi; bi++) {
+        JSAutoByteString nameBytes;
+        if (!AtomToPrintableString(cx, bi.name(), &nameBytes))
+            return false;
+
+        source = JS_sprintf_append(source, "%s %s: ", BindingKindString(bi.kind()), &nameBytes);
+        if (!source) {
+            ReportOutOfMemory(cx);
+            return false;
+        }
+
+        BindingLocation loc = bi.location();
+        switch (loc.kind()) {
+          case BindingLocation::Kind::Global:
+            source = JS_sprintf_append(source, " g");
+            break;
+
+          case BindingLocation::Kind::Frame:
+            source = JS_sprintf_append(source, " f %u", loc.slot());
+            break;
+
+          case BindingLocation::Kind::Environment:
+            source = JS_sprintf_append(source, " e %u", loc.slot());
+            break;
+
+          case BindingLocation::Kind::Argument:
+            source = JS_sprintf_append(source, " a %u", loc.slot());
+            break;
+        }
+
+        if (!source) {
+            ReportOutOfMemory(cx);
+            return false;
+        }
+    }
+
+    source = JS_sprintf_append(source, "}");
+    if (!source) {
+        ReportOutOfMemory(cx);
+        return false;
+    }
+
+    bytes->initBytes(source);
+    return true;
 }
 
 unsigned
@@ -886,6 +900,16 @@ js::Disassemble1(JSContext* cx, HandleScript script, jsbytecode* pc,
       case JOF_JUMP: {
         ptrdiff_t off = GET_JUMP_OFFSET(pc);
         if (Sprint(sp, " %u (%+d)", loc + (int) off, (int) off) == -1)
+            return 0;
+        break;
+      }
+
+      case JOF_SCOPE: {
+        RootedScope scope(cx, script->getScope(GET_UINT32_INDEX(pc)));
+        JSAutoByteString bytes;
+        if (!ToDisassemblySource(cx, scope, &bytes))
+            return 0;
+        if (Sprint(sp, " %s", bytes.ptr()) == -1)
             return 0;
         break;
       }
