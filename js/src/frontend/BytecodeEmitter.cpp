@@ -5512,23 +5512,21 @@ BytecodeEmitter::emitForOf(ParseNode* forOfLoop)
         return false;
 
     // If the loop had an escaping lexical declaration, replace the current
-    // scope with an uninitialized version of it to implement TDZ semantics.
+    // environment with an uninitialized one to implement TDZ semantics.
     if (forLoopRequiresFreshEnvironment) {
-        /* TODOshu
-        // The scope chain only includes an actual block *if* the scope is
-        // captured and therefore requires cloning.  Get the static block scope
-        // from the enclosing let-block statement (which *must* be the
-        // let-statement for the guarding condition to have held) and replace
-        // if the block scope needs cloning.
-        StmtInfoBCE* enclosing = stmtInfo.enclosing;
-        MOZ_ASSERT(enclosing->type == StmtType::BLOCK);
-        MOZ_ASSERT(enclosing->isBlockScope);
+        // The environment chain only includes an environment for the for-of
+        // loop head *if* a scope binding is captured, thereby requiring
+        // recreation each iteration.  Get the innermost scope (necessarily
+        // created by a parent LexicalScopeNode, for the guarding condition to
+        // have held).  If that scope has closed-over bindings inducing an
+        // environment, recreate the current environment.
+        Scope* forLexicalScope = innermostScope();
+        MOZ_ASSERT(forLexicalScope->kind() == ScopeKind::Lexical);
 
-        if (enclosing->staticScope->as<StaticBlockScope>().needsClone()) {
+        if (forLexicalScope->hasEnvironment()) {
             if (!emit1(JSOP_RECREATEBLOCKSCOPE))          // ITER RESULT
                 return false;
         }
-        */
     }
 
     JumpList beq;
@@ -5647,23 +5645,21 @@ BytecodeEmitter::emitForIn(ParseNode* forInLoop)
         return false;
 
     // If the loop had an escaping lexical declaration, replace the current
-    // scope with an uninitialized version of it to implement TDZ semantics.
+    // environment with an uninitialized one to implement TDZ semantics.
     if (forLoopRequiresFreshEnvironment) {
-        /* TODOshu
-        // The scope chain only includes an actual block *if* the scope is
-        // captured and therefore requires cloning.  Get the static block scope
-        // from the enclosing let-block statement (which *must* be the
-        // let-statement for the guarding condition to have held) and replace
-        // if the block scope needs cloning.
-        StmtInfoBCE* enclosing = stmtInfo.enclosing;
-        MOZ_ASSERT(enclosing->type == StmtType::BLOCK);
-        MOZ_ASSERT(enclosing->isBlockScope);
+        // The environment chain only includes an environment for the for-in
+        // loop head *if* a scope binding is captured, thereby requiring
+        // recreation each iteration.  Get the innermost scope (necessarily
+        // created by a parent LexicalScopeNode, for the guarding condition to
+        // have held).  If that scope has closed-over bindings inducing an
+        // environment, recreate the current environment.
+        Scope* forLexicalScope = innermostScope();
+        MOZ_ASSERT(forLexicalScope->kind() == ScopeKind::Lexical);
 
-        if (enclosing->staticScope->as<StaticBlockScope>().needsClone()) {
+        if (forLexicalScope->hasEnvironment()) {
             if (!emit1(JSOP_RECREATEBLOCKSCOPE))          // ITER ITERVAL
                 return false;
         }
-        */
     }
 
     {
@@ -5807,24 +5803,23 @@ BytecodeEmitter::emitCStyleFor(ParseNode* pn)
     if (!emitJumpTarget(&loopInfo.continueTarget))
         return false;
 
-    // Freshen the block on the scope chain to expose distinct bindings for each loop
-    // iteration.
+    // If an initializer let-declaration may be captured during loop iteration,
+    // the current scope has an environment.  If so, freshen the current
+    // environment to expose distinct bindings for each loop iteration.
     if (forLoopRequiresFreshening) {
-        /* TODOshu
-        // The scope chain only includes an actual block *if* the scope object
-        // is captured and therefore requires cloning.  Get the static block
-        // object from the enclosing let-block statement (which *must* be the
-        // let-statement for the guarding condition to have held) and freshen
-        // if the block object needs cloning.
-        StmtInfoBCE* enclosing = stmtInfo.enclosing;
-        MOZ_ASSERT(enclosing->type == StmtType::BLOCK);
-        MOZ_ASSERT(enclosing->isBlockScope);
+        // The environment chain only includes an environment for the for(;;)
+        // loop head's let-declaration *if* a scope binding is captured, thus
+        // requiring a fresh environment each iteration.  Get the innermost
+        // scope (necessarily created by a parent LexicalScopeNode, for the
+        // guarding condition to have held).  If that scope has closed-over
+        // bindings inducing an environment, freshen the current environment.
+        Scope* forLexicalScope = innermostScope();
+        MOZ_ASSERT(forLexicalScope->kind() == ScopeKind::Lexical);
 
-        if (enclosing->staticScope->as<StaticBlockScope>().needsClone()) {
+        if (forLexicalScope->hasEnvironment()) {
             if (!emit1(JSOP_FRESHENBLOCKSCOPE))
                 return false;
         }
-        */
     }
 
     /* Check for update code to do before the condition (if any). */

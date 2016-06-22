@@ -255,6 +255,12 @@ class Scope : public js::gc::TenuredCell
         return environmentShape_;
     }
 
+    bool hasEnvironment() const {
+        // If there's a shape, some binding is closed over: an environment must
+        // be created for this scope.
+        return environmentShape_ != nullptr;
+    }
+
     uint32_t chainLength() const;
     uint32_t environmentChainLength() const;
 
