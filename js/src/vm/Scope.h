@@ -149,27 +149,27 @@ class BindingLocation
  *  - hops: the number of scope objects on the scope chain to skip
  *  - slot: the slot on the scope object holding the variable's value
  */
-class ScopeCoordinate
+class EnvironmentCoordinate
 {
     uint32_t hops_;
     uint32_t slot_;
 
     /*
      * Technically, hops_/slot_ are ENVCOORD_(HOPS|SLOT)_BITS wide.  Since
-     * ScopeCoordinate is a temporary value, don't bother with a bitfield as
+     * EnvironmentCoordinate is a temporary value, don't bother with a bitfield as
      * this only adds overhead.
      */
     static_assert(ENVCOORD_HOPS_BITS <= 32, "We have enough bits below");
     static_assert(ENVCOORD_SLOT_BITS <= 32, "We have enough bits below");
 
   public:
-    explicit inline ScopeCoordinate(jsbytecode* pc)
+    explicit inline EnvironmentCoordinate(jsbytecode* pc)
       : hops_(GET_ENVCOORD_HOPS(pc)), slot_(GET_ENVCOORD_SLOT(pc + ENVCOORD_HOPS_LEN))
     {
         MOZ_ASSERT(JOF_OPTYPE(JSOp(*pc)) == JOF_ENVCOORD);
     }
 
-    inline ScopeCoordinate() {}
+    inline EnvironmentCoordinate() {}
 
     void setHops(uint32_t hops) { MOZ_ASSERT(hops < ENVCOORD_HOPS_LIMIT); hops_ = hops; }
     void setSlot(uint32_t slot) { MOZ_ASSERT(slot < ENVCOORD_SLOT_LIMIT); slot_ = slot; }
@@ -177,7 +177,7 @@ class ScopeCoordinate
     uint32_t hops() const { MOZ_ASSERT(hops_ < ENVCOORD_HOPS_LIMIT); return hops_; }
     uint32_t slot() const { MOZ_ASSERT(slot_ < ENVCOORD_SLOT_LIMIT); return slot_; }
 
-    bool operator==(const ScopeCoordinate& rhs) const {
+    bool operator==(const EnvironmentCoordinate& rhs) const {
         return hops() == rhs.hops() && slot() == rhs.slot();
     }
 };
@@ -1049,30 +1049,6 @@ class HandleBase<Scope*> : public ScopeCastOperation<JS::Handle<Scope*>>
 template <>
 class MutableHandleBase<Scope*> : public ScopeCastOperation<JS::MutableHandle<Scope*>>
 { };
-
-//
-// XDR helpers.
-//
-
-template <XDRMode mode>
-bool XDRLexicalScope(XDRState<mode>* xdr, ScopeKind kind, HandleScope enclosing,
-                     MutableHandle<LexicalScope*> scope);
-
-template <XDRMode mode>
-bool XDRFunctionScope(XDRState<mode>* xdr, HandleScope enclosing,
-                      MutableHandle<FunctionScope*> scope);
-
-template <XDRMode mode>
-bool XDRGlobalScope(XDRState<mode>* xdr, HandleScope enclosing,
-                    MutableHandle<GlobalScope*> scope);
-
-template <XDRMode mode>
-bool XDRWithScope(XDRState<mode>* xdr, HandleScope enclosing,
-                  MutableHandle<WithScope*> scope);
-
-template <XDRMode mode>
-bool XDREvalScope(XDRState<mode>* xdr, HandleScope enclosing,
-                  MutableHandle<EvalScope*> scope);
 
 } // namespace js
 

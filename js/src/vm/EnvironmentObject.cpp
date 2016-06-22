@@ -42,11 +42,11 @@ typedef MutableHandle<ArgumentsObject*> MutableHandleArgumentsObject;
 /*****************************************************************************/
 
 Shape*
-js::ScopeCoordinateToEnvironmentShape(JSScript* script, jsbytecode* pc)
+js::EnvironmentCoordinateToEnvironmentShape(JSScript* script, jsbytecode* pc)
 {
     MOZ_ASSERT(JOF_OPTYPE(JSOp(*pc)) == JOF_ENVCOORD);
     ScopeIter si(script->innermostScope(pc));
-    uint32_t hops = ScopeCoordinate(pc).hops();
+    uint32_t hops = EnvironmentCoordinate(pc).hops();
     while (true) {
         MOZ_ASSERT(!si.done());
         if (si.hasSyntacticEnvironment()) {
@@ -62,7 +62,7 @@ js::ScopeCoordinateToEnvironmentShape(JSScript* script, jsbytecode* pc)
 static const uint32_t SCOPE_COORDINATE_NAME_THRESHOLD = 20;
 
 void
-ScopeCoordinateNameCache::purge()
+EnvironmentCoordinateNameCache::purge()
 {
     shape = nullptr;
     if (map.initialized())
@@ -70,9 +70,9 @@ ScopeCoordinateNameCache::purge()
 }
 
 PropertyName*
-js::ScopeCoordinateName(ScopeCoordinateNameCache& cache, JSScript* script, jsbytecode* pc)
+js::EnvironmentCoordinateName(EnvironmentCoordinateNameCache& cache, JSScript* script, jsbytecode* pc)
 {
-    Shape* shape = ScopeCoordinateToEnvironmentShape(script, pc);
+    Shape* shape = EnvironmentCoordinateToEnvironmentShape(script, pc);
     if (shape != cache.shape && shape->slot() >= SCOPE_COORDINATE_NAME_THRESHOLD) {
         cache.purge();
         if (cache.map.init(shape->slot())) {
@@ -89,9 +89,9 @@ js::ScopeCoordinateName(ScopeCoordinateNameCache& cache, JSScript* script, jsbyt
     }
 
     jsid id;
-    ScopeCoordinate sc(pc);
+    EnvironmentCoordinate sc(pc);
     if (shape == cache.shape) {
-        ScopeCoordinateNameCache::Map::Ptr p = cache.map.lookup(sc.slot());
+        EnvironmentCoordinateNameCache::Map::Ptr p = cache.map.lookup(sc.slot());
         id = p->value();
     } else {
         Shape::Range<NoGC> r(shape);
@@ -107,11 +107,11 @@ js::ScopeCoordinateName(ScopeCoordinateNameCache& cache, JSScript* script, jsbyt
 }
 
 JSScript*
-js::ScopeCoordinateFunctionScript(JSScript* script, jsbytecode* pc)
+js::EnvironmentCoordinateFunctionScript(JSScript* script, jsbytecode* pc)
 {
     MOZ_ASSERT(JOF_OPTYPE(JSOp(*pc)) == JOF_ENVCOORD);
     ScopeIter si(script->innermostScope(pc));
-    uint32_t hops = ScopeCoordinate(pc).hops();
+    uint32_t hops = EnvironmentCoordinate(pc).hops();
     while (true) {
         if (si.hasSyntacticEnvironment()) {
             if (!hops)
@@ -3105,7 +3105,7 @@ RemoveReferencedNames(JSContext* cx, HandleScript script, PropertyNameSet& remai
 
           case JSOP_GETALIASEDVAR:
           case JSOP_SETALIASEDVAR:
-            name = ScopeCoordinateName(cx->runtime()->scopeCoordinateNameCache, script, pc);
+            name = EnvironmentCoordinateName(cx->runtime()->scopeCoordinateNameCache, script, pc);
             break;
 
           default:

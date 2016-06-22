@@ -3193,13 +3193,13 @@ END_CASE(JSOP_REST)
 
 CASE(JSOP_GETALIASEDVAR)
 {
-    ScopeCoordinate sc = ScopeCoordinate(REGS.pc);
-    ReservedRooted<Value> val(&rootValue0, REGS.fp()->aliasedEnvironment(sc).aliasedBinding(sc));
+    EnvironmentCoordinate ec = EnvironmentCoordinate(REGS.pc);
+    ReservedRooted<Value> val(&rootValue0, REGS.fp()->aliasedEnvironment(ec).aliasedBinding(ec));
 #ifdef DEBUG
     // Only the .this slot can hold the TDZ MagicValue.
     if (IsUninitializedLexical(val)) {
-        PropertyName* name = ScopeCoordinateName(cx->runtime()->scopeCoordinateNameCache,
-                                                 script, REGS.pc);
+        PropertyName* name = EnvironmentCoordinateName(cx->runtime()->scopeCoordinateNameCache,
+                                                       script, REGS.pc);
         MOZ_ASSERT(name == cx->names().dotThis);
         JSOp next = JSOp(*GetNextPc(REGS.pc));
         MOZ_ASSERT(next == JSOP_CHECKTHIS || next == JSOP_CHECKRETURN || next == JSOP_CHECKTHISREINIT);
@@ -3212,9 +3212,9 @@ END_CASE(JSOP_GETALIASEDVAR)
 
 CASE(JSOP_SETALIASEDVAR)
 {
-    ScopeCoordinate sc = ScopeCoordinate(REGS.pc);
-    EnvironmentObject& obj = REGS.fp()->aliasedEnvironment(sc);
-    SetAliasedVarOperation(cx, script, REGS.pc, obj, sc, REGS.sp[-1], CheckTDZ);
+    EnvironmentCoordinate ec = EnvironmentCoordinate(REGS.pc);
+    EnvironmentObject& obj = REGS.fp()->aliasedEnvironment(ec);
+    SetAliasedVarOperation(cx, script, REGS.pc, obj, ec, REGS.sp[-1], CheckTDZ);
 }
 END_CASE(JSOP_SETALIASEDVAR)
 
@@ -3245,7 +3245,7 @@ END_CASE(JSOP_INITLEXICAL)
 
 CASE(JSOP_CHECKALIASEDLEXICAL)
 {
-    ScopeCoordinate sc = ScopeCoordinate(REGS.pc);
+    EnvironmentCoordinate ec = EnvironmentCoordinate(REGS.pc);
     ReservedRooted<Value> val(&rootValue0, REGS.fp()->aliasedEnvironment(sc).aliasedBinding(sc));
     if (!CheckUninitializedLexical(cx, script, REGS.pc, val))
         goto error;
@@ -3254,7 +3254,7 @@ END_CASE(JSOP_CHECKALIASEDLEXICAL)
 
 CASE(JSOP_INITALIASEDLEXICAL)
 {
-    ScopeCoordinate sc = ScopeCoordinate(REGS.pc);
+    EnvironmentCoordinate ec = EnvironmentCoordinate(REGS.pc);
     EnvironmentObject& obj = REGS.fp()->aliasedEnvironment(sc);
     SetAliasedVarOperation(cx, script, REGS.pc, obj, sc, REGS.sp[-1], DontCheckTDZ);
 }
@@ -4910,7 +4910,7 @@ js::ReportRuntimeLexicalError(JSContext* cx, unsigned errorNumber,
         name = script->getName(pc);
     } else {
         MOZ_ASSERT(IsAliasedVarOp(op));
-        name = ScopeCoordinateName(cx->runtime()->scopeCoordinateNameCache, script, pc);
+        name = EnvironmentCoordinateName(cx->runtime()->scopeCoordinateNameCache, script, pc);
     }
 
     ReportRuntimeLexicalError(cx, errorNumber, name);

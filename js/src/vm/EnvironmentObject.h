@@ -139,15 +139,15 @@ typedef Handle<ModuleObject*> HandleModuleObject;
  * accessed by the ALIASEDVAR op at 'pc'.
  */
 extern Shape*
-ScopeCoordinateToEnvironmentShape(JSScript* script, jsbytecode* pc);
+EnvironmentCoordinateToEnvironmentShape(JSScript* script, jsbytecode* pc);
 
 /* Return the name being accessed by the given ALIASEDVAR op. */
 extern PropertyName*
-ScopeCoordinateName(ScopeCoordinateNameCache& cache, JSScript* script, jsbytecode* pc);
+EnvironmentCoordinateName(EnvironmentCoordinateNameCache& cache, JSScript* script, jsbytecode* pc);
 
 /* Return the function script accessed by the given ALIASEDVAR op, or nullptr. */
 extern JSScript*
-ScopeCoordinateFunctionScript(JSScript* script, jsbytecode* pc);
+EnvironmentCoordinateFunctionScript(JSScript* script, jsbytecode* pc);
 
 
 /*** Scope objects *******************************************************************************/
@@ -224,7 +224,7 @@ class EnvironmentObject : public NativeObject
     }
 
     // Get or set a name contained in this environment.
-    const Value& aliasedBinding(ScopeCoordinate sc) {
+    const Value& aliasedBinding(EnvironmentCoordinate sc) {
         return getSlot(sc.slot());
     }
 
@@ -233,7 +233,7 @@ class EnvironmentObject : public NativeObject
         return getSlot(bi.location().slot());
     }
 
-    inline void setAliasedBinding(JSContext* cx, ScopeCoordinate sc, PropertyName* name,
+    inline void setAliasedBinding(JSContext* cx, EnvironmentCoordinate sc, PropertyName* name,
                                   const Value& v);
 
     inline void setAliasedBinding(JSContext* cx, const BindingIter& bi, const Value& v);

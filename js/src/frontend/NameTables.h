@@ -230,9 +230,9 @@ class NameLocation
         return NameLocation(kind_, bindingKind_, hops_ + more, slot_);
     }
 
-    ScopeCoordinate scopeCoordinate() const {
+    EnvironmentCoordinate scopeCoordinate() const {
         MOZ_ASSERT(kind_ == Kind::EnvironmentCoordinate);
-        ScopeCoordinate coord;
+        EnvironmentCoordinate coord;
         coord.setHops(hops_);
         coord.setSlot(slot_);
         return coord;
