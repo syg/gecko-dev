@@ -3532,20 +3532,16 @@ JSObject::dump()
 }
 
 static void
-MaybeDumpObject(const char* name, JSObject* obj)
+MaybeDumpScope(Scope* scope)
 {
-    if (obj) {
-        fprintf(stderr, "  %s: ", name);
-        dumpValue(ObjectValue(*obj));
-        fputc('\n', stderr);
+    if (scope) {
+        fprintf(stderr, "  scope: %s\n", ScopeKindString(scope->kind()));
+        for (BindingIter bi(scope); bi; bi++) {
+            fprintf(stderr, "    ");
+            dumpValue(StringValue(bi.name()));
+            fputc('\n', stderr);
+        }
     }
-}
-
-static void
-MaybeDumpScope(const char* name, Scope* scope)
-{
-    if (scope)
-        fprintf(stderr, "  %s: %s\n", name, ScopeKindString(scope->kind()));
 }
 
 static void
@@ -3602,7 +3598,7 @@ js::DumpInterpreterFrame(JSContext* cx, InterpreterFrame* start)
         if (jsbytecode* pc = i.pc()) {
             fprintf(stderr, "  pc = %p\n", pc);
             fprintf(stderr, "  current op: %s\n", CodeName[*pc]);
-            MaybeDumpScope("scope", i.script()->lookupScope(pc));
+            MaybeDumpScope(i.script()->lookupScope(pc));
         }
         if (i.isFunctionFrame())
             MaybeDumpValue("this", i.thisArgument(cx));
