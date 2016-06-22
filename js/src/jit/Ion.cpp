@@ -2071,7 +2071,7 @@ TrackPropertiesForSingletonScopes(JSContext* cx, JSScript* script, BaselineFrame
     while (environment && !environment->is<GlobalObject>()) {
         if (environment->is<CallObject>() && environment->isSingleton())
             TrackAllProperties(cx, environment);
-        environment = environment->enclosingScope();
+        environment = environment->enclosingEnvironment();
     }
 
     if (baselineFrame) {

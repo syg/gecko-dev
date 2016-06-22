@@ -356,7 +356,7 @@ BytecodeCompiler::deoptimizeArgumentsInEnclosingScripts(JSContext* cx, HandleObj
                     return false;
             }
         }
-        env = env->enclosingScope();
+        env = env->enclosingEnvironment();
     }
 
     return true;

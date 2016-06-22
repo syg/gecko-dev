@@ -20,7 +20,7 @@ inline LexicalEnvironmentObject&
 NearestEnclosingExtensibleLexicalEnvironment(JSObject* env)
 {
     while (!IsExtensibleLexicalEnvironment(env))
-        env = env->enclosingScope();
+        env = env->enclosingEnvironment();
     return env->as<LexicalEnvironmentObject>();
 }
 
@@ -68,7 +68,7 @@ CallObject::setAliasedFormalFromArguments(JSContext* cx, const Value& argsValue,
 }  /* namespace js */
 
 inline JSObject*
-JSObject::enclosingScope() const
+JSObject::enclosingEnvironment() const
 {
     if (is<js::EnvironmentObject>())
         return &as<js::EnvironmentObject>().enclosingEnvironment();

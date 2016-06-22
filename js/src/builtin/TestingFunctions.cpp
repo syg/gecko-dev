@@ -2963,7 +2963,7 @@ EvalReturningScope(JSContext* cx, unsigned argc, Value* vp)
         if (!js::ExecuteInGlobalAndReturnScope(cx, global, script, &lexicalScope))
             return false;
 
-        varObj = lexicalScope->enclosingScope();
+        varObj = lexicalScope->enclosingEnvironment();
     }
 
     RootedObject rv(cx, JS_NewPlainObject(cx));

@@ -103,7 +103,7 @@ BaselineFrame::callObj() const
 
     JSObject* obj = environmentChain();
     while (!obj->is<CallObject>())
-        obj = obj->enclosingScope();
+        obj = obj->enclosingEnvironment();
     return obj->as<CallObject>();
 }
 

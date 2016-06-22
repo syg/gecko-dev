@@ -135,14 +135,14 @@ js::GetNonSyntacticGlobalThis(JSContext* cx, HandleObject envChain, MutableHandl
             res.set(env->as<LexicalEnvironmentObject>().thisValue());
             return true;
         }
-        if (!env->enclosingScope()) {
+        if (!env->enclosingEnvironment()) {
             // This can only happen in Debugger eval frames: in that case we
             // don't always have a global lexical env, see EvaluateInEnv.
             MOZ_ASSERT(env->is<GlobalObject>());
             res.set(GetThisValue(env));
             return true;
         }
-        env = env->enclosingScope();
+        env = env->enclosingEnvironment();
     }
 
     return true;
@@ -653,7 +653,7 @@ js::ExecuteKernel(JSContext* cx, HandleScript script, JSObject& envChainArg,
 #ifdef DEBUG
     RootedObject terminatingEnv(cx, &envChainArg);
     while (IsSyntacticEnvironment(terminatingEnv))
-        terminatingEnv = terminatingEnv->enclosingScope();
+        terminatingEnv = terminatingEnv->enclosingEnvironment();
     MOZ_ASSERT(terminatingEnv->is<GlobalObject>() ||
                script->hasNonSyntacticScope());
 #endif
@@ -703,8 +703,8 @@ js::Execute(JSContext* cx, HandleScript script, JSObject& envChainArg, Value* rv
     JSObject* s = envChain;
     do {
         assertSameCompartment(cx, s);
-        MOZ_ASSERT_IF(!s->enclosingScope(), s->is<GlobalObject>());
-    } while ((s = s->enclosingScope()));
+        MOZ_ASSERT_IF(!s->enclosingEnvironment(), s->is<GlobalObject>());
+    } while ((s = s->enclosingEnvironment()));
 #endif
 
     return ExecuteKernel(cx, script, *envChain, NullValue(),
@@ -4248,7 +4248,7 @@ js::DefFunOperation(JSContext* cx, HandleScript script, HandleObject envChain,
      */
     RootedObject parent(cx, envChain);
     while (!parent->isQualifiedVarObj())
-        parent = parent->enclosingScope();
+        parent = parent->enclosingEnvironment();
 
     /* ES5 10.5 (NB: with subsequent errata). */
     RootedPropertyName name(cx, fun->name()->asPropertyName());

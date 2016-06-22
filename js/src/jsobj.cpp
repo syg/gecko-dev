@@ -2162,7 +2162,7 @@ js::LookupName(JSContext* cx, HandlePropertyName name, HandleObject envChain,
 {
     RootedId id(cx, NameToId(name));
 
-    for (RootedObject env(cx, envChain); env; env = env->enclosingScope()) {
+    for (RootedObject env(cx, envChain); env; env = env->enclosingEnvironment()) {
         if (!LookupProperty(cx, env, id, pobjp, propp))
             return false;
         if (propp) {
@@ -2185,7 +2185,7 @@ js::LookupNameNoGC(JSContext* cx, PropertyName* name, JSObject* envChain,
 
     MOZ_ASSERT(!*objp && !*pobjp && !*propp);
 
-    for (JSObject* env = envChain; env; env = env->enclosingScope()) {
+    for (JSObject* env = envChain; env; env = env->enclosingEnvironment()) {
         if (env->getOpsLookupProperty())
             return false;
         if (!LookupPropertyInline<NoGC>(cx, &env->as<NativeObject>(), NameToId(name), pobjp, propp))
@@ -2209,7 +2209,7 @@ js::LookupNameWithGlobalDefault(JSContext* cx, HandlePropertyName name, HandleOb
     RootedShape shape(cx);
 
     RootedObject env(cx, envChain);
-    for (; !env->is<GlobalObject>(); env = env->enclosingScope()) {
+    for (; !env->is<GlobalObject>(); env = env->enclosingEnvironment()) {
         if (!LookupProperty(cx, env, id, &pobj, &shape))
             return false;
         if (shape)
@@ -2230,7 +2230,7 @@ js::LookupNameUnqualified(JSContext* cx, HandlePropertyName name, HandleObject e
     RootedShape shape(cx);
 
     RootedObject env(cx, envChain);
-    for (; !env->isUnqualifiedVarObj(); env = env->enclosingScope()) {
+    for (; !env->isUnqualifiedVarObj(); env = env->enclosingEnvironment()) {
         if (!LookupProperty(cx, env, id, &pobj, &shape))
             return false;
         if (shape)
@@ -3212,8 +3212,11 @@ js::GetThisValue(JSObject* obj)
     if (obj->is<GlobalObject>())
         return ObjectValue(*ToWindowProxyIfWindow(obj));
 
-    if (obj->is<LexicalEnvironmentObject>())
+    if (obj->is<LexicalEnvironmentObject>()) {
+        if (obj->as<LexicalEnvironmentObject>().isSyntactic())
+            return UndefinedValue();
         return obj->as<LexicalEnvironmentObject>().thisValue();
+    }
 
     if (obj->is<ModuleEnvironmentObject>())
         return UndefinedValue();
@@ -3222,7 +3225,7 @@ js::GetThisValue(JSObject* obj)
         return ObjectValue(*obj->as<WithEnvironmentObject>().withThis());
 
     if (obj->is<NonSyntacticVariablesObject>())
-        return GetThisValue(obj->enclosingScope());
+        return GetThisValue(obj->enclosingEnvironment());
 
     return ObjectValue(*obj);
 }

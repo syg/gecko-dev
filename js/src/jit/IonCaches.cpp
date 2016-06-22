@@ -4860,7 +4860,7 @@ IsCacheableEnvironmentChain(JSObject* envChain, JSObject* obj)
         if (obj2->is<GlobalObject>() || obj2 == obj)
             break;
 
-        obj2 = obj2->enclosingScope();
+        obj2 = obj2->enclosingEnvironment();
     }
 
     return obj == obj2;

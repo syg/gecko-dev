@@ -129,7 +129,7 @@ RematerializedFrame::callObj() const
 
     JSObject* env = environmentChain();
     while (!env->is<CallObject>())
-        env = env->enclosingScope();
+        env = env->enclosingEnvironment();
     return env->as<CallObject>();
 }
 

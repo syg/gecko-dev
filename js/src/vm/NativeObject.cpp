@@ -1115,7 +1115,7 @@ PurgeScopeChainHelper(ExclusiveContext* cx, HandleObject objArg, HandleId id)
      * may gain such properties via eval introducing new vars; see bug 490364.
      */
     if (obj->is<CallObject>()) {
-        while ((obj = obj->enclosingScope()) != nullptr) {
+        while ((obj = obj->enclosingEnvironment()) != nullptr) {
             if (!PurgeProtoChain(cx, obj, id))
                 return false;
         }

@@ -58,7 +58,7 @@ InterpreterFrame::varObj() const
 {
     JSObject* obj = environmentChain();
     while (!obj->isQualifiedVarObj())
-        obj = obj->enclosingScope();
+        obj = obj->enclosingEnvironment();
     return *obj;
 }
 
@@ -222,7 +222,7 @@ InterpreterFrame::callObj() const
 
     JSObject* pobj = environmentChain();
     while (MOZ_UNLIKELY(!pobj->is<CallObject>()))
-        pobj = pobj->enclosingScope();
+        pobj = pobj->enclosingEnvironment();
     return pobj->as<CallObject>();
 }
 

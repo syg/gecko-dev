@@ -13588,7 +13588,7 @@ IonBuilder::hasStaticEnvironmentObject(EnvironmentCoordinate ec, JSObject** pcal
             *pcall = environment;
             return true;
         }
-        environment = environment->enclosingScope();
+        environment = environment->enclosingEnvironment();
     }
 
     // Look for the call object on the current frame, if we are compiling the

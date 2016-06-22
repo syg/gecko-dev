@@ -9214,7 +9214,7 @@ DebuggerEnv_getParent(JSContext* cx, unsigned argc, Value* vp)
     THIS_DEBUGENV_OWNER(cx, argc, vp, "get parent", args, envobj, env, dbg);
 
     /* Don't bother switching compartments just to get env's parent. */
-    Rooted<Env*> parent(cx, env->enclosingScope());
+    Rooted<Env*> parent(cx, env->enclosingEnvironment());
     return dbg->wrapEnvironment(cx, parent, args.rval());
 }
 
@@ -9356,7 +9356,7 @@ DebuggerEnv_find(JSContext* cx, unsigned argc, Value* vp)
         /* This can trigger resolve hooks. */
         ErrorCopier ec(ac);
         bool found;
-        for (; env; env = env->enclosingScope()) {
+        for (; env; env = env->enclosingEnvironment()) {
             if (!HasProperty(cx, env, id, &found))
                 return false;
             if (found)

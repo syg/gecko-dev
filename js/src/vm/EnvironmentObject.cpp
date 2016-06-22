@@ -2729,7 +2729,7 @@ GetDebugEnvironmentForNonEnvironmentObject(const EnvironmentIter& ei)
     JSObject& enclosing = ei.enclosingEnvironment();
 #ifdef DEBUG
     JSObject* o = &enclosing;
-    while ((o = o->enclosingScope()))
+    while ((o = o->enclosingEnvironment()))
         MOZ_ASSERT(!o->is<EnvironmentObject>());
 #endif
     return &enclosing;
@@ -2794,7 +2794,7 @@ js::GetNearestEnclosingWithEnvironmentObjectForFunction(JSFunction* fun)
 
     JSObject* env = fun->environment();
     while (env && !env->is<WithEnvironmentObject>())
-        env = env->enclosingScope();
+        env = env->enclosingEnvironment();
 
     if (!env)
         return &fun->global();
@@ -3023,7 +3023,7 @@ js::CheckGlobalDeclarationConflicts(JSContext* cx, HandleScript script,
 }
 
 static bool
-CheckVarNameConflictsInScope(JSContext* cx, HandleScript script, HandleObject obj)
+CheckVarNameConflictsInEnv(JSContext* cx, HandleScript script, HandleObject obj)
 {
     Rooted<LexicalEnvironmentObject*> env(cx);
 
@@ -3073,9 +3073,9 @@ js::CheckEvalDeclarationConflicts(JSContext* cx, HandleScript script,
     // Check that a direct eval will not hoist 'var' bindings over lexical
     // bindings with the same name.
     while (obj != varObj) {
-        if (!CheckVarNameConflictsInScope(cx, script, obj))
+        if (!CheckVarNameConflictsInEnv(cx, script, obj))
             return false;
-        obj = obj->enclosingScope();
+        obj = obj->enclosingEnvironment();
     }
 
     return true;

@@ -32,7 +32,7 @@ AssertInnerizedEnvironmentChain(JSContext* cx, JSObject& env)
 {
 #ifdef DEBUG
     RootedObject obj(cx);
-    for (obj = &env; obj; obj = obj->enclosingScope())
+    for (obj = &env; obj; obj = obj->enclosingEnvironment())
         MOZ_ASSERT(!IsWindowProxy(obj));
 #endif
 }

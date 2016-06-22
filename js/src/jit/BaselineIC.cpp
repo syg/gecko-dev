@@ -3860,14 +3860,14 @@ TryAttachEnvNameStub(JSContext* cx, HandleScript script, ICGetName_Fallback* stu
         if (!envChain->is<EnvironmentObject>() || envChain->is<WithEnvironmentObject>())
             return true;
 
-        // Check for an 'own' property on the scope. There is no need to
+        // Check for an 'own' property on the env. There is no need to
         // check the prototype as non-with scopes do not inherit properties
         // from any prototype.
         shape = envChain->as<NativeObject>().lookup(cx, id);
         if (shape)
             break;
 
-        envChain = envChain->enclosingScope();
+        envChain = envChain->enclosingEnvironment();
     }
 
     // We don't handle getters here. When this changes, we need to make sure

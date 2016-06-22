@@ -2235,7 +2235,7 @@ js::CloneFunctionAndScript(JSContext* cx, HandleFunction fun, HandleObject enclo
 #ifdef DEBUG
     RootedObject terminatingEnv(cx, enclosingEnv);
     while (IsSyntacticEnvironment(terminatingEnv))
-        terminatingEnv = terminatingEnv->enclosingScope();
+        terminatingEnv = terminatingEnv->enclosingEnvironment();
     MOZ_ASSERT_IF(!terminatingEnv->is<GlobalObject>(),
                   newScope->hasEnclosing(ScopeKind::NonSyntactic));
 #endif

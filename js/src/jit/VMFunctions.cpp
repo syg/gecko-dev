@@ -186,7 +186,7 @@ BindVar(JSContext* cx, HandleObject envChain)
 {
     JSObject* obj = envChain;
     while (!obj->isQualifiedVarObj())
-        obj = obj->enclosingScope();
+        obj = obj->enclosingEnvironment();
     MOZ_ASSERT(obj);
     return obj;
 }

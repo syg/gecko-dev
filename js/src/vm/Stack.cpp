@@ -107,7 +107,7 @@ InterpreterFrame::createRestParameter(JSContext* cx)
 }
 
 static inline void
-AssertDynamicScopeMatchesStaticScope(JSContext* cx, JSScript* script, JSObject* env)
+AssertScopeMatchesEnvironment(JSContext* cx, JSScript* script, JSObject* env)
 {
     RootedObject originalEnv(cx, env);
     for (ScopeIter si(script->enclosingScope()); si; si++) {
@@ -225,7 +225,7 @@ InterpreterFrame::prologue(JSContext* cx)
         return probes::EnterScript(cx, script, nullptr, this);
     }
 
-    AssertDynamicScopeMatchesStaticScope(cx, script, environmentChain());
+    AssertScopeMatchesEnvironment(cx, script, environmentChain());
 
     if (isModuleFrame())
         return probes::EnterScript(cx, script, nullptr, this);
@@ -291,7 +291,7 @@ InterpreterFrame::epilogue(JSContext* cx)
         MOZ_ASSERT_IF(hasCallObj() && !callee().isGenerator(),
                       environmentChain()->as<CallObject>().callee().nonLazyScript() == script);
     } else {
-        AssertDynamicScopeMatchesStaticScope(cx, script, environmentChain());
+        AssertScopeMatchesEnvironment(cx, script, environmentChain());
     }
 
     if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
@@ -1193,7 +1193,7 @@ FrameIter::callObj(JSContext* cx) const
 
     JSObject* pobj = environmentChain(cx);
     while (!pobj->is<CallObject>())
-        pobj = pobj->enclosingScope();
+        pobj = pobj->enclosingEnvironment();
     return pobj->as<CallObject>();
 }
 
