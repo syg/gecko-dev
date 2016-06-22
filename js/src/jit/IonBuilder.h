@@ -412,7 +412,7 @@ class IonBuilder
 
     bool invalidatedIdempotentCache();
 
-    bool hasStaticEnvironmentObject(ScopeCoordinate sc, JSObject** pcall);
+    bool hasStaticEnvironmentObject(EnvironmentCoordinate ec, JSObject** pcall);
     MOZ_MUST_USE bool loadSlot(MDefinition* obj, size_t slot, size_t nfixed, MIRType rvalType,
                                BarrierKind barrier, TemporaryTypeSet* types);
     MOZ_MUST_USE bool loadSlot(MDefinition* obj, Shape* shape, MIRType rvalType,
@@ -676,7 +676,7 @@ class IonBuilder
     MOZ_MUST_USE bool improveThisTypesForCall();
 
     MDefinition* getCallee();
-    MDefinition* getAliasedVar(ScopeCoordinate sc);
+    MDefinition* getAliasedVar(EnvironmentCoordinate ec);
     MDefinition* addLexicalCheck(MDefinition* input);
 
     MDefinition* convertToBoolean(MDefinition* input);
@@ -701,7 +701,7 @@ class IonBuilder
     MOZ_MUST_USE bool jsop_notearg();
     MOZ_MUST_USE bool jsop_throwsetconst();
     MOZ_MUST_USE bool jsop_checklexical();
-    MOZ_MUST_USE bool jsop_checkaliasedlexical(ScopeCoordinate sc);
+    MOZ_MUST_USE bool jsop_checkaliasedlexical(EnvironmentCoordinate ec);
     MOZ_MUST_USE bool jsop_funcall(uint32_t argc);
     MOZ_MUST_USE bool jsop_funapply(uint32_t argc);
     MOZ_MUST_USE bool jsop_funapplyarguments(uint32_t argc);
@@ -776,8 +776,8 @@ class IonBuilder
     MOZ_MUST_USE bool jsop_iterend();
     MOZ_MUST_USE bool jsop_in();
     MOZ_MUST_USE bool jsop_instanceof();
-    MOZ_MUST_USE bool jsop_getaliasedvar(ScopeCoordinate sc);
-    MOZ_MUST_USE bool jsop_setaliasedvar(ScopeCoordinate sc);
+    MOZ_MUST_USE bool jsop_getaliasedvar(EnvironmentCoordinate ec);
+    MOZ_MUST_USE bool jsop_setaliasedvar(EnvironmentCoordinate ec);
     MOZ_MUST_USE bool jsop_debugger();
     MOZ_MUST_USE bool jsop_newtarget();
     MOZ_MUST_USE bool jsop_checkobjcoercible();
@@ -1170,7 +1170,7 @@ class IonBuilder
     uint32_t* bytecodeTypeMap;
 
     GSNCache gsn;
-    ScopeCoordinateNameCache scopeCoordinateNameCache;
+    EnvironmentCoordinateNameCache envCoordinateNameCache;
 
     jsbytecode* pc;
     MBasicBlock* current;

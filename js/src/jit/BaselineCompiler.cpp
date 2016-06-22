@@ -2415,35 +2415,35 @@ BaselineCompiler::emit_JSOP_STRICTDELPROP()
 }
 
 void
-BaselineCompiler::getScopeCoordinateObject(Register reg)
+BaselineCompiler::getEnvironmentCoordinateObject(Register reg)
 {
-    ScopeCoordinate sc(pc);
+    EnvironmentCoordinate ec(pc);
 
     masm.loadPtr(frame.addressOfEnvironmentChain(), reg);
-    for (unsigned i = sc.hops(); i; i--)
+    for (unsigned i = ec.hops(); i; i--)
         masm.extractObject(Address(reg, EnvironmentObject::offsetOfEnclosingEnvironment()), reg);
 }
 
 Address
-BaselineCompiler::getScopeCoordinateAddressFromObject(Register objReg, Register reg)
+BaselineCompiler::getEnvironmentCoordinateAddressFromObject(Register objReg, Register reg)
 {
-    ScopeCoordinate sc(pc);
-    Shape* shape = ScopeCoordinateToEnvironmentShape(script, pc);
+    EnvironmentCoordinate ec(pc);
+    Shape* shape = EnvironmentCoordinateToEnvironmentShape(script, pc);
 
     Address addr;
-    if (shape->numFixedSlots() <= sc.slot()) {
+    if (shape->numFixedSlots() <= ec.slot()) {
         masm.loadPtr(Address(objReg, NativeObject::offsetOfSlots()), reg);
-        return Address(reg, (sc.slot() - shape->numFixedSlots()) * sizeof(Value));
+        return Address(reg, (ec.slot() - shape->numFixedSlots()) * sizeof(Value));
     }
 
-    return Address(objReg, NativeObject::getFixedSlotOffset(sc.slot()));
+    return Address(objReg, NativeObject::getFixedSlotOffset(ec.slot()));
 }
 
 Address
-BaselineCompiler::getScopeCoordinateAddress(Register reg)
+BaselineCompiler::getEnvironmentCoordinateAddress(Register reg)
 {
-    getScopeCoordinateObject(reg);
-    return getScopeCoordinateAddressFromObject(reg, reg);
+    getEnvironmentCoordinateObject(reg);
+    return getEnvironmentCoordinateAddressFromObject(reg, reg);
 }
 
 bool
@@ -2451,7 +2451,7 @@ BaselineCompiler::emit_JSOP_GETALIASEDVAR()
 {
     frame.syncStack(0);
 
-    Address address = getScopeCoordinateAddress(R0.scratchReg());
+    Address address = getEnvironmentCoordinateAddress(R0.scratchReg());
     masm.loadValue(address, R0);
 
     if (ionCompileable_) {
@@ -2469,7 +2469,7 @@ BaselineCompiler::emit_JSOP_GETALIASEDVAR()
 bool
 BaselineCompiler::emit_JSOP_SETALIASEDVAR()
 {
-    JSScript* outerScript = ScopeCoordinateFunctionScript(script, pc);
+    JSScript* outerScript = EnvironmentCoordinateFunctionScript(script, pc);
     if (outerScript && outerScript->treatAsRunOnce()) {
         // Type updates for this operation might need to be tracked, so treat
         // this as a SETPROP.
@@ -2479,7 +2479,7 @@ BaselineCompiler::emit_JSOP_SETALIASEDVAR()
         frame.popValue(R1);
 
         // Load and box lhs into R0.
-        getScopeCoordinateObject(R2.scratchReg());
+        getEnvironmentCoordinateObject(R2.scratchReg());
         masm.tagValue(JSVAL_TYPE_OBJECT, R2.scratchReg(), R0);
 
         // Call SETPROP IC.
@@ -2496,8 +2496,8 @@ BaselineCompiler::emit_JSOP_SETALIASEDVAR()
     frame.popRegsAndSync(1);
     Register objReg = R2.scratchReg();
 
-    getScopeCoordinateObject(objReg);
-    Address address = getScopeCoordinateAddressFromObject(objReg, R1.scratchReg());
+    getEnvironmentCoordinateObject(objReg);
+    Address address = getEnvironmentCoordinateAddressFromObject(objReg, R1.scratchReg());
     masm.patchableCallPreBarrier(address, MIRType::Value);
     masm.storeValue(R0, address);
     frame.push(R0);
@@ -3079,7 +3079,7 @@ bool
 BaselineCompiler::emit_JSOP_CHECKALIASEDLEXICAL()
 {
     frame.syncStack(0);
-    masm.loadValue(getScopeCoordinateAddress(R0.scratchReg()), R0);
+    masm.loadValue(getEnvironmentCoordinateAddress(R0.scratchReg()), R0);
     return emitUninitializedLexicalCheck(R0);
 }
 

@@ -3198,7 +3198,7 @@ CASE(JSOP_GETALIASEDVAR)
 #ifdef DEBUG
     // Only the .this slot can hold the TDZ MagicValue.
     if (IsUninitializedLexical(val)) {
-        PropertyName* name = EnvironmentCoordinateName(cx->runtime()->scopeCoordinateNameCache,
+        PropertyName* name = EnvironmentCoordinateName(cx->runtime()->envCoordinateNameCache,
                                                        script, REGS.pc);
         MOZ_ASSERT(name == cx->names().dotThis);
         JSOp next = JSOp(*GetNextPc(REGS.pc));
@@ -3246,7 +3246,7 @@ END_CASE(JSOP_INITLEXICAL)
 CASE(JSOP_CHECKALIASEDLEXICAL)
 {
     EnvironmentCoordinate ec = EnvironmentCoordinate(REGS.pc);
-    ReservedRooted<Value> val(&rootValue0, REGS.fp()->aliasedEnvironment(sc).aliasedBinding(sc));
+    ReservedRooted<Value> val(&rootValue0, REGS.fp()->aliasedEnvironment(ec).aliasedBinding(ec));
     if (!CheckUninitializedLexical(cx, script, REGS.pc, val))
         goto error;
 }
@@ -3255,8 +3255,8 @@ END_CASE(JSOP_CHECKALIASEDLEXICAL)
 CASE(JSOP_INITALIASEDLEXICAL)
 {
     EnvironmentCoordinate ec = EnvironmentCoordinate(REGS.pc);
-    EnvironmentObject& obj = REGS.fp()->aliasedEnvironment(sc);
-    SetAliasedVarOperation(cx, script, REGS.pc, obj, sc, REGS.sp[-1], DontCheckTDZ);
+    EnvironmentObject& obj = REGS.fp()->aliasedEnvironment(ec);
+    SetAliasedVarOperation(cx, script, REGS.pc, obj, ec, REGS.sp[-1], DontCheckTDZ);
 }
 END_CASE(JSOP_INITALIASEDLEXICAL)
 
@@ -4910,7 +4910,7 @@ js::ReportRuntimeLexicalError(JSContext* cx, unsigned errorNumber,
         name = script->getName(pc);
     } else {
         MOZ_ASSERT(IsAliasedVarOp(op));
-        name = EnvironmentCoordinateName(cx->runtime()->scopeCoordinateNameCache, script, pc);
+        name = EnvironmentCoordinateName(cx->runtime()->envCoordinateNameCache, script, pc);
     }
 
     ReportRuntimeLexicalError(cx, errorNumber, name);

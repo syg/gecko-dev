@@ -179,10 +179,10 @@ InterpreterFrame::initArgsObj(ArgumentsObject& argsobj)
 }
 
 inline EnvironmentObject&
-InterpreterFrame::aliasedEnvironment(ScopeCoordinate sc) const
+InterpreterFrame::aliasedEnvironment(EnvironmentCoordinate ec) const
 {
     JSObject* env = &environmentChain()->as<EnvironmentObject>();
-    for (unsigned i = sc.hops(); i; i--)
+    for (unsigned i = ec.hops(); i; i--)
         env = &env->as<EnvironmentObject>().enclosingEnvironment();
     return env->as<EnvironmentObject>();
 }

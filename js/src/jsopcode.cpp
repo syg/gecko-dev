@@ -891,19 +891,14 @@ js::Disassemble1(JSContext* cx, HandleScript script, jsbytecode* pc,
       }
 
       case JOF_ENVCOORD: {
-          /*
         RootedValue v(cx,
-            StringValue(ScopeCoordinateName(cx->runtime()->scopeCoordinateNameCache, script, pc)));
+            StringValue(EnvironmentCoordinateName(cx->runtime()->envCoordinateNameCache,
+                                                  script, pc)));
         JSAutoByteString bytes;
         if (!ToDisassemblySource(cx, v, &bytes))
             return 0;
-          */
-        ScopeCoordinate sc(pc);
-        /* TODOshu
-        if (Sprint(sp, " %s (hops = %u, slot = %u)", bytes.ptr(), sc.hops(), sc.slot()) == -1)
-            return 0;
-        */
-        if (Sprint(sp, " (hops = %u, slot = %u)", sc.hops(), sc.slot()) == -1)
+        EnvironmentCoordinate ec(pc);
+        if (Sprint(sp, " %s (hops = %u, slot = %u)", bytes.ptr(), ec.hops(), ec.slot()) == -1)
             return 0;
         break;
       }
@@ -1150,7 +1145,7 @@ ExpressionDecompiler::decompilePC(jsbytecode* pc)
         return write("(intermediate value)");
       }
       case JSOP_GETALIASEDVAR: {
-        JSAtom* atom = ScopeCoordinateName(cx->runtime()->scopeCoordinateNameCache, script, pc);
+        JSAtom* atom = EnvironmentCoordinateName(cx->runtime()->envCoordinateNameCache, script, pc);
         MOZ_ASSERT(atom);
         return write(atom);
       }

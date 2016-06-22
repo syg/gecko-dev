@@ -3875,7 +3875,7 @@ GCRuntime::purgeRuntime(AutoLockForExclusiveAccess& lock)
 
     rt->interpreterStack().purge(rt);
     rt->gsnCache.purge();
-    rt->scopeCoordinateNameCache.purge();
+    rt->envCoordinateNameCache.purge();
     rt->newObjectCache.purge();
     rt->nativeIterCache.purge();
     rt->uncompressedSourceCache.purge();

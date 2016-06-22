@@ -337,9 +337,9 @@ class BaselineCompiler : public BaselineCompilerSpecific
 
     MOZ_MUST_USE bool addYieldOffset();
 
-    void getScopeCoordinateObject(Register reg);
-    Address getScopeCoordinateAddressFromObject(Register objReg, Register reg);
-    Address getScopeCoordinateAddress(Register reg);
+    void getEnvironmentCoordinateObject(Register reg);
+    Address getEnvironmentCoordinateAddressFromObject(Register objReg, Register reg);
+    Address getEnvironmentCoordinateAddress(Register reg);
 };
 
 extern const VMFunction NewArrayCopyOnWriteInfo;

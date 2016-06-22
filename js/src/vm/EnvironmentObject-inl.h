@@ -43,10 +43,10 @@ EnvironmentObject::setAliasedBinding(JSContext* cx, uint32_t slot, PropertyName*
 }
 
 inline void
-EnvironmentObject::setAliasedBinding(JSContext* cx, ScopeCoordinate sc, PropertyName* name,
+EnvironmentObject::setAliasedBinding(JSContext* cx, EnvironmentCoordinate ec, PropertyName* name,
                                      const Value& v)
 {
-    setAliasedBinding(cx, sc.slot(), name, v);
+    setAliasedBinding(cx, ec.slot(), name, v);
 }
 
 inline void

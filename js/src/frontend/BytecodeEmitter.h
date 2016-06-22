@@ -513,7 +513,7 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     MOZ_MUST_USE bool emitLocalOp(JSOp op, uint32_t slot);
 
     MOZ_MUST_USE bool emitArgOp(JSOp op, uint16_t slot);
-    MOZ_MUST_USE bool emitScopeCoordOp(JSOp op, ScopeCoordinate sc);
+    MOZ_MUST_USE bool emitEnvCoordOp(JSOp op, EnvironmentCoordinate ec);
 
     MOZ_MUST_USE bool emitGetName(JSAtom* name, bool callContext = false);
     MOZ_MUST_USE bool emitGetName(ParseNode* pn, bool callContext = false) {

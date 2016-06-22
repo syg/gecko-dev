@@ -68,7 +68,7 @@ class BytecodeEmitter::TDZCheckCache : public Nestable<BytecodeEmitter::TDZCheck
     ExclusiveContext* cx_;
     CheckTDZMap* cache_;
 
-    bool ensureCache() {
+    MOZ_MUST_USE bool ensureCache() {
         if (!cache_) {
             cache_ = cx_->frontendTablePools().acquireMap<CheckTDZMap>(cx_);
             if (!cache_)
@@ -95,7 +95,7 @@ class BytecodeEmitter::TDZCheckCache : public Nestable<BytecodeEmitter::TDZCheck
     }
 
     Maybe<MaybeCheckTDZ> needsTDZCheck(JSAtom* name);
-    bool noteEmittedTDZCheck(JSAtom* name);
+    MOZ_MUST_USE bool noteEmittedTDZCheck(JSAtom* name);
 };
 
 class BytecodeEmitter::NestableControl : public Nestable<BytecodeEmitter::NestableControl>
@@ -358,7 +358,7 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
     // block scope note list. Otherwise ScopeNote::NoScopeNote.
     uint32_t noteIndex_;
 
-    bool ensureCache(BytecodeEmitter* bce) {
+    MOZ_MUST_USE bool ensureCache(BytecodeEmitter* bce) {
         MOZ_ASSERT(!nameCache_);
         nameCache_ = bce->cx->frontendTablePools().acquireMap<NameLocationMap>(bce->cx);
         return !!nameCache_;
@@ -555,7 +555,7 @@ BytecodeEmitter::EmitterScope::dump(BytecodeEmitter* bce)
             break;
           case NameLocation::Kind::EnvironmentCoordinate:
             fprintf(stdout, "environment hops=%u slot=%u\n",
-                    l.scopeCoordinate().hops(), l.scopeCoordinate().slot());
+                    l.environmentCoordinate().hops(), l.environmentCoordinate().slot());
             break;
         }
     }
@@ -1906,7 +1906,7 @@ BytecodeEmitter::emitArgOp(JSOp op, uint16_t slot)
 }
 
 bool
-BytecodeEmitter::emitScopeCoordOp(JSOp op, ScopeCoordinate sc)
+BytecodeEmitter::emitEnvCoordOp(JSOp op, EnvironmentCoordinate ec)
 {
     MOZ_ASSERT(JOF_OPTYPE(op) == JOF_ENVCOORD);
 
@@ -1918,9 +1918,9 @@ BytecodeEmitter::emitScopeCoordOp(JSOp op, ScopeCoordinate sc)
         return false;
 
     jsbytecode* pc = code(off);
-    SET_ENVCOORD_HOPS(pc, sc.hops());
+    SET_ENVCOORD_HOPS(pc, ec.hops());
     pc += ENVCOORD_HOPS_LEN;
-    SET_ENVCOORD_SLOT(pc, sc.slot());
+    SET_ENVCOORD_SLOT(pc, ec.slot());
     pc += ENVCOORD_SLOT_LEN;
     checkTypeSet(op);
     return true;
@@ -2611,7 +2611,7 @@ EmitGetNameAtLocation(BytecodeEmitter* bce, JSAtom* name, const NameLocation& lo
       case NameLocation::Kind::EnvironmentCoordinate:
         if (loc.isLexical() && !bce->emitTDZCheckIfNeeded(name, loc))
             return false;
-        if (!bce->emitScopeCoordOp(JSOP_GETALIASEDVAR, loc.scopeCoordinate()))
+        if (!bce->emitEnvCoordOp(JSOP_GETALIASEDVAR, loc.environmentCoordinate()))
             return false;
         break;
     }
@@ -2754,7 +2754,7 @@ BytecodeEmitter::emitSetOrInitializeName(JSAtom* name, RHSEmitter emitRhs, bool 
         JSOp op = JSOP_SETALIASEDVAR;
         if (loc.isLexical()) {
             if (initialize) {
-                MOZ_ASSERT(loc.scopeCoordinate().hops() == 0);
+                MOZ_ASSERT(loc.environmentCoordinate().hops() == 0);
                 op = JSOP_INITALIASEDLEXICAL;
             } else {
                 if (loc.isConst())
@@ -2766,7 +2766,7 @@ BytecodeEmitter::emitSetOrInitializeName(JSAtom* name, RHSEmitter emitRhs, bool 
         }
         if (!emitRhs(this, loc, emittedBindOp))
             return false;
-        if (!emitScopeCoordOp(op, loc.scopeCoordinate()))
+        if (!emitEnvCoordOp(op, loc.environmentCoordinate()))
             return false;
         if (op == JSOP_INITALIASEDLEXICAL && !innermostTDZCheckCache->noteEmittedTDZCheck(name))
             return false;
@@ -2796,7 +2796,7 @@ BytecodeEmitter::emitTDZCheckIfNeeded(JSAtom* name, const NameLocation& loc)
         if (!emitLocalOp(JSOP_CHECKLEXICAL, loc.frameSlot()))
             return false;
     } else {
-        if (!emitScopeCoordOp(JSOP_CHECKALIASEDLEXICAL, loc.scopeCoordinate()))
+        if (!emitEnvCoordOp(JSOP_CHECKALIASEDLEXICAL, loc.environmentCoordinate()))
             return false;
     }
 

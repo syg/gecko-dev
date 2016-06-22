@@ -3105,7 +3105,7 @@ RemoveReferencedNames(JSContext* cx, HandleScript script, PropertyNameSet& remai
 
           case JSOP_GETALIASEDVAR:
           case JSOP_SETALIASEDVAR:
-            name = EnvironmentCoordinateName(cx->runtime()->scopeCoordinateNameCache, script, pc);
+            name = EnvironmentCoordinateName(cx->runtime()->envCoordinateNameCache, script, pc);
             break;
 
           default:
