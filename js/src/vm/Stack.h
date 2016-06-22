@@ -541,7 +541,7 @@ class InterpreterFrame
 
     inline HandleObject environmentChain() const;
 
-    inline EnvironmentObject& aliasedEnvironment(EnvironmentCoordinate sc) const;
+    inline EnvironmentObject& aliasedEnvironment(EnvironmentCoordinate ec) const;
     inline GlobalObject& global() const;
     inline CallObject& callObj() const;
     inline JSObject& varObj() const;

@@ -514,9 +514,7 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     MOZ_MUST_USE bool emitEnvCoordOp(JSOp op, EnvironmentCoordinate ec);
 
     MOZ_MUST_USE bool emitGetName(JSAtom* name, bool callContext = false);
-    MOZ_MUST_USE bool emitGetName(ParseNode* pn, bool callContext = false) {
-        return emitGetName(pn->name(), callContext);
-    }
+    MOZ_MUST_USE bool emitGetName(ParseNode* pn, bool callContext = false);
 
     template <typename RHSEmitter>
     MOZ_MUST_USE bool emitSetOrInitializeName(JSAtom* name, RHSEmitter emitRhs, bool initialize);

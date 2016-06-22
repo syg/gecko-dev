@@ -19,9 +19,9 @@
 #include "gc/Allocator.h"
 #include "vm/ArrayObject.h"
 #include "vm/DateObject.h"
+#include "vm/EnvironmentObject.h"
 #include "vm/NumberObject.h"
 #include "vm/Probes.h"
-#include "vm/EnvironmentObject.h"
 #include "vm/StringObject.h"
 #include "vm/TypedArrayCommon.h"
 

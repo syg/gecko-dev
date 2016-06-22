@@ -38,8 +38,8 @@
 #include "gc/GCInternals.h"
 #include "js/CharacterEncoding.h"
 #include "vm/CodeCoverage.h"
-#include "vm/Opcodes.h"
 #include "vm/EnvironmentObject.h"
+#include "vm/Opcodes.h"
 #include "vm/Shape.h"
 #include "vm/StringBuffer.h"
 

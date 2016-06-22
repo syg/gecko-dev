@@ -52,9 +52,9 @@
 
 #include "jit/JitFrames-inl.h"
 #include "vm/Debugger-inl.h"
+#include "vm/EnvironmentObject-inl.h"
 #include "vm/NativeObject-inl.h"
 #include "vm/Probes-inl.h"
-#include "vm/EnvironmentObject-inl.h"
 #include "vm/Stack-inl.h"
 
 using namespace js;

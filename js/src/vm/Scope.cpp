@@ -8,8 +8,8 @@
 
 #include "jsscript.h"
 #include "gc/Allocator.h"
-#include "vm/Runtime.h"
 #include "vm/EnvironmentObject.h"
+#include "vm/Runtime.h"
 
 using namespace js;
 

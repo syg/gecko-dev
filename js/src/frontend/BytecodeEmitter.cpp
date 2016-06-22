@@ -40,8 +40,8 @@
 #include "jsscriptinlines.h"
 
 #include "frontend/ParseNode-inl.h"
-#include "vm/NativeObject-inl.h"
 #include "vm/EnvironmentObject-inl.h"
+#include "vm/NativeObject-inl.h"
 
 using namespace js;
 using namespace js::gc;
@@ -2646,6 +2646,11 @@ bool
 BytecodeEmitter::emitGetName(JSAtom* name, bool callContext)
 {
     return EmitGetNameAtLocation(this, name, lookupName(name), callContext);
+}
+
+BytecodeEmitter::emitGetName(ParseNode* pn, bool callContext)
+{
+    return emitGetName(pn->name(), callContext);
 }
 
 template <typename RHSEmitter>

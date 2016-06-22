@@ -7,11 +7,11 @@
 #ifndef vm_Scope_h
 #define vm_Scope_h
 
-#include "jsobj.h"
-#include "jsopcode.h"
-
 #include "mozilla/Maybe.h"
 #include "mozilla/Variant.h"
+
+#include "jsobj.h"
+#include "jsopcode.h"
 
 #include "gc/Heap.h"
 #include "gc/Policy.h"
@@ -140,45 +140,6 @@ class BindingLocation
     uint16_t argumentSlot() const {
         MOZ_ASSERT(kind_ == Kind::Argument);
         return mozilla::AssertedCast<uint16_t>(slot_);
-    }
-};
-
-/*
- * A "scope coordinate" describes how to get from head of the scope chain to a
- * given lexically-enclosing variable. A scope coordinate has two dimensions:
- *  - hops: the number of scope objects on the scope chain to skip
- *  - slot: the slot on the scope object holding the variable's value
- */
-class EnvironmentCoordinate
-{
-    uint32_t hops_;
-    uint32_t slot_;
-
-    /*
-     * Technically, hops_/slot_ are ENVCOORD_(HOPS|SLOT)_BITS wide.  Since
-     * EnvironmentCoordinate is a temporary value, don't bother with a bitfield as
-     * this only adds overhead.
-     */
-    static_assert(ENVCOORD_HOPS_BITS <= 32, "We have enough bits below");
-    static_assert(ENVCOORD_SLOT_BITS <= 32, "We have enough bits below");
-
-  public:
-    explicit inline EnvironmentCoordinate(jsbytecode* pc)
-      : hops_(GET_ENVCOORD_HOPS(pc)), slot_(GET_ENVCOORD_SLOT(pc + ENVCOORD_HOPS_LEN))
-    {
-        MOZ_ASSERT(JOF_OPTYPE(JSOp(*pc)) == JOF_ENVCOORD);
-    }
-
-    inline EnvironmentCoordinate() {}
-
-    void setHops(uint32_t hops) { MOZ_ASSERT(hops < ENVCOORD_HOPS_LIMIT); hops_ = hops; }
-    void setSlot(uint32_t slot) { MOZ_ASSERT(slot < ENVCOORD_SLOT_LIMIT); slot_ = slot; }
-
-    uint32_t hops() const { MOZ_ASSERT(hops_ < ENVCOORD_HOPS_LIMIT); return hops_; }
-    uint32_t slot() const { MOZ_ASSERT(slot_ < ENVCOORD_SLOT_LIMIT); return slot_; }
-
-    bool operator==(const EnvironmentCoordinate& rhs) const {
-        return hops() == rhs.hops() && slot() == rhs.slot();
     }
 };
 

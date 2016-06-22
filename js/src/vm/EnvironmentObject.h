@@ -12,10 +12,12 @@
 #include "jsweakmap.h"
 
 #include "builtin/ModuleObject.h"
+#include "frontend/NameAnalysisTypes.h"
 #include "gc/Barrier.h"
 #include "js/GCHashTable.h"
 #include "vm/ArgumentsObject.h"
 #include "vm/ProxyObject.h"
+#include "vm/Scope.h"
 
 namespace js {
 
@@ -208,7 +210,7 @@ class EnvironmentObject : public NativeObject
     static const uint32_t ENCLOSING_ENV_SLOT = 0;
 
     inline void setAliasedBinding(JSContext* cx, uint32_t slot, PropertyName* name,
-                               const Value& v);
+                                  const Value& v);
 
   public:
     // Since every env chain terminates with a global object, whether
@@ -224,8 +226,8 @@ class EnvironmentObject : public NativeObject
     }
 
     // Get or set a name contained in this environment.
-    const Value& aliasedBinding(EnvironmentCoordinate sc) {
-        return getSlot(sc.slot());
+    const Value& aliasedBinding(EnvironmentCoordinate ec) {
+        return getSlot(ec.slot());
     }
 
     const Value& aliasedBinding(const BindingIter& bi) {
@@ -233,7 +235,7 @@ class EnvironmentObject : public NativeObject
         return getSlot(bi.location().slot());
     }
 
-    inline void setAliasedBinding(JSContext* cx, EnvironmentCoordinate sc, PropertyName* name,
+    inline void setAliasedBinding(JSContext* cx, EnvironmentCoordinate ec, PropertyName* name,
                                   const Value& v);
 
     inline void setAliasedBinding(JSContext* cx, const BindingIter& bi, const Value& v);

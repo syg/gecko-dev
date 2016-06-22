@@ -30,8 +30,8 @@
 #include "jsobjinlines.h"
 #include "jsscriptinlines.h"
 
-#include "vm/NativeObject-inl.h"
 #include "vm/EnvironmentObject-inl.h"
+#include "vm/NativeObject-inl.h"
 
 using namespace js;
 

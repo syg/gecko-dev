@@ -19,8 +19,6 @@
 #include "frontend/SharedContext.h"
 #include "frontend/SyntaxParseHandler.h"
 
-#include "frontend/ParseNode-inl.h"
-
 namespace js {
 
 class ModuleObject;

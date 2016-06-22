@@ -23,8 +23,6 @@
 
 #include "vm/EnvironmentObject-inl.h"
 
-#include <time.h>
-
 using namespace js;
 using namespace js::frontend;
 using mozilla::Maybe;
@@ -33,7 +31,7 @@ class MOZ_STACK_CLASS AutoCompilationTraceLogger
 {
   public:
     AutoCompilationTraceLogger(ExclusiveContext* cx, const TraceLoggerTextId id,
-            const ReadOnlyCompileOptions& options);
+                               const ReadOnlyCompileOptions& options);
 
   private:
     TraceLoggerThread* logger;

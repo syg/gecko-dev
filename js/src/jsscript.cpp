@@ -54,8 +54,8 @@
 #include "jsfuninlines.h"
 #include "jsobjinlines.h"
 
-#include "vm/NativeObject-inl.h"
 #include "vm/EnvironmentObject-inl.h"
+#include "vm/NativeObject-inl.h"
 #include "vm/SharedImmutableStringsCache-inl.h"
 #include "vm/Stack-inl.h"
 

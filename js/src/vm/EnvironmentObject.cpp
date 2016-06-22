@@ -70,7 +70,8 @@ EnvironmentCoordinateNameCache::purge()
 }
 
 PropertyName*
-js::EnvironmentCoordinateName(EnvironmentCoordinateNameCache& cache, JSScript* script, jsbytecode* pc)
+js::EnvironmentCoordinateName(EnvironmentCoordinateNameCache& cache, JSScript* script,
+                              jsbytecode* pc)
 {
     Shape* shape = EnvironmentCoordinateToEnvironmentShape(script, pc);
     if (shape != cache.shape && shape->slot() >= SCOPE_COORDINATE_NAME_THRESHOLD) {
@@ -89,13 +90,13 @@ js::EnvironmentCoordinateName(EnvironmentCoordinateNameCache& cache, JSScript* s
     }
 
     jsid id;
-    EnvironmentCoordinate sc(pc);
+    EnvironmentCoordinate ec(pc);
     if (shape == cache.shape) {
-        EnvironmentCoordinateNameCache::Map::Ptr p = cache.map.lookup(sc.slot());
+        EnvironmentCoordinateNameCache::Map::Ptr p = cache.map.lookup(ec.slot());
         id = p->value();
     } else {
         Shape::Range<NoGC> r(shape);
-        while (r.front().slot() != sc.slot())
+        while (r.front().slot() != ec.slot())
             r.popFront();
         id = r.front().propidRaw();
     }

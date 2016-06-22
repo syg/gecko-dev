@@ -36,11 +36,11 @@
 #include "builtin/WeakMapObject.h"
 #include "builtin/WeakSetObject.h"
 #include "vm/Debugger.h"
+#include "vm/EnvironmentObject.h"
 #include "vm/HelperThreads.h"
 #include "vm/PIC.h"
 #include "vm/RegExpStatics.h"
 #include "vm/RegExpStaticsObject.h"
-#include "vm/EnvironmentObject.h"
 #include "vm/StopIterationObject.h"
 
 #include "jscompartmentinlines.h"

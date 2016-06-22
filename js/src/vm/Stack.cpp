@@ -20,9 +20,9 @@
 #include "vm/Opcodes.h"
 
 #include "jit/JitFrameIterator-inl.h"
+#include "vm/EnvironmentObject-inl.h"
 #include "vm/Interpreter-inl.h"
 #include "vm/Probes-inl.h"
-#include "vm/EnvironmentObject-inl.h"
 
 using namespace js;
 
