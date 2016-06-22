@@ -24,118 +24,6 @@ namespace js {
 class ModuleObject;
 typedef Handle<ModuleObject*> HandleModuleObject;
 
-
-/*
- * Non-syntactic scopes
- *
- * A non-syntactic scope is one that was not created due to source code. On
- * the static scope chain, a single StaticNonSyntacticScope maps to 0+
- * non-syntactic dynamic scope objects. This is contrasted with syntactic
- * scopes, where each syntactic static scope corresponds to 0 or 1 dynamic
- * scope objects.
- *
- * There are 3 kinds of dynamic non-syntactic scopes:
- *
- * 1. DynamicWithObject
- *
- *    When the embedding compiles or executes a script, it has the option to
- *    pass in a vector of objects to be used as the initial scope chain. Each
- *    of those objects is wrapped by a DynamicWithObject.
- *
- *    The innermost scope passed in by the embedding becomes a qualified
- *    variables object that captures 'var' bindings. That is, it wraps the
- *    holder object of 'var' bindings.
- *
- *    Does not hold 'let' or 'const' bindings.
- *
- * 2. NonSyntacticVariablesObject
- *
- *    When the embedding wants qualified 'var' bindings and unqualified
- *    bareword assignments to go on a different object than the global
- *    object. While any object can be made into a qualified variables object,
- *    only the GlobalObject and NonSyntacticVariablesObject are considered
- *    unqualified variables objects.
- *
- *    Unlike DynamicWithObjects, this object is itself the holder of 'var'
- *    bindings.
- *
- *    Does not hold 'let' or 'const' bindings.
- *
- * 3. ClonedBlockObject
- *
- *    Each non-syntactic object used as a qualified variables object needs to
- *    enclose a non-syntactic ClonedBlockObject to hold 'let' and 'const'
- *    bindings. There is a bijection per compartment between the non-syntactic
- *    variables objects and their non-syntactic ClonedBlockObjects.
- *
- *    Does not hold 'var' bindings.
- *
- * The embedding (Gecko) uses non-syntactic scopes for various things, some of
- * which are detailed below. All scope chain listings below are, from top to
- * bottom, outermost to innermost.
- *
- * A. Component loading
- *
- * Components may be loaded in "reuse loader global" mode, where to save on
- * memory, all JSMs and JS-implemented XPCOM modules are loaded into a single
- * global. Each individual JSMs are compiled as functions with their own
- * FakeBackstagePass. They have the following dynamic scope chain:
- *
- *   BackstagePass global
- *       |
- *   Global lexical scope
- *       |
- *   DynamicWithObject wrapping FakeBackstagePass
- *       |
- *   ClonedBlockObject
- *
- * B. Subscript loading
- *
- * Subscripts may be loaded into a target object. They have the following
- * dynamic scope chain:
- *
- *   Loader global
- *       |
- *   Global lexical scope
- *       |
- *   DynamicWithObject wrapping target
- *       |
- *   ClonedBlockObject
- *
- * C. Frame scripts
- *
- * XUL frame scripts are always loaded with a NonSyntacticVariablesObject as a
- * "polluting global". This is done exclusively in
- * js::ExecuteInGlobalAndReturnScope.
- *
- *   Loader global
- *       |
- *   Global lexical scope
- *       |
- *   NonSyntacticVariablesObject
- *       |
- *   ClonedBlockObject
- *
- * D. XBL
- *
- * XBL methods are compiled as functions with XUL elements on the scope chain.
- * For a chain of elements e0,...,eN:
- *
- *      ...
- *       |
- *   DynamicWithObject wrapping eN
- *       |
- *      ...
- *       |
- *   DynamicWithObject wrapping e0
- *       |
- *   ClonedBlockObject
- *
- */
-
-
-/*****************************************************************************/
-
 /*
  * Return a shape representing the static scope containing the variable
  * accessed by the ALIASEDVAR op at 'pc'.
@@ -152,54 +40,148 @@ extern JSScript*
 EnvironmentCoordinateFunctionScript(JSScript* script, jsbytecode* pc);
 
 
-/*** Scope objects *******************************************************************************/
+/*** Environment objects *****************************************************/
 
 /*
- * Scope objects are technically real JSObjects but only belong on the scope
- * chain (that is, fp->scopeChain() or fun->environment()). The hierarchy of
- * scope objects is:
+ * Environment objects are technically real JSObjects but only belong on the
+ * environment chain (that is, fp->environmentChain() or
+ * fun->environment()).
  *
- *   JSObject                       Generic object
- *     |   |
- *     |  StaticScope               Created at compile time
+ * Environments may be syntactic, i.e., corresponding to source text, or
+ * non-syntactic, i.e., specially created by embedding.
+ *
+ * Syntactic Environments
+ * ----------------------
+ *
+ * The hierarchy of syntactic environment objects is:
+ *
+ *   JSObject                           Generic object
+ *     |
+ *   EnvironmentObject                  Engine-internal environment
+ *     |   |   |
+ *     |   |  VarEnvironmentObject      Shared base for function and modules envs
  *     |   |   |   |
- *     |   |   |  StaticNonSyntacticScope   See "Non-syntactic scopes"
+ *     |   |   |  CallObject            Environment of entire function or strict eval
  *     |   |   |
- *     |   |  StaticEvalScope       Placeholder so eval scopes may be iterated through
+ *     |   |  ModuleEnvironmentObject   Module top-level environment
  *     |   |
- *     |  NestedStaticScope         Enclosing scope is in the same JSScript
- *     |   |   |
- *     |   |  StaticBlockScope      See NB
- *     |   |
- *     |  StaticWithScope           Template for "with" object in static scope chain
+ *     |  WithEnvironmentObject         Run-time "with" object on env chain
  *     |
- *   ScopeObject                    Engine-internal scope
- *     |   |   |
- *     |   |  DeclEnvObject         Holds name of recursive/needsCallObject named lambda
- *     |   |
- *     |  LexicalScopeBase          Shared base for function and modules scopes
- *     |   |   |
- *     |   |  CallObject            Scope of entire function or strict eval
- *     |   |
- *     |  ModuleEnvironmentObject   Module top-level scope on run-time scope chain
- *     |
- *   NestedScopeObject              Statement scopes; don't cross script boundaries
- *     |   |
- *     |  DynamicWithObject         Run-time "with" object on scope chain
- *     |
- *   ClonedBlockObject              let, switch, catch, for
+ *   LexicalEnvironmentObject           Lexical (block) environment
  *
  * This hierarchy represents more than just the interface hierarchy: reserved
  * slots in base classes are fixed for all derived classes. Thus, for example,
- * ScopeObject::enclosingScope() can simply access a fixed slot without further
- * dynamic type information.
+ * EnvironmentObject::enclosingEnvironment() can simply access a fixed slot
+ * without further dynamic type information.
  *
- * NB: Static block objects are a special case: these objects are created at
- * compile time to hold the shape/binding information from which block objects
- * are cloned at runtime. These objects should never escape into the wild and
- * support a restricted set of ScopeObject operations.
+ * See also "Debug environment objects" below.
  *
- * See also "Debug scope objects" below.
+ * Non-syntactic Environments
+ * --------------------------
+ *
+ * A non-syntactic environment is one that was not created due to source
+ * code. On the scope chain, a single NonSyntactic GlobalScope maps to 0+
+ * non-syntactic environment objects. This is contrasted with syntactic
+ * environments, where each scope corresponds to 0 or 1 environment object.
+ *
+ * There are 3 kinds of dynamic environment objects:
+ *
+ * 1. WithEnvironmentObject
+ *
+ *    When the embedding compiles or executes a script, it has the option to
+ *    pass in a vector of objects to be used as the initial env chain. Each
+ *    of those objects is wrapped by a WithEnvironmentObject.
+ *
+ *    The innermost object passed in by the embedding becomes a qualified
+ *    variables object that captures 'var' bindings. That is, it wraps the
+ *    holder object of 'var' bindings.
+ *
+ *    Does not hold 'let' or 'const' bindings.
+ *
+ * 2. NonSyntacticVariablesObject
+ *
+ *    When the embedding wants qualified 'var' bindings and unqualified
+ *    bareword assignments to go on a different object than the global
+ *    object. While any object can be made into a qualified variables object,
+ *    only the GlobalObject and NonSyntacticVariablesObject are considered
+ *    unqualified variables objects.
+ *
+ *    Unlike WithEnvironmentObjects, this object is itself the holder of 'var'
+ *    bindings.
+ *
+ *    Does not hold 'let' or 'const' bindings.
+ *
+ * 3. LexicalEnvironmentObject
+ *
+ *    Each non-syntactic object used as a qualified variables object needs to
+ *    enclose a non-syntactic LexicalEnvironmentObject to hold 'let' and
+ *    'const' bindings. There is a bijection per compartment between the
+ *    non-syntactic variables objects and their non-syntactic
+ *    LexicalEnvironmentObjects.
+ *
+ *    Does not hold 'var' bindings.
+ *
+ * The embedding (Gecko) uses non-syntactic envs for various things, some of
+ * which are detailed below. All env chain listings below are, from top to
+ * bottom, outermost to innermost.
+ *
+ * A. Component loading
+ *
+ * Components may be loaded in "reuse loader global" mode, where to save on
+ * memory, all JSMs and JS-implemented XPCOM modules are loaded into a single
+ * global. Each individual JSMs are compiled as functions with their own
+ * FakeBackstagePass. They have the following env chain:
+ *
+ *   BackstagePass global
+ *       |
+ *   Global lexical scope
+ *       |
+ *   WithEnvironmentObject wrapping FakeBackstagePass
+ *       |
+ *   LexicalEnvironmentObject
+ *
+ * B. Subscript loading
+ *
+ * Subscripts may be loaded into a target object. They have the following
+ * env chain:
+ *
+ *   Loader global
+ *       |
+ *   Global lexical scope
+ *       |
+ *   WithEnvironmentObject wrapping target
+ *       |
+ *   LexicalEnvironmentObject
+ *
+ * C. Frame scripts
+ *
+ * XUL frame scripts are always loaded with a NonSyntacticVariablesObject as a
+ * "polluting global". This is done exclusively in
+ * js::ExecuteInGlobalAndReturnScope.
+ *
+ *   Loader global
+ *       |
+ *   Global lexical scope
+ *       |
+ *   NonSyntacticVariablesObject
+ *       |
+ *   LexicalEnvironmentObject
+ *
+ * D. XBL
+ *
+ * XBL methods are compiled as functions with XUL elements on the env chain.
+ * For a chain of elements e0,...,eN:
+ *
+ *      ...
+ *       |
+ *   WithEnvironmentObject wrapping eN
+ *       |
+ *      ...
+ *       |
+ *   WithEnvironmentObject wrapping e0
+ *       |
+ *   LexicalEnvironmentObject
+ *
  */
 
 class EnvironmentObject : public NativeObject
@@ -411,12 +393,12 @@ class LexicalEnvironmentObject : public EnvironmentObject
     static LexicalEnvironmentObject* createHollowForDebug(JSContext* cx,
                                                           Handle<LexicalScope*> scope);
 
-    // Create a new ClonedBlockObject with the same enclosing scope and
+    // Create a new LexicalEnvironmentObject with the same enclosing env and
     // variable values as this.
     static LexicalEnvironmentObject* clone(JSContext* cx, Handle<LexicalEnvironmentObject*> env);
 
-    // Create a new ClonedBlockObject with the same enclosing scope as this,
-    // with all variables uninitialized.
+    // Create a new LexicalEnvironmentObject with the same enclosing env as
+    // this, with all variables uninitialized.
     static LexicalEnvironmentObject* recreate(JSContext* cx, Handle<LexicalEnvironmentObject*> env);
 
     // Copy in all the unaliased formals and locals.
@@ -738,23 +720,23 @@ class LiveEnvironmentVal
 /*****************************************************************************/
 
 /*
- * Debug scope objects
+ * Debug environment objects
  *
  * The debugger effectively turns every opcode into a potential direct eval.
  * Naively, this would require creating a EnvironmentObject for every
  * call/block scope and using JSOP_GETALIASEDVAR for every access. To optimize
  * this, the engine assumes there is no debugger and optimizes scope access
  * and creation accordingly. When the debugger wants to perform an unexpected
- * eval-in-frame (or other, similar dynamic-scope-requiring operations),
- * fp->scopeChain is now incomplete: it may not contain all, or any, of the
- * EnvironmentObjects to represent the current scope.
+ * eval-in-frame (or other, similar environment-requiring operations),
+ * fp->environmentChain is now incomplete: it may not contain all, or any, of
+ * the EnvironmentObjects to represent the current scope.
  *
  * To resolve this, the debugger first calls GetDebugEnvironmentFor* to
- * synthesize a "debug scope chain". A debug scope chain is just a chain of
- * objects that fill in missing scopes and protect the engine from unexpected
- * access. (The latter means that some debugger operations, like redefining a
- * lexical binding, can fail when a true eval would succeed.) To do both of
- * these things, GetDebugEnvironmentFor* creates a new proxy
+ * synthesize a "debug env chain". A debug env chain is just a chain of
+ * objects that fill in missing environments and protect the engine from
+ * unexpected access. (The latter means that some debugger operations, like
+ * redefining a lexical binding, can fail when a true eval would succeed.) To
+ * do both of these things, GetDebugEnvironmentFor* creates a new proxy
  * DebugEnvironmentProxy to sit in front of every existing EnvironmentObject.
  *
  * GetDebugEnvironmentFor* ensures the invariant that the same

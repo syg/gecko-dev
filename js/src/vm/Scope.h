@@ -20,10 +20,6 @@
 
 namespace js {
 
-namespace frontend {
-class FunctionBox;
-};
-
 enum class BindingKind : uint8_t
 {
     FormalParameter,
@@ -143,6 +139,9 @@ class BindingLocation
     }
 };
 
+//
+// The base class of all Scopes.
+//
 class Scope : public js::gc::TenuredCell
 {
     friend class GCMarker;
@@ -252,6 +251,23 @@ class Scope : public js::gc::TenuredCell
     void dump() const;
 };
 
+//
+// A lexical scope that holds let and const bindings. There are 3 kinds of
+// LexicalScopes.
+//
+// Lexical
+//   A plain lexical scope.
+//
+// Catch
+//   Holds the catch parameters (and only the catch parameters) of a catch
+//   block.
+//
+// ParameterDefaults
+//   Holds the parameter names for a function if it has parameter default
+//   expressions.
+//
+// All kinds of LexicalScopes correspond to LexicalEnvironmentObjects on the
+// environment chain.
 class LexicalScope : public Scope
 {
     friend class Scope;
@@ -324,6 +340,11 @@ Scope::is<LexicalScope>() const
            kind_ == ScopeKind::ParameterDefaults;
 }
 
+//
+// Scope corresponding to a function body. Holds var bindings and formal
+// parameter names.
+//
+// Corresponds to CallObject on environment chain.
 class FunctionScope : public Scope
 {
     friend class GCMarker;
@@ -440,17 +461,25 @@ class FunctionScope : public Scope
     static Shape* getEmptyEnvironmentShape(JSContext* cx);
 };
 
+//
 // Scope corresponding to both the global object scope and the global lexical
 // scope.
 //
-// Both are extensible and are singletons across <script> tags and are super
-// weird, so these scopes similarly a fragment of the names in global
-// scope. In other words, two global scripts may have two different
-// GlobalScopes despite having the same GlobalObject.
+// Both are extensible and are singletons across <script> tags, so these
+// scopes are a fragment of the names in global scope. In other words, two
+// global scripts may have two different GlobalScopes despite having the same
+// GlobalObject.
 //
-// A global scope may be non-syntactic, meaning the scope is not a
-// GlobalObject but some other kind of object created by the embedding. This
-// distinction is important for optimizations.
+// There are 2 kinds of GlobalScopes.
+//
+// Global
+//   Corresponds to a GlobalObject and its global LexicalEnvironmentObject on
+//   the environment chain.
+//
+// NonSyntactic
+//   Corresponds to a non-GlobalObject created by the embedding on the
+//   environment chain. This distinction is important for optimizations.
+//
 class GlobalScope : public Scope
 {
     friend class Scope;
@@ -513,6 +542,10 @@ Scope::is<GlobalScope>() const
     return kind_ == ScopeKind::Global || kind_ == ScopeKind::NonSyntactic;
 }
 
+//
+// Scope of a 'with' statement. Has no bindings.
+//
+// Corresponds to a WithEnvironmentObject on the environment chain.
 class WithScope : public Scope
 {
     friend class Scope;
@@ -522,6 +555,16 @@ class WithScope : public Scope
     static WithScope* create(ExclusiveContext* cx, HandleScope enclosing);
 };
 
+//
+// Scope of an eval. Holds var bindings. There are 2 kinds of EvalScopes.
+//
+// Eval
+//   A sloppy eval. Never has its own environment. Its var bindings are bound
+//   on the nearest enclosing var environment at the time of eval.
+//
+// StrictEval
+//   A strict eval. Corresponds to a CallObject, where its var bindings lives.
+//
 class EvalScope : public Scope
 {
     friend class Scope;
@@ -598,6 +641,18 @@ Scope::is<EvalScope>() const
     return kind_ == ScopeKind::Eval || kind_ == ScopeKind::StrictEval;
 }
 
+//
+// An iterator for a Scope's bindings. This is the source of truth for frame
+// and environment object layout.
+//
+// It may be placed in GC containers; for example:
+//
+//   for (Rooted<BindingIter> bi(cx, BindingIter(scope)); bi; bi++) {
+//     use(bi);
+//     SomeMayGCOperation();
+//     use(bi);
+//   }
+//
 class BindingIter
 {
   protected:
@@ -829,6 +884,19 @@ class BindingIter
     void trace(JSTracer* trc);
 };
 
+//
+// A refinement of BindingIter that only iterates over closed over argument
+// slots, i.e., positional parameter names that are closed over.
+//
+// For example, this would iterate over {a, b} in the following function:
+//
+//   function f(a, [c], b, d) {
+//     return () => {
+//       a++;
+//       b++;
+//     };
+//   }
+//
 class ClosedOverArgumentSlotIter : public BindingIter
 {
     void settle() {
@@ -851,6 +919,17 @@ class ClosedOverArgumentSlotIter : public BindingIter
     }
 };
 
+//
+// Iterator for walking the scope chain.
+//
+// It may be placed in GC containers; for example:
+//
+//   for (Rooted<ScopeIter> si(cx, ScopeIter(scope)); si; si++) {
+//     use(si);
+//     SomeMayGCOperation();
+//     use(si);
+//   }
+//
 class ScopeIter
 {
     HeapPtr<Scope*> scope_;

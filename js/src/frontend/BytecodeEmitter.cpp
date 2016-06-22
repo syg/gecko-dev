@@ -2648,6 +2648,7 @@ BytecodeEmitter::emitGetName(JSAtom* name, bool callContext)
     return EmitGetNameAtLocation(this, name, lookupName(name), callContext);
 }
 
+bool
 BytecodeEmitter::emitGetName(ParseNode* pn, bool callContext)
 {
     return emitGetName(pn->name(), callContext);
