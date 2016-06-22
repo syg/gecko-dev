@@ -515,8 +515,8 @@ BytecodeCompiler::compileFunctionBody(MutableHandleFunction fun,
     ParseNode* fn;
     do {
         Directives newDirectives = directives;
-        fn = parser->standaloneFunctionBody(fun, formals, generatorKind, directives,
-                                            &newDirectives);
+        fn = parser->standaloneFunctionBody(fun, enclosingScope, formals, generatorKind,
+                                            directives, &newDirectives);
         if (!fn && !handleParseFailure(newDirectives))
             return false;
     } while (!fn);

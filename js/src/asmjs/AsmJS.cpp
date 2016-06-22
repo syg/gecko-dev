@@ -753,6 +753,9 @@ FunctionStatementList(ParseNode* fn)
 {
     MOZ_ASSERT(fn->pn_body->isKind(PNK_PARAMSBODY));
     ParseNode* last = fn->pn_body->last();
+    MOZ_ASSERT(last->isKind(PNK_LEXICALSCOPE));
+    MOZ_ASSERT(last->isEmptyScope());
+    last = last->scopeBody();
     MOZ_ASSERT(last->isKind(PNK_STATEMENTLIST));
     return last;
 }
@@ -3144,10 +3147,6 @@ static bool
 CheckArgument(ModuleValidator& m, ParseNode* arg, PropertyName** name)
 {
     *name = nullptr;
-    /* TODOshu
-    if (!IsDefinition(arg))
-        return m.fail(arg, "duplicate argument name not allowed");
-    */
 
     if (arg->isKind(PNK_ASSIGN))
         return m.fail(arg, "default arguments not allowed");
@@ -3546,11 +3545,6 @@ CheckGlobalDotImport(ModuleValidator& m, PropertyName* varName, ParseNode* initN
 static bool
 CheckModuleGlobal(ModuleValidator& m, ParseNode* var, bool isConst)
 {
-    /* TODOshu
-    if (!IsDefinition(var))
-        return m.fail(var, "import variable names must be unique");
-    */
-
     if (!CheckModuleLevelName(m, var, var->name()))
         return false;
 
@@ -3725,11 +3719,6 @@ CheckFinalReturn(FunctionValidator& f, ParseNode* lastNonEmptyStmt)
 static bool
 CheckVariable(FunctionValidator& f, ParseNode* var, ValTypeVector* types, Vector<NumLit>* inits)
 {
-    /* TODOshu
-    if (!IsDefinition(var))
-        return f.fail(var, "local variable names must not restate argument names");
-    */
-
     PropertyName* name = var->name();
 
     if (!CheckIdentifier(f.m(), var, name))
@@ -6823,6 +6812,7 @@ CheckStatement(FunctionValidator& f, ParseNode* stmt)
       case PNK_STATEMENTLIST: return CheckStatementList(f, stmt);
       case PNK_BREAK:         return CheckBreakOrContinue(f, true, stmt);
       case PNK_CONTINUE:      return CheckBreakOrContinue(f, false, stmt);
+      case PNK_LEXICALSCOPE:  return CheckStatement(f, stmt->scopeBody());
       default:;
     }
 
@@ -6980,11 +6970,6 @@ CheckFunctions(ModuleValidator& m)
 static bool
 CheckFuncPtrTable(ModuleValidator& m, ParseNode* var)
 {
-    /* TODOshu
-    if (!IsDefinition(var))
-        return m.fail(var, "function-pointer table name must be unique");
-    */
-
     ParseNode* arrayLiteral = MaybeInitializer(var);
     if (!arrayLiteral || !arrayLiteral->isKind(PNK_ARRAY))
         return m.fail(var, "function-pointer table's initializer must be an array literal");

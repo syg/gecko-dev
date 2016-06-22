@@ -477,6 +477,8 @@ class FunctionBox : public ObjectBox, public SharedContext
 {
     void initWithEnclosingScope(Scope* enclosingScope);
 
+    Scope* enclosingScope_;
+
   public:
     // Names from the named lambda scope, if a named lambda.
     LexicalScope::BindingData* declEnvBindings;
@@ -513,7 +515,7 @@ class FunctionBox : public ObjectBox, public SharedContext
                 Directives directives, bool extraWarnings, GeneratorKind generatorKind);
 
     void initFromLazyFunction();
-    void initStandaloneFunction();
+    void initStandaloneFunction(Scope* enclosingScope);
     void initWithEnclosingContext(SharedContext* enclosing, FunctionSyntaxKind kind,
                                   bool isGenexpLambda);
 
@@ -524,9 +526,9 @@ class FunctionBox : public ObjectBox, public SharedContext
         // This method is used to distinguish the outermost SharedContext. If
         // a FunctionBox is the outermost SharedContext, it must be a lazy
         // function.
-        if (function()->lazyScript())
-            return function()->lazyScript()->enclosingScope();
-        return nullptr;
+        MOZ_ASSERT_IF(function()->isInterpretedLazy(),
+                      enclosingScope_ == function()->lazyScript()->enclosingScope());
+        return enclosingScope_;
     }
 
     bool isLikelyConstructorWrapper() const {

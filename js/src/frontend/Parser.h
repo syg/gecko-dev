@@ -825,8 +825,8 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
 
     // Parse a function, given only its body. Used for the Function and
     // Generator constructors.
-    Node standaloneFunctionBody(HandleFunction fun, Handle<PropertyNameVector> formals,
-                                GeneratorKind generatorKind,
+    Node standaloneFunctionBody(HandleFunction fun, HandleScope enclosingScope,
+                                Handle<PropertyNameVector> formals, GeneratorKind generatorKind,
                                 Directives inheritedDirectives, Directives* newDirectives);
 
     // Parse a function, given only its arguments and body. Used for lazily

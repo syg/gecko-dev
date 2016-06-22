@@ -312,6 +312,7 @@ FunctionBox::FunctionBox(ExclusiveContext* cx, LifoAlloc& alloc, ObjectBox* trac
                          GeneratorKind generatorKind)
   : ObjectBox(fun, traceListHead),
     SharedContext(cx, Kind::ObjectBox, directives, extraWarnings),
+    enclosingScope_(nullptr),
     declEnvBindings(nullptr),
     defaultsScopeBindings(nullptr),
     funScopeBindings(nullptr),
@@ -349,16 +350,18 @@ FunctionBox::initFromLazyFunction()
     length = fun->nargs() - fun->hasRest();
     if (fun->lazyScript()->isDerivedClassConstructor())
         setDerivedClassConstructor();
-    initWithEnclosingScope(fun->lazyScript()->enclosingScope());
+    enclosingScope_ = fun->lazyScript()->enclosingScope();
+    initWithEnclosingScope(enclosingScope_);
 }
 
 void
-FunctionBox::initStandaloneFunction()
+FunctionBox::initStandaloneFunction(Scope* enclosingScope)
 {
     // Standalone functions are Function or Generator constructors and are
     // always scoped to the global.
     JSFunction* fun = function();
     length = fun->nargs() - fun->hasRest();
+    enclosingScope_ = enclosingScope;
 }
 
 void
@@ -1582,6 +1585,7 @@ Parser<SyntaxParseHandler>::finishFunction()
 template <>
 ParseNode*
 Parser<FullParseHandler>::standaloneFunctionBody(HandleFunction fun,
+                                                 HandleScope enclosingScope,
                                                  Handle<PropertyNameVector> formals,
                                                  GeneratorKind generatorKind,
                                                  Directives inheritedDirectives,
@@ -1601,7 +1605,7 @@ Parser<FullParseHandler>::standaloneFunctionBody(HandleFunction fun,
     FunctionBox* funbox = newFunctionBox(fn, fun, inheritedDirectives, generatorKind);
     if (!funbox)
         return null();
-    funbox->initStandaloneFunction();
+    funbox->initStandaloneFunction(enclosingScope);
 
     ParseContext funpc(this, funbox, newDirectives);
     if (!funpc.init())
