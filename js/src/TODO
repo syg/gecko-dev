@@ -2,11 +2,8 @@ Parser:
   - remove uses of op on ParseNode
 
 BCE:
-  - for loops
+  - comprehension for
   - Annex B
 
 VM:
   - use scope notes to find param defaults scope when direct evaling
-  - fix decompiling
-
-rename ScopeCoordinate -> EnvironmentCoordinate
