@@ -2149,13 +2149,13 @@ IonBuilder::inspectOpcode(JSOp op)
 #ifdef DEBUG
       case JSOP_PUSHBLOCKSCOPE:
       case JSOP_FRESHENBLOCKSCOPE:
+      case JSOP_RECREATEBLOCKSCOPE:
       case JSOP_POPBLOCKSCOPE:
         // These opcodes are currently unhandled by Ion, but in principle
         // there's no reason they couldn't be.  Whenever this happens, OSR will
-        // have to consider that JSOP_FRESHENBLOCK mutates the env chain --
-        // right now it caches the env chain in MBasicBlock::environmentChain().
-        // That stale value will have to be updated when JSOP_FRESHENBLOCK is
-        // encountered.
+        // have to consider that JSOP_{FRESHEN,RECREATE}BLOCK mutates the env
+        // chain -- right now MBasicBlock::environmentChain() caches the env
+        // chain.  JSOP_{FRESHEN,RECREATE}BLOCK must update that stale value.
 #endif
       default:
         break;
@@ -3338,7 +3338,7 @@ IonBuilder::forLoop(JSOp op, jssrcnote* sn)
     // body:
     //    ; [body]
     // [increment:]
-    //   [FRESHENBLOCKSCOPE, if needed by a cloned block]
+    //   [{FRESHEN,RECREATE}BLOCKSCOPE, if needed by a cloned block]
     //    ; [increment]
     // [cond:]
     //   LOOPENTRY
@@ -3347,9 +3347,9 @@ IonBuilder::forLoop(JSOp op, jssrcnote* sn)
     // If there is a condition (condpc != ifne), this acts similar to a while
     // loop otherwise, it acts like a do-while loop.
     //
-    // Note that currently Ion does not compile pushblockscope/popblockscope as
-    // necessary prerequisites to freshenblockscope.  So the code below doesn't
-    // and needn't consider the implications of freshenblockscope.
+    // Note that currently Ion doesn't compile pushblockscope/popblockscope,
+    // necessary prerequisites to {freshen,recreate}blockscope.  So the code
+    // below doesn't and needn't consider either op's implications.
     jsbytecode* bodyStart = pc;
     jsbytecode* bodyEnd = updatepc;
     jsbytecode* loopEntry = condpc;

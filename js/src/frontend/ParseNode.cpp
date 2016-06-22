@@ -633,11 +633,6 @@ Parser<FullParseHandler>::cloneParseTree(ParseNode* opn)
 {
     JS_CHECK_RECURSION(context, return nullptr);
 
-    if (opn->isKind(PNK_COMPUTED_NAME)) {
-        report(ParseError, false, opn, JSMSG_COMPUTED_NAME_IN_PATTERN);
-        return null();
-    }
-
     ParseNode* pn = handler.new_<ParseNode>(opn->getKind(), opn->getOp(), opn->getArity(),
                                             opn->pn_pos);
     if (!pn)
@@ -712,6 +707,10 @@ Parser<FullParseHandler>::cloneParseTree(ParseNode* opn)
     return pn;
 }
 
+template <>
+ParseNode*
+Parser<FullParseHandler>::cloneLeftHandSide(ParseNode* opn);
+
 /*
  * Used by Parser::cloneLeftHandSide to clone a default expression
  * in the form of
@@ -722,9 +721,17 @@ ParseNode*
 Parser<FullParseHandler>::cloneDestructuringDefault(ParseNode* opn)
 {
     MOZ_ASSERT(opn->isKind(PNK_ASSIGN));
+    MOZ_ASSERT(opn->isArity(PN_BINARY));
 
-    report(ParseError, false, opn, JSMSG_DEFAULT_IN_PATTERN);
-    return null();
+    ParseNode* target = cloneLeftHandSide(opn->pn_left);
+    if (!target)
+        return nullptr;
+
+    ParseNode* defaultNode = cloneParseTree(opn->pn_right);
+    if (!defaultNode)
+        return nullptr;
+
+    return handler.new_<BinaryNode>(PNK_ASSIGN, JSOP_NOP, opn->pn_pos, target, defaultNode);
 }
 
 /*

@@ -4,12 +4,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/* JS bytecode generation. */
+
 #ifndef frontend_BytecodeEmitter_h
 #define frontend_BytecodeEmitter_h
-
-/*
- * JS bytecode generation.
- */
 
 #include "jscntxt.h"
 #include "jsopcode.h"
@@ -660,11 +658,14 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     MOZ_MUST_USE bool emitComprehensionForOf(ParseNode* pn);
 
     MOZ_MUST_USE bool emitDo(ParseNode* pn);
-    MOZ_MUST_USE bool emitFor(ParseNode* pn);
-    MOZ_MUST_USE bool emitForIn(ParseNode* pn);
-    MOZ_MUST_USE bool emitForInOrOfVariables(ParseNode* pn);
-    MOZ_MUST_USE bool emitCStyleFor(ParseNode* pn);
     MOZ_MUST_USE bool emitWhile(ParseNode* pn);
+
+    MOZ_MUST_USE bool emitFor(ParseNode* pn);
+    MOZ_MUST_USE bool emitCStyleFor(ParseNode* pn);
+    MOZ_MUST_USE bool emitForIn(ParseNode* pn);
+    MOZ_MUST_USE bool emitForOf(ParseNode* pn);
+
+    MOZ_MUST_USE bool emitInitializeForInOrOfTarget(ParseNode* forHead);
 
     MOZ_MUST_USE bool emitBreak(PropertyName* label);
     MOZ_MUST_USE bool emitContinue(PropertyName* label);
@@ -681,10 +682,6 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     // incrementing I, then push the result I (it will be original I +
     // iteration count). The stack after iteration will look like |ARRAY INDEX|.
     MOZ_MUST_USE bool emitSpread(bool allowSelfHosted = false);
-
-    // Emit bytecode for a for-of loop.  pn should be PNK_FOR, and pn->pn_left
-    // should be PNK_FOROF.
-    MOZ_MUST_USE bool emitForOf(ParseNode* pn);
 
     MOZ_MUST_USE bool emitClass(ParseNode* pn);
     MOZ_MUST_USE bool emitSuperPropLHS(ParseNode* superBase, bool isCall = false);

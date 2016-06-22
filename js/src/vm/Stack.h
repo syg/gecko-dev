@@ -555,12 +555,16 @@ class InterpreterFrame
      * For blocks with aliased locals, these interfaces push and pop entries
      * on the environment chain.  The "freshen" operation replaces the current
      * block with a fresh copy of it, to implement semantics providing
-     * distinct bindings per iteration of a for-loop.
+     * distinct bindings per iteration of a for(;;) loop whose head has a
+     * lexical declaration.  The "recreate" operation replaces the current
+     * block with a copy of it containing uninitialized bindings, to implement
+     * semantics providing distinct bindings per iteration of a for-in/of loop.
      */
 
     bool pushBlock(JSContext* cx, Handle<LexicalScope*> scope);
     void popBlock(JSContext* cx);
     bool freshenBlock(JSContext* cx);
+    bool recreateBlock(JSContext* cx);
 
     /*
      * With

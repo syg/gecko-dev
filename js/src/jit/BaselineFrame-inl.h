@@ -83,6 +83,18 @@ BaselineFrame::freshenBlock(JSContext* cx)
     return true;
 }
 
+inline bool
+BaselineFrame::recreateBlock(JSContext* cx)
+{
+    Rooted<LexicalEnvironmentObject*> current(cx, &envChain_->as<LexicalEnvironmentObject>());
+    LexicalEnvironmentObject* clone = LexicalEnvironmentObject::recreate(cx, current);
+    if (!clone)
+        return false;
+
+    replaceInnermostEnvironment(*clone);
+    return true;
+}
+
 inline CallObject&
 BaselineFrame::callObj() const
 {
