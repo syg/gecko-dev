@@ -482,7 +482,7 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
         return noteIndex_;
     }
 
-    HandleScope scope(const BytecodeEmitter* bce) const {
+    Scope* scope(const BytecodeEmitter* bce) const {
         return bce->scopeList.vector[index()];
     }
 
@@ -1765,7 +1765,7 @@ BytecodeEmitter::emitGoto(NestableControl* target, JumpList* jumplist, SrcNoteTy
     return emitJump(JSOP_GOTO, jumplist);
 }
 
-HandleScope
+Scope*
 BytecodeEmitter::innermostScope() const
 {
     return innermostEmitterScope->scope(this);
