@@ -1028,6 +1028,19 @@ DebugLeaveThenFreshenBlockScope(JSContext* cx, BaselineFrame* frame, jsbytecode*
 }
 
 bool
+RecreateBlockScope(JSContext* cx, BaselineFrame* frame)
+{
+    return frame->recreateBlock(cx);
+}
+
+bool
+DebugLeaveThenRecreateBlockScope(JSContext* cx, BaselineFrame* frame, jsbytecode* pc)
+{
+    MOZ_ALWAYS_TRUE(DebugLeaveBlock(cx, frame, pc));
+    return frame->recreateBlock(cx);
+}
+
+bool
 DebugLeaveBlock(JSContext* cx, BaselineFrame* frame, jsbytecode* pc)
 {
     MOZ_ASSERT(frame->script()->baselineScript()->hasDebugInstrumentation());

@@ -878,6 +878,23 @@ LexicalEnvironmentObject::clone(JSContext* cx, Handle<LexicalEnvironmentObject*>
     return copy;
 }
 
+/* static */ LexicalEnvironmentObject*
+LexicalEnvironmentObject::recreate(JSContext* cx, Handle<LexicalEnvironmentObject*> env)
+{
+    Rooted<LexicalScope*> scope(cx, &env->scope());
+    RootedObject enclosing(cx, &env->enclosingEnvironment());
+    Rooted<LexicalEnvironmentObject*> copy(cx, create(cx, scope, enclosing, gc::TenuredHeap));
+    if (!copy)
+        return nullptr;
+
+    uint32_t slotCount = scope->environmentShape()->slot();
+    MOZ_ASSERT(slotCount == env->lastProperty()->slot());
+    for (uint32_t i = JSSLOT_FREE(&class_); i < slotCount; i++)
+        copy->setSlot(i, MagicValue(JS_UNINITIALIZED_LEXICAL));
+
+    return copy;
+}
+
 /* static */ bool
 LexicalEnvironmentObject::copyUnaliasedValues(JSContext* cx, Handle<LexicalEnvironmentObject*> env,
                                               AbstractFramePtr frame)

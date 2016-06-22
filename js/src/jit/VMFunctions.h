@@ -679,6 +679,8 @@ bool PopBlockScope(JSContext* cx, BaselineFrame* frame);
 bool DebugLeaveThenPopBlockScope(JSContext* cx, BaselineFrame* frame, jsbytecode* pc);
 bool FreshenBlockScope(JSContext* cx, BaselineFrame* frame);
 bool DebugLeaveThenFreshenBlockScope(JSContext* cx, BaselineFrame* frame, jsbytecode* pc);
+bool RecreateBlockScope(JSContext* cx, BaselineFrame* frame);
+bool DebugLeaveThenRecreateBlockScope(JSContext* cx, BaselineFrame* frame, jsbytecode* pc);
 bool DebugLeaveBlock(JSContext* cx, BaselineFrame* frame, jsbytecode* pc);
 
 bool InitBaselineFrameForOsr(BaselineFrame* frame, InterpreterFrame* interpFrame,

@@ -413,6 +413,10 @@ class LexicalEnvironmentObject : public EnvironmentObject
     // variable values as this.
     static LexicalEnvironmentObject* clone(JSContext* cx, Handle<LexicalEnvironmentObject*> env);
 
+    // Create a new ClonedBlockObject with the same enclosing scope as this,
+    // with all variables uninitialized.
+    static LexicalEnvironmentObject* recreate(JSContext* cx, Handle<LexicalEnvironmentObject*> env);
+
     // Copy in all the unaliased formals and locals.
     static bool copyUnaliasedValues(JSContext* cx, Handle<LexicalEnvironmentObject*> env,
                                     AbstractFramePtr frame);

@@ -3462,6 +3462,31 @@ BaselineCompiler::emit_JSOP_FRESHENBLOCKSCOPE()
     return callVM(FreshenBlockScopeInfo);
 }
 
+typedef bool (*RecreateBlockScopeFn)(JSContext*, BaselineFrame*);
+static const VMFunction RecreateBlockScopeInfo =
+    FunctionInfo<RecreateBlockScopeFn>(jit::RecreateBlockScope);
+
+typedef bool (*DebugLeaveThenRecreateBlockScopeFn)(JSContext*, BaselineFrame*, jsbytecode*);
+static const VMFunction DebugLeaveThenRecreateBlockScopeInfo =
+    FunctionInfo<DebugLeaveThenRecreateBlockScopeFn>(jit::DebugLeaveThenRecreateBlockScope);
+
+bool
+BaselineCompiler::emit_JSOP_RECREATEBLOCKSCOPE()
+{
+    prepareVMCall();
+
+    masm.loadBaselineFramePtr(BaselineFrameReg, R0.scratchReg());
+
+    if (compileDebugInstrumentation_) {
+        pushArg(ImmPtr(pc));
+        pushArg(R0.scratchReg());
+        return callVM(DebugLeaveThenRecreateBlockScopeInfo);
+    }
+
+    pushArg(R0.scratchReg());
+    return callVM(RecreateBlockScopeInfo);
+}
+
 typedef bool (*DebugLeaveBlockFn)(JSContext*, BaselineFrame*, jsbytecode*);
 static const VMFunction DebugLeaveBlockInfo = FunctionInfo<DebugLeaveBlockFn>(jit::DebugLeaveBlock);
 
