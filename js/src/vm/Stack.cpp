@@ -107,62 +107,72 @@ InterpreterFrame::createRestParameter(JSContext* cx)
 }
 
 static inline void
-AssertDynamicScopeMatchesStaticScope(JSContext* cx, JSScript* script, JSObject* scope)
+AssertDynamicScopeMatchesStaticScope(JSContext* cx, JSScript* script, JSObject* env)
 {
-#if 0
-    TODOshu
-    RootedObject originalScope(cx, scope);
-    RootedObject enclosingScope(cx, script->enclosingStaticScope());
-    for (StaticScopeIter<NoGC> i(enclosingScope); !i.done(); i++) {
-        if (i.type() == StaticScopeIter<NoGC>::NonSyntactic) {
-            while (scope->is<WithEnvironmentObject>() ||
-                   scope->is<NonSyntacticVariablesObject>() ||
-                   (scope->is<LexicalEnvironmentObject>() &&
-                    !scope->as<LexicalEnvironmentObject>().isSyntactic()))
+    RootedObject originalEnv(cx, env);
+    for (ScopeIter si(script->enclosingScope()); si; si++) {
+        if (si.kind() == ScopeKind::NonSyntactic) {
+            while (env->is<WithEnvironmentObject>() ||
+                   env->is<NonSyntacticVariablesObject>() ||
+                   (env->is<LexicalEnvironmentObject>() &&
+                    !env->as<LexicalEnvironmentObject>().isSyntactic()))
             {
-                MOZ_ASSERT(!IsSyntacticEnvironment(scope));
-                scope = &scope->as<ScopeObject>().enclosingScope();
+                MOZ_ASSERT(!IsSyntacticEnvironment(env));
+                env = &env->as<EnvironmentObject>().enclosingEnvironment();
             }
-        } else if (i.hasSyntacticDynamicScopeObject()) {
-            switch (i.type()) {
-              case StaticScopeIter<NoGC>::Module:
-                MOZ_ASSERT(scope->as<ModuleEnvironmentObject>().module().script() == i.moduleScript());
-                scope = &scope->as<ModuleEnvironmentObject>().enclosingScope();
+        } else if (si.hasSyntacticEnvironment()) {
+            switch (si.kind()) {
+              case ScopeKind::Function:
+                MOZ_ASSERT(env->as<CallObject>().callee().nonLazyScript() ==
+                           si.scope()->as<FunctionScope>().script());
+                env = &env->as<CallObject>().enclosingEnvironment();
                 break;
-              case StaticScopeIter<NoGC>::Function:
-                MOZ_ASSERT(scope->as<CallObject>().callee().nonLazyScript() == i.funScript());
-                scope = &scope->as<CallObject>().enclosingScope();
+
+              case ScopeKind::ParameterDefaults:
+              case ScopeKind::Lexical:
+              case ScopeKind::Catch:
+                MOZ_ASSERT(&env->as<LexicalEnvironmentObject>().scope() == si.scope());
+                env = &env->as<LexicalEnvironmentObject>().enclosingEnvironment();
                 break;
-              case StaticScopeIter<NoGC>::Block:
-                MOZ_ASSERT(&i.block() == scope->as<LexicalEnvironmentObject>().staticScope());
-                scope = &scope->as<LexicalEnvironmentObject>().enclosingScope();
+
+              case ScopeKind::With:
+                MOZ_ASSERT(&env->as<WithEnvironmentObject>().scope() == si.scope());
+                env = &env->as<WithEnvironmentObject>().enclosingEnvironment();
                 break;
-              case StaticScopeIter<NoGC>::With:
-                MOZ_ASSERT(&i.staticWith() == scope->as<WithEnvironmentObject>().staticScope());
-                scope = &scope->as<WithEnvironmentObject>().enclosingScope();
+
+              case ScopeKind::Eval:
+              case ScopeKind::StrictEval:
+                env = &env->as<CallObject>().enclosingEnvironment();
                 break;
-              case StaticScopeIter<NoGC>::NamedLambda:
-                scope = &scope->as<DeclEnvObject>().enclosingScope();
+
+              case ScopeKind::Global:
+                MOZ_ASSERT(env->as<LexicalEnvironmentObject>().isGlobal());
+                env = &env->as<LexicalEnvironmentObject>().enclosingEnvironment();
+                MOZ_ASSERT(env->is<GlobalObject>());
                 break;
-              case StaticScopeIter<NoGC>::Eval:
-                scope = &scope->as<CallObject>().enclosingScope();
+
+              case ScopeKind::NonSyntactic:
+                MOZ_CRASH("NonSyntactic should not have a syntactic environment");
                 break;
-              case StaticScopeIter<NoGC>::NonSyntactic:
-                MOZ_CRASH("NonSyntactic should not have a syntactic scope");
+
+              case ScopeKind::Module:
+                /* TODOshu
+                   MOZ_ASSERT(env->as<ModuleEnvironmentObject>().module().script() == i.moduleScript());
+                   env = &scope->as<ModuleEnvironmentObject>().enclosingEnvironment();
+                */
                 break;
             }
         }
     }
 
-    // In the case of a non-syntactic scope chain, the immediate parent of the
-    // outermost non-syntactic scope may be the global lexical scope, or, if
+    // In the case of a non-syntactic env chain, the immediate parent of the
+    // outermost non-syntactic env may be the global lexical env, or, if
     // called from Debugger, a DebugEnvironmentProxy.
     //
-    // In the case of a syntactic scope chain, the outermost scope is always a
+    // In the case of a syntactic env chain, the outermost env is always a
     // GlobalObject.
-    MOZ_ASSERT(scope->is<GlobalObject>() || IsGlobalLexicalScope(scope) ||
-               scope->is<DebugEnvironmentProxy>());
-#endif
+    MOZ_ASSERT(env->is<GlobalObject>() || IsGlobalLexicalEnvironment(env) ||
+               env->is<DebugEnvironmentProxy>());
 }
 
 bool
