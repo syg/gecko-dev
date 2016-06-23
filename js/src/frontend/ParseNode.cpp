@@ -695,7 +695,8 @@ Parser<FullParseHandler>::cloneParseTree(ParseNode* opn)
         break;
 
       case PN_SCOPE:
-        MOZ_CRASH("TODOshu");
+        pn->pn_u = opn->pn_u;
+        NULLCHECK(pn->pn_u.scope.body = cloneParseTree(opn->pn_u.scope.body));
         break;
 
       case PN_NULLARY:
@@ -807,11 +808,7 @@ Parser<FullParseHandler>::cloneLeftHandSide(ParseNode* opn)
     MOZ_ASSERT(opn->isArity(PN_NAME));
     MOZ_ASSERT(opn->isKind(PNK_NAME));
 
-    /* If opn is a definition or use, make pn a use. */
     pn->pn_u.name = opn->pn_u.name;
-    // TODOshu ??
-    pn->setOp(JSOP_SETNAME);
-    pn->pn_expr = opn->pn_expr;
     return pn;
 }
 
