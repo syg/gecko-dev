@@ -2326,6 +2326,10 @@ DisassembleScript(JSContext* cx, HandleScript script, HandleFunction fun,
             Sprint(sp, " LAMBDA");
         if (fun->needsCallObject())
             Sprint(sp, " NEEDS_CALLOBJECT");
+        if (fun->needsDefaultsEnvironment())
+            Sprint(sp, " NEEDS_DEFAULTSENV");
+        if (fun->needsDeclEnvObject())
+            Sprint(sp, " NEEDS_DECLENV");
         if (fun->isConstructor())
             Sprint(sp, " CONSTRUCTOR");
         if (fun->isExprBody())

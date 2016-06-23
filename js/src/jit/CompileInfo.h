@@ -453,7 +453,7 @@ class CompileInfo
         if (slot == thisSlot())
             return true;
 
-        if (funMaybeLazy()->needsCallObject() && slot == environmentChainSlot())
+        if (funMaybeLazy()->needsSomeEnvironmentObject() && slot == environmentChainSlot())
             return true;
 
         // If the function may need an arguments object, then make sure to

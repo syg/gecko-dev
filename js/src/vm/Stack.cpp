@@ -178,32 +178,11 @@ AssertScopeMatchesEnvironment(JSContext* cx, JSScript* script, JSObject* env)
 bool
 InterpreterFrame::initFunctionEnvironmentObjects(JSContext* cx)
 {
-    // Named lambdas may have an environment that holds itself for recursion.
-    if (callee().isNamedLambda() && script()->declEnvScope()->hasEnvironment()) {
-        DeclEnvObject* declEnv = DeclEnvObject::create(cx, this);
-        if (!declEnv)
-            return false;
-        pushOnEnvironmentChain(*declEnv);
-    }
+    if (!InitFunctionEnvironmentObjects(cx, this))
+        return false;
 
-    // If the function has parameter default expressions, there may be an
-    // extra environment to hold the parameters.
-    if (script()->hasDefaults() && script()->defaultsScope()->hasEnvironment()) {
-        Rooted<LexicalScope*> defaultsScope(cx, script()->defaultsScope());
-        LexicalEnvironmentObject* defaultsEnv =
-            LexicalEnvironmentObject::create(cx, defaultsScope, this);
-        if (!defaultsEnv)
-            return false;
-        pushOnEnvironmentChain(*defaultsEnv);
-    }
-
-    if (callee().needsCallObject()) {
-        CallObject* callobj = CallObject::createForFunction(cx, this);
-        if (!callobj)
-            return false;
-        pushOnEnvironmentChain(*callobj);
+    if (environmentChain()->is<CallObject>())
         flags_ |= HAS_CALL_OBJ;
-    }
 
     return true;
 }
@@ -251,7 +230,7 @@ InterpreterFrame::prologue(JSContext* cx)
         return probes::EnterScript(cx, script, nullptr, this);
 
     MOZ_ASSERT(isFunctionFrame());
-    if (!initFunctionEnvironmentObjects(cx))
+    if (callee().needsSomeEnvironmentObject() && !initFunctionEnvironmentObjects(cx))
         return false;
 
     AssertScopeMatchesEnvironment(cx, script, environmentChain());
@@ -1558,7 +1537,8 @@ jit::JitActivation::clearRematerializedFrames()
 }
 
 jit::RematerializedFrame*
-jit::JitActivation::getRematerializedFrame(JSContext* cx, const JitFrameIterator& iter, size_t inlineDepth)
+jit::JitActivation::getRematerializedFrame(JSContext* cx, const JitFrameIterator& iter,
+                                           size_t inlineDepth)
 {
     MOZ_ASSERT(iter.activation() == this);
     MOZ_ASSERT(iter.isIonScripted());

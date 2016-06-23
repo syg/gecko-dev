@@ -122,15 +122,12 @@ BaselineFrame::initStrictEvalEnvironmentObjects(JSContext* cx)
 bool
 BaselineFrame::initFunctionEnvironmentObjects(JSContext* cx)
 {
-    MOZ_ASSERT(isFunctionFrame());
-    MOZ_ASSERT(callee()->needsCallObject());
-
-    CallObject* callobj = CallObject::createForFunction(cx, this);
-    if (!callobj)
+    if (!InitFunctionEnvironmentObjects(cx, this))
         return false;
 
-    pushOnEnvironmentChain(*callobj);
-    flags_ |= HAS_CALL_OBJ;
+    if (environmentChain()->is<CallObject>())
+        flags_ |= HAS_CALL_OBJ;
+
     return true;
 }
 

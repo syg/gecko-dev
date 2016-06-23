@@ -725,8 +725,8 @@ const Class NonSyntacticVariablesObject::class_ = {
 /*****************************************************************************/
 
 /* static */ LexicalEnvironmentObject*
-LexicalEnvironmentObject::create(JSContext* cx, HandleShape shape, HandleObject enclosing,
-                                 gc::InitialHeap heap)
+LexicalEnvironmentObject::createTemplateObject(JSContext* cx, HandleShape shape,
+                                               HandleObject enclosing, gc::InitialHeap heap)
 {
     MOZ_ASSERT(shape->getObjectClass() == &LexicalEnvironmentObject::class_);
 
@@ -755,14 +755,14 @@ LexicalEnvironmentObject::create(JSContext* cx, HandleShape shape, HandleObject 
 }
 
 /* static */ LexicalEnvironmentObject*
-LexicalEnvironmentObject::create(JSContext* cx, Handle<LexicalScope*> scope,
-                                 HandleObject enclosing, gc::InitialHeap heap)
+LexicalEnvironmentObject::createTemplateObject(JSContext* cx, Handle<LexicalScope*> scope,
+                                               HandleObject enclosing, gc::InitialHeap heap)
 {
     assertSameCompartment(cx, enclosing);
     MOZ_ASSERT(scope->hasEnvironment());
 
     RootedShape shape(cx, scope->environmentShape());
-    LexicalEnvironmentObject* env = create(cx, shape, enclosing, heap);
+    LexicalEnvironmentObject* env = createTemplateObject(cx, shape, enclosing, heap);
     if (!env)
         return nullptr;
 
@@ -775,7 +775,7 @@ LexicalEnvironmentObject::create(JSContext* cx, Handle<LexicalScope*> scope,
                                  AbstractFramePtr frame)
 {
     RootedObject enclosing(cx, frame.environmentChain());
-    return create(cx, scope, enclosing, gc::DefaultHeap);
+    return createTemplateObject(cx, scope, enclosing, gc::DefaultHeap);
 }
 
 /* static */ LexicalEnvironmentObject*
@@ -787,8 +787,8 @@ LexicalEnvironmentObject::createGlobal(JSContext* cx, Handle<GlobalObject*> glob
     if (!shape)
         return nullptr;
 
-    Rooted<LexicalEnvironmentObject*> env(cx, LexicalEnvironmentObject::create(cx, shape, global,
-                                                                               gc::TenuredHeap));
+    Rooted<LexicalEnvironmentObject*> env(cx,
+        LexicalEnvironmentObject::createTemplateObject(cx, shape, global, gc::TenuredHeap));
     if (!env)
         return nullptr;
 
@@ -809,8 +809,8 @@ LexicalEnvironmentObject::createNonSyntactic(JSContext* cx, HandleObject enclosi
     if (!shape)
         return nullptr;
 
-    LexicalEnvironmentObject* env = LexicalEnvironmentObject::create(cx, shape, enclosing,
-                                                                     gc::TenuredHeap);
+    LexicalEnvironmentObject* env =
+        LexicalEnvironmentObject::createTemplateObject(cx, shape, enclosing, gc::TenuredHeap);
     if (!env)
         return nullptr;
 
@@ -830,7 +830,8 @@ LexicalEnvironmentObject::createHollowForDebug(JSContext* cx, Handle<LexicalScop
     // This environment's parent link is never used: the DebugEnvironmentProxy
     // that refers to this scope carries its own parent link, which is what
     // Debugger uses to construct the tree of Debugger.Environment objects.
-    Rooted<LexicalEnvironmentObject*> env(cx, create(cx, shape, nullptr, gc::TenuredHeap));
+    Rooted<LexicalEnvironmentObject*> env(cx, createTemplateObject(cx, shape, nullptr,
+                                                                   gc::TenuredHeap));
     if (!env)
         return nullptr;
 
@@ -854,7 +855,8 @@ LexicalEnvironmentObject::clone(JSContext* cx, Handle<LexicalEnvironmentObject*>
 {
     Rooted<LexicalScope*> scope(cx, &env->scope());
     RootedObject enclosing(cx, &env->enclosingEnvironment());
-    Rooted<LexicalEnvironmentObject*> copy(cx, create(cx, scope, enclosing, gc::TenuredHeap));
+    Rooted<LexicalEnvironmentObject*> copy(cx, createTemplateObject(cx, scope, enclosing,
+                                                                    gc::TenuredHeap));
     if (!copy)
         return nullptr;
 
@@ -871,7 +873,8 @@ LexicalEnvironmentObject::recreate(JSContext* cx, Handle<LexicalEnvironmentObjec
 {
     Rooted<LexicalScope*> scope(cx, &env->scope());
     RootedObject enclosing(cx, &env->enclosingEnvironment());
-    Rooted<LexicalEnvironmentObject*> copy(cx, create(cx, scope, enclosing, gc::TenuredHeap));
+    Rooted<LexicalEnvironmentObject*> copy(cx, createTemplateObject(cx, scope, enclosing,
+                                                                    gc::TenuredHeap));
     if (!copy)
         return nullptr;
 
@@ -951,8 +954,9 @@ DeclEnvObject::create(JSContext* cx, HandleFunction canonicalFun, HandleObject e
     MOZ_ASSERT(bi.done());
 #endif
 
-    return static_cast<DeclEnvObject*>(LexicalEnvironmentObject::create(cx, scope.as<LexicalScope>(),
-                                                                        enclosing, gc::TenuredHeap));
+    return static_cast<DeclEnvObject*>(
+        LexicalEnvironmentObject::createTemplateObject(cx, scope.as<LexicalScope>(),
+                                                       enclosing, gc::TenuredHeap));
 }
 
 /* static */ DeclEnvObject*
@@ -3060,6 +3064,43 @@ js::CheckEvalDeclarationConflicts(JSContext* cx, HandleScript script,
         if (!CheckVarNameConflictsInEnv(cx, script, obj))
             return false;
         obj = obj->enclosingEnvironment();
+    }
+
+    return true;
+}
+
+bool
+js::InitFunctionEnvironmentObjects(JSContext* cx, AbstractFramePtr frame)
+{
+    MOZ_ASSERT(frame.isFunctionFrame());
+    MOZ_ASSERT(frame.callee()->needsSomeEnvironmentObject());
+
+    RootedFunction callee(cx, frame.callee());
+
+    // Named lambdas may have an environment that holds itself for recursion.
+    if (callee->needsDeclEnvObject()) {
+        DeclEnvObject* declEnv = DeclEnvObject::create(cx, frame);
+        if (!declEnv)
+            return false;
+        frame.pushOnEnvironmentChain(*declEnv);
+    }
+
+    // If the function has parameter default expressions, there may be an
+    // extra environment to hold the parameters.
+    if (callee->needsDefaultsEnvironment()) {
+        Rooted<LexicalScope*> defaultsScope(cx, frame.script()->defaultsScope());
+        LexicalEnvironmentObject* defaultsEnv =
+            LexicalEnvironmentObject::create(cx, defaultsScope, frame);
+        if (!defaultsEnv)
+            return false;
+        frame.pushOnEnvironmentChain(*defaultsEnv);
+    }
+
+    if (callee->needsCallObject()) {
+        CallObject* callobj = CallObject::createForFunction(cx, frame);
+        if (!callobj)
+            return false;
+        frame.pushOnEnvironmentChain(*callobj);
     }
 
     return true;

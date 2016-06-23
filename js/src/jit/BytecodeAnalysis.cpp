@@ -46,11 +46,12 @@ BytecodeAnalysis::init(TempAllocator& alloc, GSNCache& gsn)
     if (!infos_.growByUninitialized(script_->length()))
         return false;
 
-    // Initialize the env chain slot if either the function needs a CallObject
-    // or the script uses the env chain. The latter case is handled below.
+    // Initialize the env chain slot if either the function needs some
+    // EnvironmentObject (like a CallObject) or the script uses the env
+    // chain. The latter case is handled below.
     usesEnvironmentChain_ = script_->module() ||
-                      (script_->functionDelazifying() &&
-                       script_->functionDelazifying()->needsCallObject());
+                            (script_->functionDelazifying() &&
+                             script_->functionDelazifying()->needsSomeEnvironmentObject());
     MOZ_ASSERT_IF(script_->hasAnyAliasedBindings(), usesEnvironmentChain_);
 
     jsbytecode* end = script_->codeEnd();

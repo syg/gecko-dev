@@ -1991,6 +1991,34 @@ JSFunction::isBuiltinFunctionConstructor()
     return maybeNative() == Function || maybeNative() == Generator;
 }
 
+bool
+JSFunction::needsDefaultsEnvironment() const
+{
+    MOZ_ASSERT(!isInterpretedLazy());
+
+    if (isNative())
+        return false;
+
+    if (!nonLazyScript()->hasDefaults())
+        return false;
+
+    return nonLazyScript()->defaultsScope()->hasEnvironment();
+}
+
+bool
+JSFunction::needsDeclEnvObject() const
+{
+    MOZ_ASSERT(!isInterpretedLazy());
+
+    if (isNative())
+        return false;
+
+    if (!isNamedLambda())
+        return false;
+
+    return nonLazyScript()->declEnvScope()->hasEnvironment();
+}
+
 JSFunction*
 js::NewNativeFunction(ExclusiveContext* cx, Native native, unsigned nargs, HandleAtom atom,
                       gc::AllocKind allocKind /* = AllocKind::FUNCTION */,

@@ -136,15 +136,23 @@ BaselineCompiler::compile()
     Rooted<EnvironmentObject*> templateEnv(cx);
     if (script->functionNonDelazifying()) {
         RootedFunction fun(cx, script->functionNonDelazifying());
+
+        if (fun->needsDeclEnvObject()) {
+            templateEnv = DeclEnvObject::createTemplateObject(cx, fun, gc::TenuredHeap);
+            if (!templateEnv)
+                return Method_Error;
+        }
+
+        if (fun->needsDefaultsEnvironment()) {
+            Rooted<LexicalScope*> scope(cx, script->defaultsScope());
+            templateEnv = LexicalEnvironmentObject::createTemplateObject(cx, scope, templateEnv,
+                                                                         gc::TenuredHeap);
+            if (!templateEnv)
+                return Method_Error;
+        }
+
         if (fun->needsCallObject()) {
             RootedScript scriptRoot(cx, script);
-
-            if (fun->isNamedLambda()) {
-                templateEnv = DeclEnvObject::createTemplateObject(cx, fun, gc::TenuredHeap);
-                if (!templateEnv)
-                    return Method_Error;
-            }
-
             templateEnv = CallObject::createTemplateObject(cx, scriptRoot, templateEnv,
                                                            gc::TenuredHeap);
             if (!templateEnv)
@@ -642,16 +650,16 @@ BaselineCompiler::initEnvironmentChain()
 
     RootedFunction fun(cx, function());
     if (fun) {
-        // Use callee->environment as scope chain. Note that we do
-        // this also for needsCallObject functions, so that the scope
-        // chain slot is properly initialized if the call triggers GC.
+        // Use callee->environment as scope chain. Note that we do this also
+        // for needsSomeEnvironmentObject functions, so that the scope chain
+        // slot is properly initialized if the call triggers GC.
         Register callee = R0.scratchReg();
         Register scope = R1.scratchReg();
         masm.loadFunctionFromCalleeToken(frame.addressOfCalleeToken(), callee);
         masm.loadPtr(Address(callee, JSFunction::offsetOfEnvironment()), scope);
         masm.storePtr(scope, frame.addressOfEnvironmentChain());
 
-        if (fun->needsCallObject()) {
+        if (fun->needsSomeEnvironmentObject()) {
             // Call into the VM to create a new call object.
             prepareVMCall();
 

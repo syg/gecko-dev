@@ -368,9 +368,9 @@ class LexicalEnvironmentObject : public EnvironmentObject
     static const Class class_;
 
   private:
-    static LexicalEnvironmentObject* create(JSContext* cx, HandleShape shape,
-                                            HandleObject enclosing,
-                                            gc::InitialHeap heap);
+    static LexicalEnvironmentObject* createTemplateObject(JSContext* cx, HandleShape shape,
+                                                          HandleObject enclosing,
+                                                          gc::InitialHeap heap);
 
     void initThisValue(JSObject* obj) {
         MOZ_ASSERT(isGlobal() || !isSyntactic());
@@ -383,8 +383,10 @@ class LexicalEnvironmentObject : public EnvironmentObject
     }
 
   public:
-    static LexicalEnvironmentObject* create(JSContext* cx, Handle<LexicalScope*> scope,
-                                            HandleObject enclosing, gc::InitialHeap heap);
+    static LexicalEnvironmentObject* createTemplateObject(JSContext* cx,
+                                                          Handle<LexicalScope*> scope,
+                                                          HandleObject enclosing,
+                                                          gc::InitialHeap heap);
 
     static LexicalEnvironmentObject* create(JSContext* cx, Handle<LexicalScope*> scope,
                                             AbstractFramePtr frame);
@@ -933,21 +935,24 @@ CreateObjectsForEnvironmentChain(JSContext* cx, AutoObjectVector& chain,
 
 ModuleEnvironmentObject* GetModuleEnvironmentForScript(JSScript* script);
 
-bool GetThisValueForDebuggerMaybeOptimizedOut(JSContext* cx, AbstractFramePtr frame, jsbytecode* pc,
-                                              MutableHandleValue res);
+MOZ_MUST_USE bool GetThisValueForDebuggerMaybeOptimizedOut(JSContext* cx, AbstractFramePtr frame,
+                                                           jsbytecode* pc, MutableHandleValue res);
 
-bool CheckVarNameConflict(JSContext* cx, Handle<LexicalEnvironmentObject*> lexicalEnv,
-                          HandlePropertyName name);
+MOZ_MUST_USE bool CheckVarNameConflict(JSContext* cx, Handle<LexicalEnvironmentObject*> lexicalEnv,
+                                       HandlePropertyName name);
 
-bool CheckLexicalNameConflict(JSContext* cx, Handle<LexicalEnvironmentObject*> lexicalScope,
-                              HandleObject varObj, HandlePropertyName name);
+MOZ_MUST_USE bool CheckLexicalNameConflict(JSContext* cx,
+                                           Handle<LexicalEnvironmentObject*> lexicalScope,
+                                           HandleObject varObj, HandlePropertyName name);
 
-bool CheckGlobalDeclarationConflicts(JSContext* cx, HandleScript script,
-                                     Handle<LexicalEnvironmentObject*> lexicalScope,
-                                     HandleObject varObj);
+MOZ_MUST_USE bool CheckGlobalDeclarationConflicts(JSContext* cx, HandleScript script,
+                                                  Handle<LexicalEnvironmentObject*> lexicalScope,
+                                                  HandleObject varObj);
 
-bool CheckEvalDeclarationConflicts(JSContext* cx, HandleScript script,
-                                   HandleObject scopeChain, HandleObject varObj);
+MOZ_MUST_USE bool CheckEvalDeclarationConflicts(JSContext* cx, HandleScript script,
+                                                HandleObject scopeChain, HandleObject varObj);
+
+MOZ_MUST_USE bool InitFunctionEnvironmentObjects(JSContext* cx, AbstractFramePtr frame);
 
 #ifdef DEBUG
 bool

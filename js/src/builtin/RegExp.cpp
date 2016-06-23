@@ -1672,10 +1672,10 @@ js::intrinsic_GetElemBaseForLambda(JSContext* cx, unsigned argc, Value* vp)
 
     /*
      * JSOP_GETALIASEDVAR tells us exactly where to find the base object 'b'.
-     * Rule out the (unlikely) possibility of a function with a call object
-     * since it would make our environment walk off by 1.
+     * Rule out the (unlikely) possibility of a function with environment
+     * objects since it would make our environment walk off.
      */
-    if (JSOp(*pc) != JSOP_GETALIASEDVAR || fun->needsCallObject())
+    if (JSOp(*pc) != JSOP_GETALIASEDVAR || fun->needsSomeEnvironmentObject())
         return true;
     EnvironmentCoordinate ec(pc);
     EnvironmentObject* env = &fun->environment()->as<EnvironmentObject>();
