@@ -2388,11 +2388,6 @@ ASTSerializer::statement(ParseNode* pn, MutableHandleValue dst)
       case PNK_EXPORT_FROM:
         return exportDeclaration(pn, dst);
 
-      case PNK_NAME:
-        MOZ_CRASH("TODOshu");
-        return false;
-        //return statement(pn->pn_lexdef, dst);
-
       case PNK_SEMI:
         if (pn->pn_kid) {
             RootedValue expr(cx);

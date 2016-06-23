@@ -326,6 +326,8 @@ class LexicalScope : public Scope
         return bindingData().nextFrameSlot;
     }
 
+    size_t sizeOfData(mozilla::MallocSizeOf mallocSizeOf) const;
+
     // Returns an empty shape for extensible global and non-syntactic lexical
     // scopes.
     static Shape* getEmptyExtensibleEnvironmentShape(JSContext* cx);
@@ -458,6 +460,8 @@ class FunctionScope : public Scope
         return bindingData().nonPositionalFormalStart;
     }
 
+    size_t sizeOfData(mozilla::MallocSizeOf mallocSizeOf) const;
+
     static Shape* getEmptyEnvironmentShape(JSContext* cx);
 };
 
@@ -533,6 +537,8 @@ class GlobalScope : public Scope
     bool hasBindings() const {
         return bindingData().length > 0;
     }
+
+    size_t sizeOfData(mozilla::MallocSizeOf mallocSizeOf) const;
 };
 
 template <>
@@ -632,6 +638,8 @@ class EvalScope : public Scope
             return true;
         return !nearestVarScopeForDirectEval(enclosing())->is<GlobalScope>();
     }
+
+    size_t sizeOfData(mozilla::MallocSizeOf mallocSizeOf) const;
 };
 
 template <>

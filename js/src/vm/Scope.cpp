@@ -767,10 +767,43 @@ BindingIter::init(EvalScope::BindingData& data, bool strict)
     }
 }
 
+size_t
+LexicalScope::sizeOfData(mozilla::MallocSizeOf mallocSizeOf) const
+{
+    return mallocSizeOf(&bindingData());
+}
+
+size_t
+FunctionScope::sizeOfData(mozilla::MallocSizeOf mallocSizeOf) const
+{
+    return mallocSizeOf(&data()) + mallocSizeOf(&bindingData());
+}
+
+size_t
+GlobalScope::sizeOfData(mozilla::MallocSizeOf mallocSizeOf) const
+{
+    return mallocSizeOf(&bindingData());
+}
+
+size_t
+EvalScope::sizeOfData(mozilla::MallocSizeOf mallocSizeOf) const
+{
+    return mallocSizeOf(&bindingData());
+}
+
 JS::ubi::Node::Size
 JS::ubi::Concrete<Scope>::size(mozilla::MallocSizeOf mallocSizeOf) const
 {
     Size size = js::gc::Arena::thingSize(get().asTenured().getAllocKind());
-    // TODOshu sizes
+
+    if (get().is<LexicalScope>())
+        size += get().as<LexicalScope>().sizeOfData(mallocSizeOf);
+    else if (get().is<FunctionScope>())
+        size += get().as<FunctionScope>().sizeOfData(mallocSizeOf);
+    else if (get().is<GlobalScope>())
+        size += get().as<GlobalScope>().sizeOfData(mallocSizeOf);
+    else if (get().is<EvalScope>())
+        size += get().as<EvalScope>().sizeOfData(mallocSizeOf);
+
     return size;
 }

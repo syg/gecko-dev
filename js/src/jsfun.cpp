@@ -1417,8 +1417,7 @@ JSFunction::createScriptForLazilyInterpretedFunction(JSContext* cx, HandleFuncti
         }
 
         if (script) {
-            // TODOshu
-            RootedScope enclosingScope(cx /*, lazy->enclosingScope() */);
+            RootedScope enclosingScope(cx, lazy->enclosingScope());
             RootedScript clonedScript(cx, CloneScriptIntoFunction(cx, enclosingScope, fun, script));
             if (!clonedScript)
                 return false;
