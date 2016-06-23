@@ -798,7 +798,7 @@ ToDisassemblySource(JSContext* cx, HandleValue v, JSAutoByteString* bytes)
 static bool
 ToDisassemblySource(JSContext* cx, HandleScope scope, JSAutoByteString* bytes)
 {
-    char* source = JS_sprintf_append(nullptr, "%s scope {", ScopeKindString(scope->kind()));
+    char* source = JS_sprintf_append(nullptr, "%s {", ScopeKindString(scope->kind()));
     if (!source) {
         ReportOutOfMemory(cx);
         return false;
@@ -809,7 +809,7 @@ ToDisassemblySource(JSContext* cx, HandleScope scope, JSAutoByteString* bytes)
         if (!AtomToPrintableString(cx, bi.name(), &nameBytes))
             return false;
 
-        source = JS_sprintf_append(source, "%s %s: ", BindingKindString(bi.kind()), &nameBytes);
+        source = JS_sprintf_append(source, "%s: ", nameBytes.ptr());
         if (!source) {
             ReportOutOfMemory(cx);
             return false;
@@ -818,25 +818,33 @@ ToDisassemblySource(JSContext* cx, HandleScope scope, JSAutoByteString* bytes)
         BindingLocation loc = bi.location();
         switch (loc.kind()) {
           case BindingLocation::Kind::Global:
-            source = JS_sprintf_append(source, " g");
+            source = JS_sprintf_append(source, "global");
             break;
 
           case BindingLocation::Kind::Frame:
-            source = JS_sprintf_append(source, " f %u", loc.slot());
+            source = JS_sprintf_append(source, "frame slot %u", loc.slot());
             break;
 
           case BindingLocation::Kind::Environment:
-            source = JS_sprintf_append(source, " e %u", loc.slot());
+            source = JS_sprintf_append(source, "env slot %u", loc.slot());
             break;
 
           case BindingLocation::Kind::Argument:
-            source = JS_sprintf_append(source, " a %u", loc.slot());
+            source = JS_sprintf_append(source, "arg slot %u", loc.slot());
             break;
         }
 
         if (!source) {
             ReportOutOfMemory(cx);
             return false;
+        }
+
+        if (!bi.isLast()) {
+            source = JS_sprintf_append(source, ", ");
+            if (!source) {
+                ReportOutOfMemory(cx);
+                return false;
+            }
         }
     }
 

@@ -812,6 +812,11 @@ class BindingIter
         settle();
     }
 
+    bool isLast() const {
+        MOZ_ASSERT(!done());
+        return index_ + 1 == length_;
+    }
+
     bool canHaveArgumentSlots() const {
         return canHaveSlots_ & CanHaveArgumentSlots;
     }
@@ -996,6 +1001,7 @@ class BindingIterOperations
   public:
     bool done() const { return iter().done(); }
     explicit operator bool() const { return !done(); }
+    bool isLast() const { return iter().isLast(); }
     bool canHaveArgumentSlots() const { return iter().canHaveArgumentSlots(); }
     bool canHaveFrameSlots() const { return iter().canHaveFrameSlots(); }
     bool canHaveEnvironmentSlots() const { return iter().canHaveEnvironmentSlots(); }
