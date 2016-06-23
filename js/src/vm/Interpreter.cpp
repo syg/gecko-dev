@@ -4951,9 +4951,13 @@ js::ThrowUninitializedThis(JSContext* cx, AbstractFramePtr frame)
     } else {
         MOZ_ASSERT(frame.isEvalFrame());
         MOZ_ASSERT(frame.script()->isDirectEvalInFunction());
-        fun = nullptr;
-        // TODOshu use ScopeIter and eval scopes
-        // fun = frame.script()->getCallerFunction();
+        for (ScopeIter si(frame.script()->enclosingScope()); si; si++) {
+            if (si.scope()->is<FunctionScope>()) {
+                fun = si.scope()->as<FunctionScope>().canonicalFunction();
+                break;
+            }
+        }
+        MOZ_ASSERT(fun);
     }
 
     if (fun->isDerivedClassConstructor()) {
