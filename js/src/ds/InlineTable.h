@@ -320,8 +320,8 @@ class InlineTable
         MOZ_ASSERT(p);
         if (p.isInlinePtr_) {
             MOZ_ASSERT(inlCount_ > 0);
-            MOZ_ASSERT(p.inlPtr->key != nullptr);
-            p.inlPtr->key = nullptr;
+            MOZ_ASSERT(p.inlPtr_->key != nullptr);
+            p.inlPtr_->key = nullptr;
             --inlCount_;
             return;
         }

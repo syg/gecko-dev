@@ -173,6 +173,10 @@ class ParseContext : public Nestable<ParseContext>
             return used().has(name);
         }
 
+        // A helper that moves all declared parameter names to the parameter
+        // default expression scope.
+        static MOZ_MUST_USE bool moveFormalParameterDeclaredNamesForDefaults(ParseContext* pc);
+
         // An iterator for the set of free names in the current scope: the set
         // of uses subtracting the set of declared names.
         class FreeNameIter

@@ -141,6 +141,39 @@ ParseContext::Scope::dump(ParseContext* pc)
     fprintf(stdout, "\n");
 }
 
+/* static */ bool
+ParseContext::Scope::moveFormalParameterDeclaredNamesForDefaults(ParseContext* pc)
+{
+    // If we had default expressions, move all all formal parameter
+    // declarations from the var scope to the defaults scope as 'let'
+    // bindings, as the defaults scope has TDZ.
+
+    Scope& varScope = pc->varScope();
+    Scope& defaultsScope = pc->defaultsScope();
+    Vector<JSAtom*> paramNames(pc->sc()->context);
+
+    for (DeclaredNameMap::Range r = varScope.declared().all(); !r.empty(); r.popFront()) {
+        DeclarationKind declKind = r.front().value()->kind();
+        if (declKind == DeclarationKind::PositionalFormalParameter ||
+            declKind == DeclarationKind::FormalParameter)
+        {
+            JSAtom* name = r.front().key();
+            AddDeclaredNamePtr p = defaultsScope.lookupDeclaredNameForAdd(name);
+            MOZ_ASSERT(!p);
+            if (!defaultsScope.addDeclaredName(pc, p, name, DeclarationKind::Let))
+                return false;
+
+            if (!paramNames.append(name))
+                return false;
+        }
+    }
+
+    for (uint32_t i = 0; i < paramNames.length(); i++)
+        varScope.declared().remove(paramNames[i]);
+
+    return true;
+}
+
 bool
 ParseContext::Scope::propagateFreeNames(ParseContext* pc)
 {
@@ -2190,21 +2223,8 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
         }
 
         if (hasDefaults) {
-            // If we had default expressions, move all all formal parameter
-            // declarations from the var scope to the defaults scope as 'let'
-            // bindings, as the defaults scope has TDZ.
-            ParseContext::Scope& defaultsScope = pc->defaultsScope();
-            for (BindingIter bi = pc->varScope().bindings(pc); bi; bi++) {
-                DeclarationKind declKind = bi.declarationKind();
-                if (declKind == DeclarationKind::PositionalFormalParameter ||
-                    declKind == DeclarationKind::FormalParameter)
-                {
-                    AddDeclaredNamePtr p = defaultsScope.lookupDeclaredNameForAdd(bi.name());
-                    MOZ_ASSERT(!p);
-                    if (!defaultsScope.addDeclaredName(pc, p, bi.name(), DeclarationKind::Let))
-                        return false;
-                }
-            }
+            if (!ParseContext::Scope::moveFormalParameterDeclaredNamesForDefaults(pc))
+                return false;
         } else {
             funbox->length = positionalFormals.length() - hasRest;
         }
