@@ -3547,7 +3547,7 @@ IsFunctionCloneable(HandleFunction fun)
         // lexical scope.
         if (scope->is<LexicalScope>()) {
             LexicalScope& lexicalScope = scope->as<LexicalScope>();
-            if (lexicalScope.environmentShape())
+            if (lexicalScope.hasEnvironment())
                 return false;
 
             Scope* enclosing = lexicalScope.enclosing();

@@ -205,8 +205,8 @@ CallObject::createTemplateObject(JSContext* cx, HandleScript script, HandleObjec
  * must be null.
  */
 CallObject*
-CallObject::create(JSContext* cx, HandleScript script, HandleObject enclosing,
-                   HandleFunction callee)
+CallObject::create(JSContext* cx, HandleScript script, HandleFunction callee,
+                   HandleObject enclosing)
 {
     gc::InitialHeap heap = script->treatAsRunOnce() ? gc::TenuredHeap : gc::DefaultHeap;
     CallObject* callobj = CallObject::createTemplateObject(cx, script, enclosing, heap);
@@ -226,22 +226,11 @@ CallObject::create(JSContext* cx, HandleScript script, HandleObject enclosing,
 }
 
 CallObject*
-CallObject::createForFunction(JSContext* cx, HandleObject enclosing, HandleFunction callee)
+CallObject::createForFunction(JSContext* cx, HandleFunction callee, HandleObject enclosing)
 {
-    RootedObject envChain(cx, enclosing);
-    MOZ_ASSERT(envChain);
-
-    /*
-     * For a named function expression Call's parent points to an environment
-     * object holding function's name.
-     */
+    MOZ_ASSERT(enclosing);
     RootedScript script(cx, callee->nonLazyScript());
-    if (callee->isNamedLambda()) {
-        RootedScope declEnvScope(cx, script->outermostScope());
-        // TODOshu make the block env.
-    }
-
-    return create(cx, script, envChain, callee);
+    return create(cx, script, callee, enclosing);
 }
 
 CallObject*
@@ -253,15 +242,14 @@ CallObject::createForFunction(JSContext* cx, AbstractFramePtr frame)
     RootedObject envChain(cx, frame.environmentChain());
     RootedFunction callee(cx, frame.callee());
 
-    CallObject* callobj = createForFunction(cx, envChain, callee);
+    CallObject* callobj = createForFunction(cx, callee, envChain);
     if (!callobj)
         return nullptr;
 
-    if (frame.script()->hasDefaults()) {
-        // TODOshu make the defaults env.
-    } else {
+    if (!frame.script()->hasDefaults()) {
         // If there are no defaults, copy the aliased arguments into the call
-        // object manually.
+        // object manually. If there are defaults, bytecode is generated to do
+        // the copying.
 
         for (ClosedOverArgumentSlotIter fi(frame.script()); fi; fi++) {
             callobj->setAliasedBinding(cx, fi, frame.unaliasedFormal(fi.argumentSlot(),
@@ -279,10 +267,9 @@ CallObject::createForStrictEval(JSContext* cx, AbstractFramePtr frame)
     MOZ_ASSERT_IF(frame.isInterpreterFrame(), cx->interpreterFrame() == frame.asInterpreterFrame());
     MOZ_ASSERT_IF(frame.isInterpreterFrame(), cx->interpreterRegs().pc == frame.script()->code());
 
-    RootedFunction callee(cx);
     RootedScript script(cx, frame.script());
     RootedObject envChain(cx, frame.environmentChain());
-    return create(cx, script, envChain, callee);
+    return create(cx, script, nullptr, envChain);
 }
 
 CallObject*
@@ -748,7 +735,7 @@ LexicalEnvironmentObject::create(JSContext* cx, HandleShape shape, HandleObject 
     if (!group)
         return nullptr;
 
-    gc::AllocKind allocKind = gc::GetGCObjectKind(&LexicalEnvironmentObject::class_);
+    gc::AllocKind allocKind = gc::GetGCObjectKind(shape->numFixedSlots());
     MOZ_ASSERT(CanBeFinalizedInBackground(allocKind, &LexicalEnvironmentObject::class_));
     allocKind = GetBackgroundAllocKind(allocKind);
     RootedNativeObject obj(cx,
@@ -772,7 +759,7 @@ LexicalEnvironmentObject::create(JSContext* cx, Handle<LexicalScope*> scope,
                                  HandleObject enclosing, gc::InitialHeap heap)
 {
     assertSameCompartment(cx, enclosing);
-    MOZ_ASSERT(scope->environmentShape());
+    MOZ_ASSERT(scope->hasEnvironment());
 
     RootedShape shape(cx, scope->environmentShape());
     LexicalEnvironmentObject* env = create(cx, shape, enclosing, heap);
@@ -834,7 +821,7 @@ LexicalEnvironmentObject::createNonSyntactic(JSContext* cx, HandleObject enclosi
 /* static */ LexicalEnvironmentObject*
 LexicalEnvironmentObject::createHollowForDebug(JSContext* cx, Handle<LexicalScope*> scope)
 {
-    MOZ_ASSERT(!scope->environmentShape());
+    MOZ_ASSERT(!scope->hasEnvironment());
 
     RootedShape shape(cx, LexicalScope::getEmptyExtensibleEnvironmentShape(cx));
     if (!shape)
@@ -952,7 +939,7 @@ DeclEnvObject::create(JSContext* cx, HandleFunction canonicalFun, HandleObject e
                       gc::InitialHeap heap)
 {
     MOZ_ASSERT(canonicalFun->isNamedLambda());
-    RootedScope scope(cx, canonicalFun->nonLazyScript()->outermostScope());
+    RootedScope scope(cx, canonicalFun->nonLazyScript()->declEnvScope());
     MOZ_ASSERT(scope->environmentShape());
     MOZ_ASSERT(scope->environmentShape()->slot() == lambdaSlot());
     MOZ_ASSERT(!scope->environmentShape()->writable());
@@ -976,13 +963,10 @@ DeclEnvObject::createTemplateObject(JSContext* cx, HandleFunction canonicalFun,
 }
 
 /* static */ DeclEnvObject*
-DeclEnvObject::create(JSContext* cx, HandleFunction fun)
+DeclEnvObject::create(JSContext* cx, AbstractFramePtr frame)
 {
-    RootedObject enclosing(cx);
-    if (fun->environment())
-        enclosing = fun->environment();
-    else
-        enclosing = &cx->global()->lexicalEnvironment();
+    RootedFunction fun(cx, frame.callee());
+    RootedObject enclosing(cx, frame.environmentChain());
     return create(cx, fun, enclosing, gc::DefaultHeap);
 }
 
@@ -1483,7 +1467,7 @@ class DebugEnvironmentProxyHandler : public BaseProxyHandler
                     // have an environment shape at all is a "hollow" block
                     // object reflected for missing block scopes. Their slot
                     // values are lost.
-                    if (!block->scope().environmentShape()) {
+                    if (!block->scope().hasEnvironment()) {
                         *accessResult = ACCESS_LOST;
                         return true;
                     }
@@ -2149,7 +2133,7 @@ DebugEnvironmentProxy::isOptimizedOut() const
 
     if (e.is<LexicalEnvironmentObject>()) {
         return e.as<LexicalEnvironmentObject>().isSyntactic() &&
-               !e.as<LexicalEnvironmentObject>().scope().environmentShape();
+               !e.as<LexicalEnvironmentObject>().scope().hasEnvironment();
     }
 
     if (e.is<CallObject>()) {

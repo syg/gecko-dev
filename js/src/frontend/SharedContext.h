@@ -199,10 +199,6 @@ class FunctionContextFlags
     //
     bool hasExtensibleScope:1;
 
-    // This function refers directly to its name in a way which requires the
-    // name to be a separate object on the scope chain.
-    bool needsDeclEnvObject:1;
-
     // Technically, every function has a binding named 'arguments'. Internally,
     // this binding is only added when 'arguments' is mentioned by the function
     // body. This flag indicates whether 'arguments' has been bound either
@@ -251,7 +247,6 @@ class FunctionContextFlags
     FunctionContextFlags()
      :  mightAliasLocals(false),
         hasExtensibleScope(false),
-        needsDeclEnvObject(false),
         argumentsHasLocalBinding(false),
         definitelyNeedsArgsObj(false),
         needsHomeObject(false),
@@ -551,7 +546,6 @@ class FunctionBox : public ObjectBox, public SharedContext
 
     bool mightAliasLocals()          const { return funCxFlags.mightAliasLocals; }
     bool hasExtensibleScope()        const { return funCxFlags.hasExtensibleScope; }
-    bool needsDeclEnvObject()        const { return funCxFlags.needsDeclEnvObject; }
     bool hasThisBinding()            const { return funCxFlags.hasThisBinding; }
     bool argumentsHasLocalBinding()  const { return funCxFlags.argumentsHasLocalBinding; }
     bool definitelyNeedsArgsObj()    const { return funCxFlags.definitelyNeedsArgsObj; }
@@ -561,7 +555,6 @@ class FunctionBox : public ObjectBox, public SharedContext
 
     void setMightAliasLocals()             { funCxFlags.mightAliasLocals         = true; }
     void setHasExtensibleScope()           { funCxFlags.hasExtensibleScope       = true; }
-    void setNeedsDeclEnvObject()           { funCxFlags.needsDeclEnvObject       = true; }
     void setHasThisBinding()               { funCxFlags.hasThisBinding           = true; }
     void setArgumentsHasLocalBinding()     { funCxFlags.argumentsHasLocalBinding = true; }
     void setDefinitelyNeedsArgsObj()       { MOZ_ASSERT(funCxFlags.argumentsHasLocalBinding);

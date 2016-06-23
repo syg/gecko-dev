@@ -145,6 +145,13 @@ JSScript::global() const
     return *compartment()->maybeGlobal();
 }
 
+inline js::Scope*
+JSScript::declEnvScope() const
+{
+    MOZ_ASSERT(functionNonDelazifying()->isNamedLambda());
+    return outermostScope();
+}
+
 inline JSPrincipals*
 JSScript::principals()
 {

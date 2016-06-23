@@ -953,7 +953,7 @@ PopEnvironment(JSContext* cx, EnvironmentIter& ei)
       case ScopeKind::Catch:
         if (cx->compartment()->isDebuggee())
             DebugEnvironments::onPopBlock(cx, ei);
-        if (ei.scope().as<LexicalScope>().environmentShape())
+        if (ei.scope().as<LexicalScope>().hasEnvironment())
             ei.initialFrame().popBlock(cx);
         break;
       case ScopeKind::With:
@@ -3706,7 +3706,7 @@ CASE(JSOP_POPBLOCKSCOPE)
 #ifdef DEBUG
     // Pop block from scope chain.
     Scope* scope = script->lookupScope(REGS.pc);
-    MOZ_ASSERT(scope && scope->is<LexicalScope>() && scope->as<LexicalScope>().environmentShape());
+    MOZ_ASSERT(scope && scope->is<LexicalScope>() && scope->as<LexicalScope>().hasEnvironment());
 #endif
 
     if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
@@ -3721,7 +3721,7 @@ CASE(JSOP_DEBUGLEAVEBLOCK)
 {
     MOZ_ASSERT(script->lookupScope(REGS.pc));
     MOZ_ASSERT(script->lookupScope(REGS.pc)->is<LexicalScope>());
-    MOZ_ASSERT(!script->lookupScope(REGS.pc)->as<LexicalScope>().environmentShape());
+    MOZ_ASSERT(!script->lookupScope(REGS.pc)->as<LexicalScope>().hasEnvironment());
 
     // FIXME: This opcode should not be necessary.  The debugger shouldn't need
     // help from bytecode to do its job.  See bug 927782.

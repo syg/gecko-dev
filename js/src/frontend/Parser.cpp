@@ -300,12 +300,6 @@ ParseContext::finishExtraFunctionScopes()
     if (fun->isNamedLambda()) {
         if (!defaultsScope().propagateFreeNames(this))
             return false;
-
-        // If the function name of a named lambda is closed over, we mark the
-        // function as needing a dynamic environment holding itself.
-        DeclaredNamePtr p = declEnvScope().lookupDeclaredName(fun->name());
-        if (p->value()->closedOver())
-            functionBox()->setNeedsDeclEnvObject();
     }
 
     return true;

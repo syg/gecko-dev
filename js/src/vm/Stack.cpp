@@ -110,7 +110,7 @@ static inline void
 AssertScopeMatchesEnvironment(JSContext* cx, JSScript* script, JSObject* env)
 {
     RootedObject originalEnv(cx, env);
-    for (ScopeIter si(script->enclosingScope()); si; si++) {
+    for (ScopeIter si(script->bodyScope()); si; si++) {
         if (si.kind() == ScopeKind::NonSyntactic) {
             while (env->is<WithEnvironmentObject>() ||
                    env->is<NonSyntacticVariablesObject>() ||
@@ -178,11 +178,33 @@ AssertScopeMatchesEnvironment(JSContext* cx, JSScript* script, JSObject* env)
 bool
 InterpreterFrame::initFunctionEnvironmentObjects(JSContext* cx)
 {
-    CallObject* callobj = CallObject::createForFunction(cx, this);
-    if (!callobj)
-        return false;
-    pushOnEnvironmentChain(*callobj);
-    flags_ |= HAS_CALL_OBJ;
+    // Named lambdas may have an environment that holds itself for recursion.
+    if (callee().isNamedLambda() && script()->declEnvScope()->hasEnvironment()) {
+        DeclEnvObject* declEnv = DeclEnvObject::create(cx, this);
+        if (!declEnv)
+            return false;
+        pushOnEnvironmentChain(*declEnv);
+    }
+
+    // If the function has parameter default expressions, there may be an
+    // extra environment to hold the parameters.
+    if (script()->hasDefaults() && script()->defaultsScope()->hasEnvironment()) {
+        Rooted<LexicalScope*> defaultsScope(cx, script()->defaultsScope());
+        LexicalEnvironmentObject* defaultsEnv =
+            LexicalEnvironmentObject::create(cx, defaultsScope, this);
+        if (!defaultsEnv)
+            return false;
+        pushOnEnvironmentChain(*defaultsEnv);
+    }
+
+    if (callee().needsCallObject()) {
+        CallObject* callobj = CallObject::createForFunction(cx, this);
+        if (!callobj)
+            return false;
+        pushOnEnvironmentChain(*callobj);
+        flags_ |= HAS_CALL_OBJ;
+    }
+
     return true;
 }
 
@@ -225,14 +247,14 @@ InterpreterFrame::prologue(JSContext* cx)
         return probes::EnterScript(cx, script, nullptr, this);
     }
 
-    AssertScopeMatchesEnvironment(cx, script, environmentChain());
-
     if (isModuleFrame())
         return probes::EnterScript(cx, script, nullptr, this);
 
     MOZ_ASSERT(isFunctionFrame());
-    if (callee().needsCallObject() && !initFunctionEnvironmentObjects(cx))
+    if (!initFunctionEnvironmentObjects(cx))
         return false;
+
+    AssertScopeMatchesEnvironment(cx, script, environmentChain());
 
     if (isConstructing()) {
         if (callee().isBoundFunction()) {

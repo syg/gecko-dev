@@ -303,7 +303,6 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope, HandleScrip
         Strict,
         ContainsDynamicNameAccess,
         FunHasExtensibleScope,
-        FunNeedsDeclEnvObject,
         FunHasAnyAliasedFormal,
         ArgumentsHasVarBinding,
         NeedsArgsObj,
@@ -406,8 +405,6 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope, HandleScrip
             scriptBits |= (1 << ContainsDynamicNameAccess);
         if (script->funHasExtensibleScope())
             scriptBits |= (1 << FunHasExtensibleScope);
-        if (script->funNeedsDeclEnvObject())
-            scriptBits |= (1 << FunNeedsDeclEnvObject);
         if (script->funHasAnyAliasedFormal())
             scriptBits |= (1 << FunHasAnyAliasedFormal);
         if (script->argumentsHasVarBinding())
@@ -541,8 +538,6 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope, HandleScrip
             script->bindingsAccessedDynamically_ = true;
         if (scriptBits & (1 << FunHasExtensibleScope))
             script->funHasExtensibleScope_ = true;
-        if (scriptBits & (1 << FunNeedsDeclEnvObject))
-            script->funNeedsDeclEnvObject_ = true;
         if (scriptBits & (1 << FunHasAnyAliasedFormal))
             script->funHasAnyAliasedFormal_ = true;
         if (scriptBits & (1 << ArgumentsHasVarBinding))
@@ -2502,7 +2497,6 @@ JSScript::initFromFunctionBox(ExclusiveContext* cx, HandleScript script,
                               frontend::FunctionBox* funbox)
 {
     script->funHasExtensibleScope_ = funbox->hasExtensibleScope();
-    script->funNeedsDeclEnvObject_ = funbox->needsDeclEnvObject();
     script->needsHomeObject_       = funbox->needsHomeObject();
     script->isDerivedClassConstructor_ = funbox->isDerivedClassConstructor();
 
@@ -2539,7 +2533,6 @@ JSScript::initFromModuleBox(ExclusiveContext* cx, HandleScript script,
                             frontend::ModuleBox* modulebox)
 {
     script->funHasExtensibleScope_ = false;
-    script->funNeedsDeclEnvObject_ = false;
     script->needsHomeObject_ = false;
     script->isDerivedClassConstructor_ = false;
     script->funLength_ = 0;
@@ -3181,7 +3174,6 @@ js::detail::CopyScript(JSContext* cx, HandleScript src, HandleScript dst,
     dst->hasNonSyntacticScope_ = scopes[0]->hasEnclosing(ScopeKind::NonSyntactic);
     dst->bindingsAccessedDynamically_ = src->bindingsAccessedDynamically();
     dst->funHasExtensibleScope_ = src->funHasExtensibleScope();
-    dst->funNeedsDeclEnvObject_ = src->funNeedsDeclEnvObject();
     dst->funHasAnyAliasedFormal_ = src->funHasAnyAliasedFormal();
     dst->hasSingletons_ = src->hasSingletons();
     dst->treatAsRunOnce_ = src->treatAsRunOnce();

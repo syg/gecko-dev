@@ -137,7 +137,6 @@ class JSFunction : public js::NativeObject
         // Note: this should be kept in sync with FunctionBox::needsCallObject().
         return nonLazyScript()->hasAnyAliasedBindings() ||
                nonLazyScript()->funHasExtensibleScope() ||
-               nonLazyScript()->funNeedsDeclEnvObject() ||
                nonLazyScript()->needsHomeObject()       ||
                nonLazyScript()->isDerivedClassConstructor() ||
                isGenerator();

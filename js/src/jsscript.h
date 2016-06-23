@@ -774,7 +774,6 @@ class JSScript : public js::gc::TenuredCell
     // See FunctionContextFlags.
     bool bindingsAccessedDynamically_:1;
     bool funHasExtensibleScope_:1;
-    bool funNeedsDeclEnvObject_:1;
 
     // True if any formalIsAliased(i).
     bool funHasAnyAliasedFormal_:1;
@@ -1059,9 +1058,6 @@ class JSScript : public js::gc::TenuredCell
     bool bindingsAccessedDynamically() const { return bindingsAccessedDynamically_; }
     bool funHasExtensibleScope() const {
         return funHasExtensibleScope_;
-    }
-    bool funNeedsDeclEnvObject() const {
-        return funNeedsDeclEnvObject_;
     }
     bool funHasAnyAliasedFormal() const {
         return funHasAnyAliasedFormal_;
@@ -1417,6 +1413,13 @@ class JSScript : public js::gc::TenuredCell
         size_t index = 0;
         return getScope(index);
     }
+
+    js::LexicalScope* defaultsScope() const {
+        MOZ_ASSERT(hasDefaults());
+        return &bodyScope()->enclosing()->as<js::LexicalScope>();
+    }
+
+    inline js::Scope* declEnvScope() const;
 
     js::Scope* enclosingScope() const {
         return outermostScope()->enclosing();

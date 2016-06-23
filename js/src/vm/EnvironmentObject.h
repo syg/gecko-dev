@@ -239,8 +239,8 @@ class CallObject : public VarEnvironmentObject
   protected:
     static const uint32_t CALLEE_SLOT = 1;
 
-    static CallObject* create(JSContext* cx, HandleScript script, HandleObject enclosing,
-                              HandleFunction callee);
+    static CallObject* create(JSContext* cx, HandleScript script, HandleFunction callee,
+                              HandleObject enclosing);
 
   public:
     static const uint32_t RESERVED_SLOTS = 2;
@@ -263,8 +263,8 @@ class CallObject : public VarEnvironmentObject
     static CallObject* createTemplateObject(JSContext* cx, HandleScript script,
                                             HandleObject enclosing, gc::InitialHeap heap);
 
-    static CallObject* createForFunction(JSContext* cx, HandleObject enclosing,
-                                         HandleFunction callee);
+    static CallObject* createForFunction(JSContext* cx, HandleFunction callee,
+                                         HandleObject enclosing);
 
     static CallObject* createForFunction(JSContext* cx, AbstractFramePtr frame);
     static CallObject* createForStrictEval(JSContext* cx, AbstractFramePtr frame);
@@ -446,7 +446,7 @@ class DeclEnvObject : public LexicalEnvironmentObject
     static DeclEnvObject* createTemplateObject(JSContext* cx, HandleFunction canonicalFun,
                                                gc::InitialHeap heap);
 
-    static DeclEnvObject* create(JSContext* cx, HandleFunction fun);
+    static DeclEnvObject* create(JSContext* cx, AbstractFramePtr frame);
 
     // For JITs.
     static size_t lambdaSlot();
