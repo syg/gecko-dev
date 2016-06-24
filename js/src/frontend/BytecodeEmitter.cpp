@@ -712,7 +712,7 @@ BytecodeEmitter::EmitterScope::locationBoundInScope(BytecodeEmitter* bce, JSAtom
     // particular scope, it must already be in the cache. Furthermore, don't
     // consult the fallback location as we only care about binding names.
     Maybe<NameLocation> loc;
-    if (NameLocationMap::Ptr p = nameCache().lookup(name)) {
+    if (NameLocationMap::Ptr p = target->nameCache().lookup(name)) {
         NameLocation l = p->value().wrapped;
         if (l.kind() == NameLocation::Kind::EnvironmentCoordinate)
             loc = Some(l.addHops(extraHops));

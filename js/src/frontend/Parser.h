@@ -179,9 +179,13 @@ class ParseContext : public Nestable<ParseContext>
             return used().has(name);
         }
 
-        // A helper that moves all declared parameter names to the parameter
-        // default expression scope.
+        // Move all declared parameter names to the parameter default
+        // expression scope.
         static MOZ_MUST_USE bool moveFormalParameterDeclaredNamesForDefaults(ParseContext* pc);
+
+        // Remove all VarForAnnexB declarations of a certain name from all scopes
+        // in pc's scope stack.
+        static void removeVarForAnnexB(ParseContext* pc, JSAtom* name);
 
         // An iterator for the set of used names in the current scope.
         class UsedNameIter
@@ -361,6 +365,10 @@ class ParseContext : public Nestable<ParseContext>
     // defaultsScope, and varScope.
     mozilla::Maybe<Scope> varScope_;
 
+    // Inner function boxes in this context to try Annex B.3.3 semantics
+    // on. Only used when full parsing.
+    Vector<FunctionBox*> innerFunctionBoxesForAnnexB_;
+
     // Set when compiling a function using Parser::standaloneFunctionBody via
     // the Function or Generator constructor.
     bool isStandaloneFunctionBody_;
@@ -381,10 +389,6 @@ class ParseContext : public Nestable<ParseContext>
 
     // All inner functions in this context. Only used when syntax parsing.
     Rooted<GCVector<JSFunction*>> innerFunctions;
-
-    // Inner function boxes in this context to try Annex B.3.3 semantics
-    // on. Only used when full parsing.
-    Vector<FunctionBox*> innerFunctionBoxesForAnnexB;
 
     // In a function context, points to a Directive struct that can be updated
     // to reflect new directives encountered in the Directive Prologue that
@@ -417,12 +421,12 @@ class ParseContext : public Nestable<ParseContext>
         sc_(sc),
         innermostStatement_(nullptr),
         innermostScope_(nullptr),
+        innerFunctionBoxesForAnnexB_(prs->context),
         isStandaloneFunctionBody_(false),
         superScopeNeedsHomeObject_(false),
         lastYieldOffset(NoYieldOffset),
         positionalFormalParameterNames(prs->context),
         innerFunctions(prs->context, GCVector<JSFunction*>(prs->context)),
-        innerFunctionBoxesForAnnexB(prs->context),
         newDirectives(newDirectives),
         inDeclDestructuring(false),
         funHasReturnExpr(false),
@@ -496,6 +500,10 @@ class ParseContext : public Nestable<ParseContext>
     T* findInnermostStatement(Predicate predicate) {
         return Statement::findNearest<T>(innermostStatement_, predicate);
     }
+
+    MOZ_MUST_USE bool addInnerFunctionBoxForAnnexB(FunctionBox* funbox);
+    void removeInnerFunctionBoxesForAnnexB(JSAtom* name);
+    void finishInnerFunctionBoxesForAnnexB();
 
     // True if we are at the topmost level of a entire script or function body.
     // For example, while parsing this code we would encounter f1 and f2 at
@@ -790,7 +798,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
      */
     ObjectBox* newObjectBox(JSObject* obj);
     FunctionBox* newFunctionBox(Node fn, JSFunction* fun, Directives directives,
-                                GeneratorKind generatorKind);
+                                GeneratorKind generatorKind, bool tryAnnexB);
     ModuleBox* newModuleBox(Node pn, HandleModuleObject module, ModuleBuilder& builder);
 
     /*
@@ -1121,7 +1129,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
 
     bool checkFunctionDefinition(HandleAtom funAtom, Node pn, FunctionSyntaxKind kind,
                                  bool *tryAnnexB);
-    bool skipLazyInnerFunction(Node pn);
+    bool skipLazyInnerFunction(Node pn, bool tryAnnexB);
     bool innerFunction(Node pn, ParseContext* outerpc, HandleFunction fun,
                        InHandling inHandling, FunctionSyntaxKind kind,
                        GeneratorKind generatorKind, bool tryAnnexB,
@@ -1166,6 +1174,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     bool noteDestructuredPositionalFormalParameter();
     bool tryDeclareVar(HandlePropertyName name, DeclarationKind kind,
                        mozilla::Maybe<DeclarationKind>* redeclaredKind);
+    bool tryDeclareVarForAnnexB(HandlePropertyName name, bool* tryAnnexB);
     bool noteDeclaredName(HandlePropertyName name, DeclarationKind kind, Node node = null());
     bool noteUsedName(HandlePropertyName name, UsedNameInfo info);
 

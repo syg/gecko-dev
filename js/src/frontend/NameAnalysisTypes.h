@@ -77,7 +77,7 @@ enum class DeclarationKind : uint8_t
     Import,
     BodyLevelFunction,
     LexicalFunction,
-    AnnexBVar,
+    VarForAnnexB,
     CatchParameter
 };
 
@@ -91,6 +91,7 @@ DeclarationKindToBindingKind(DeclarationKind kind)
 
       case DeclarationKind::Var:
       case DeclarationKind::BodyLevelFunction:
+      case DeclarationKind::VarForAnnexB:
         return BindingKind::Var;
 
       case DeclarationKind::Let:
@@ -101,10 +102,9 @@ DeclarationKindToBindingKind(DeclarationKind kind)
 
       case DeclarationKind::Const:
         return BindingKind::Const;
-
-      default:
-        MOZ_CRASH("Bad DeclarationKind");
     }
+
+    MOZ_CRASH("Bad DeclarationKind");
 }
 
 static inline bool

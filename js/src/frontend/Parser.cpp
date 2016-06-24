@@ -104,11 +104,13 @@ DeclarationKindString(DeclarationKind kind)
         return "function";
       case DeclarationKind::LexicalFunction:
         return "function";
+      case DeclarationKind::VarForAnnexB:
+        return "annex b var";
       case DeclarationKind::CatchParameter:
         return "catch parameter";
-      default:
-        MOZ_CRASH("Bad DeclarationKind");
     }
+
+    MOZ_CRASH("Bad DeclarationKind");
 }
 
 void
@@ -174,6 +176,26 @@ ParseContext::Scope::moveFormalParameterDeclaredNamesForDefaults(ParseContext* p
         varScope.declared().remove(paramNames[i]);
 
     return true;
+}
+
+/* static */ void
+ParseContext::Scope::removeVarForAnnexB(ParseContext* pc, JSAtom* name)
+{
+    MOZ_ASSERT(!pc->sc()->strict());
+
+    for (ParseContext::Scope* scope = pc->innermostScope();
+         scope != pc->varScope().enclosing();
+         scope = scope->enclosing())
+    {
+        if (DeclaredNamePtr p = scope->declared().lookup(name)) {
+            if (p->value()->kind() == DeclarationKind::VarForAnnexB)
+                scope->declared().remove(p);
+        }
+    }
+
+    // Annex B semantics no longer applies to any functions with this name, as
+    // an early error would have occurred.
+    pc->removeInnerFunctionBoxesForAnnexB(name);
 }
 
 bool
@@ -298,6 +320,38 @@ ParseContext::finishExtraFunctionScopes()
     }
 
     return true;
+}
+
+bool
+ParseContext::addInnerFunctionBoxForAnnexB(FunctionBox* funbox)
+{
+    for (uint32_t i = 0; i < innerFunctionBoxesForAnnexB_.length(); i++) {
+        if (!innerFunctionBoxesForAnnexB_[i]) {
+            innerFunctionBoxesForAnnexB_[i] = funbox;
+            return true;
+        }
+    }
+    return innerFunctionBoxesForAnnexB_.append(funbox);
+}
+
+void
+ParseContext::removeInnerFunctionBoxesForAnnexB(JSAtom* name)
+{
+    for (uint32_t i = 0; i < innerFunctionBoxesForAnnexB_.length(); i++) {
+        if (FunctionBox* funbox = innerFunctionBoxesForAnnexB_[i]) {
+            if (funbox->function()->name() == name)
+                innerFunctionBoxesForAnnexB_[i] = nullptr;
+        }
+    }
+}
+
+void
+ParseContext::finishInnerFunctionBoxesForAnnexB()
+{
+    for (uint32_t i = 0; i < innerFunctionBoxesForAnnexB_.length(); i++) {
+        if (FunctionBox* funbox = innerFunctionBoxesForAnnexB_[i])
+            funbox->isAnnexB = true;
+    }
 }
 
 ParseContext::~ParseContext()
@@ -606,9 +660,10 @@ Parser<ParseHandler>::newObjectBox(JSObject* obj)
 template <typename ParseHandler>
 FunctionBox*
 Parser<ParseHandler>::newFunctionBox(Node fn, JSFunction* fun, Directives inheritedDirectives,
-                                     GeneratorKind generatorKind)
+                                     GeneratorKind generatorKind, bool tryAnnexB)
 {
     MOZ_ASSERT(fun);
+    MOZ_ASSERT_IF(tryAnnexB, !pc->sc()->strict());
 
     /*
      * We use JSContext.tempLifoAlloc to allocate parsed objects and place them
@@ -628,6 +683,9 @@ Parser<ParseHandler>::newFunctionBox(Node fn, JSFunction* fun, Directives inheri
     traceListHead = funbox;
     if (fn)
         handler.setFunctionBox(fn, funbox);
+
+    if (tryAnnexB && !pc->addInnerFunctionBoxForAnnexB(funbox))
+        return nullptr;
 
     return funbox;
 }
@@ -848,7 +906,7 @@ DeclarationKindIsVar(DeclarationKind kind)
 {
     return kind == DeclarationKind::Var ||
            kind == DeclarationKind::BodyLevelFunction ||
-           kind == DeclarationKind::AnnexBVar;
+           kind == DeclarationKind::VarForAnnexB;
 }
 
 template <typename ParseHandler>
@@ -895,6 +953,26 @@ Parser<ParseHandler>::tryDeclareVar(HandlePropertyName name, DeclarationKind kin
             if (!scope->addDeclaredName(pc, p, name, kind))
                 return false;
         }
+    }
+
+    return true;
+}
+
+template <typename ParseHandler>
+bool
+Parser<ParseHandler>::tryDeclareVarForAnnexB(HandlePropertyName name, bool* tryAnnexB)
+{
+    Maybe<DeclarationKind> redeclaredKind;
+    if (!tryDeclareVar(name, DeclarationKind::VarForAnnexB, &redeclaredKind))
+        return false;
+
+    if (redeclaredKind) {
+        // If an early error would have occurred, undo all the VarForAnnexB
+        // declarations.
+        *tryAnnexB = false;
+        ParseContext::Scope::removeVarForAnnexB(pc, name);
+    } else {
+        *tryAnnexB = true;
     }
 
     return true;
@@ -952,11 +1030,15 @@ Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind 
             // compatibility reasons.
             if (pc->sc()->strict() ||
                 (p->value()->kind() != DeclarationKind::LexicalFunction &&
-                 p->value()->kind() != DeclarationKind::AnnexBVar))
+                 p->value()->kind() != DeclarationKind::VarForAnnexB))
             {
                 reportRedeclaration(name, p->value()->kind());
                 return false;
             }
+
+            // Update the DeclarationKind to make a LexicalFunction
+            // declaration that shadows the VarForAnnexB.
+            p->value() = DeclaredNameInfo(kind);
         } else {
             if (!scope->addDeclaredName(pc, p, name, kind))
                 return false;
@@ -985,12 +1067,19 @@ Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind 
         ParseContext::Scope* scope = pc->innermostScope();
         AddDeclaredNamePtr p = scope->lookupDeclaredNameForAdd(name);
         if (p) {
-            reportRedeclaration(name, p->value()->kind());
-            return false;
+            // If the early error would have occurred due to Annex B.3.3
+            // semantics, remove the synthesized Annex B var declaration but
+            // do not report the redeclaration.
+            if (p->value()->kind() == DeclarationKind::VarForAnnexB) {
+                ParseContext::Scope::removeVarForAnnexB(pc, name);
+            } else {
+                reportRedeclaration(name, p->value()->kind());
+                return false;
+            }
+        } else {
+            if (!scope->addDeclaredName(pc, p, name, kind))
+                return false;
         }
-
-        if (!scope->addDeclaredName(pc, p, name, kind))
-            return false;
 
         break;
       }
@@ -999,7 +1088,7 @@ Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind 
         MOZ_CRASH("Positional formal parameter names should use notePositionalFormalParameter");
         break;
 
-      case DeclarationKind::AnnexBVar:
+      case DeclarationKind::VarForAnnexB:
         MOZ_CRASH("Synthesized Annex B vars should go through tryDeclareVar");
         break;
     }
@@ -1589,6 +1678,9 @@ template <>
 bool
 Parser<FullParseHandler>::finishFunction()
 {
+    if (!pc->sc()->strict())
+        pc->finishInnerFunctionBoxesForAnnexB();
+
     if (!pc->finishExtraFunctionScopes())
         return null();
 
@@ -1686,7 +1778,8 @@ Parser<FullParseHandler>::standaloneFunctionBody(HandleFunction fun,
         return null();
     fn->pn_body = argsbody;
 
-    FunctionBox* funbox = newFunctionBox(fn, fun, inheritedDirectives, generatorKind);
+    FunctionBox* funbox = newFunctionBox(fn, fun, inheritedDirectives, generatorKind,
+                                         /* tryAnnexB = */ false);
     if (!funbox)
         return null();
     funbox->initStandaloneFunction(enclosingScope);
@@ -2345,13 +2438,8 @@ Parser<ParseHandler>::checkFunctionDefinition(HandleAtom funAtom, Node pn, Funct
                 // the function object when its declaration is reached, not at
                 // the start of the block.
 
-                Maybe<DeclarationKind> redeclaredKind;
-                if (!tryDeclareVar(funName, DeclarationKind::AnnexBVar, &redeclaredKind))
+                if (!tryDeclareVarForAnnexB(funName, tryAnnexB))
                     return false;
-
-                // FIXMEshu this is wrong
-                if (!redeclaredKind)
-                    *tryAnnexB = true;
             }
 
             if (!noteDeclaredName(funName, DeclarationKind::LexicalFunction, pn))
@@ -2409,7 +2497,7 @@ class LazyScriptUsedNameIter
 
 template <>
 bool
-Parser<FullParseHandler>::skipLazyInnerFunction(ParseNode* pn)
+Parser<FullParseHandler>::skipLazyInnerFunction(ParseNode* pn, bool tryAnnexB)
 {
     // When a lazily-parsed function is called, we only fully parse (and emit)
     // that function, not any of its nested children. The initial syntax-only
@@ -2419,7 +2507,7 @@ Parser<FullParseHandler>::skipLazyInnerFunction(ParseNode* pn)
     RootedFunction fun(context, handler.nextLazyInnerFunction());
     MOZ_ASSERT(!fun->isLegacyGenerator());
     FunctionBox* funbox = newFunctionBox(pn, fun, Directives(/* strict = */ false),
-                                         fun->generatorKind());
+                                         fun->generatorKind(), tryAnnexB);
     if (!funbox)
         return false;
 
@@ -2442,7 +2530,7 @@ Parser<FullParseHandler>::skipLazyInnerFunction(ParseNode* pn)
 
 template <>
 bool
-Parser<SyntaxParseHandler>::skipLazyInnerFunction(Node pn)
+Parser<SyntaxParseHandler>::skipLazyInnerFunction(Node pn, bool tryAnnexB)
 {
     MOZ_CRASH("Cannot skip lazy inner functions when syntax parsing");
 }
@@ -2540,7 +2628,7 @@ Parser<ParseHandler>::functionDefinition(InHandling inHandling, YieldHandling yi
     // functions, which are also lazy. Instead, their free variables and
     // source extents are recorded and may be skipped.
     if (handler.canSkipLazyInnerFunctions()) {
-        if (!skipLazyInnerFunction(pn))
+        if (!skipLazyInnerFunction(pn, tryAnnexB))
             return null();
         return pn;
     }
@@ -2630,13 +2718,11 @@ Parser<FullParseHandler>::trySyntaxParseInnerFunction(ParseNode* pn, HandleFunct
         // Make a FunctionBox before we enter the syntax parser, because |pn|
         // still expects a FunctionBox to be attached to it during BCE, and
         // the syntax parser cannot attach one to it.
-        FunctionBox* funbox = newFunctionBox(pn, fun, inheritedDirectives, generatorKind);
+        FunctionBox* funbox = newFunctionBox(pn, fun, inheritedDirectives, generatorKind,
+                                             tryAnnexB);
         if (!funbox)
             return false;
         funbox->initWithEnclosingContext(pc->sc(), kind, /* isGenexpLambda = */ false);
-
-        if (tryAnnexB && !pc->innerFunctionBoxesForAnnexB.append(funbox))
-            return false;
 
         if (!parser->innerFunction(SyntaxParseHandler::NodeGeneric, pc, funbox, inHandling,
                                    kind, generatorKind, inheritedDirectives, newDirectives))
@@ -2718,13 +2804,10 @@ Parser<ParseHandler>::innerFunction(Node pn, ParseContext* outerpc, HandleFuncti
     // parser. In that case, outerpc is a ParseContext from the full parser
     // instead of the current top of the stack of the syntax parser.
 
-    FunctionBox* funbox = newFunctionBox(pn, fun, inheritedDirectives, generatorKind);
+    FunctionBox* funbox = newFunctionBox(pn, fun, inheritedDirectives, generatorKind, tryAnnexB);
     if (!funbox)
         return false;
     funbox->initWithEnclosingContext(outerpc->sc(), kind, /* isGenexpLambda = */ false);
-
-    if (tryAnnexB && !pc->innerAnnexBFunctionBoxes.append(funbox))
-        return false;
 
     return innerFunction(pn, outerpc, funbox, inHandling, kind, generatorKind,
                          inheritedDirectives, newDirectives);
@@ -2766,7 +2849,8 @@ Parser<FullParseHandler>::standaloneLazyFunction(HandleFunction fun, bool strict
         return null();
 
     Directives directives(strict);
-    FunctionBox* funbox = newFunctionBox(pn, fun, directives, generatorKind);
+    FunctionBox* funbox = newFunctionBox(pn, fun, directives, generatorKind,
+                                         /* tryAnnexB = */ false);
     if (!funbox)
         return null();
     funbox->initFromLazyFunction();
@@ -6936,7 +7020,8 @@ Parser<ParseHandler>::generatorComprehensionLambda(unsigned begin)
 
     // Create box for fun->object early to root it.
     Directives directives(/* strict = */ outerpc->sc()->strict());
-    FunctionBox* genFunbox = newFunctionBox(genfn, fun, directives, StarGenerator);
+    FunctionBox* genFunbox = newFunctionBox(genfn, fun, directives, StarGenerator,
+                                            /* tryAnnexB = */ false);
     if (!genFunbox)
         return null();
     genFunbox->initWithEnclosingContext(outerpc->sc(), Expression, /* isGenexpLambda = */ true);
