@@ -601,6 +601,7 @@ BytecodeEmitter::EmitterScope::searchInEnclosingScope(JSAtom* name, Scope* scope
           case ScopeKind::Function:
           case ScopeKind::ParameterDefaults:
           case ScopeKind::Lexical:
+          case ScopeKind::DeclEnv:
           case ScopeKind::Catch:
           case ScopeKind::StrictEval:
             if (hasEnv) {
@@ -782,13 +783,13 @@ BytecodeEmitter::EmitterScope::enterDeclEnv(BytecodeEmitter* bce, FunctionBox* f
     if (!ensureCache(bce))
         return false;
 
-    // The lambda name, if not closed over, emits JSOP_CALLEE and has
-    // no frame slot, so set the first frame slot to LOCALNO_LIMIT.
     BindingIter bi(*funbox->declEnvBindings, LOCALNO_LIMIT);
     MOZ_ASSERT(bi);
 
+    // The lambda name, if not closed over, is accessed via JSOP_CALLEE and
+    // not a frame slot. Do not update frame slot information.
     NameLocation loc = NameLocation::NamedLambdaCallee();
-    if (bi.location().kind() == BindingLocation::Kind::Environment) {
+    if (bi.closedOver()) {
         loc = NameLocation::fromBinding(BindingKind::Const, bi.location());
         hasEnvironment_ = true;
     }
@@ -801,7 +802,7 @@ BytecodeEmitter::EmitterScope::enterDeclEnv(BytecodeEmitter* bce, FunctionBox* f
     MOZ_ASSERT(!bi);
 
     auto createScope = [funbox](ExclusiveContext* cx, HandleScope enclosing) {
-        return LexicalScope::create(cx, ScopeKind::Lexical, funbox->declEnvBindings,
+        return LexicalScope::create(cx, ScopeKind::DeclEnv, funbox->declEnvBindings,
                                     LOCALNO_LIMIT, enclosing);
     };
     if (!internScope(bce, createScope))
@@ -1081,6 +1082,7 @@ BytecodeEmitter::EmitterScope::leave(BytecodeEmitter* bce, bool nonLocal)
 
       case ScopeKind::Function:
       case ScopeKind::ParameterDefaults:
+      case ScopeKind::DeclEnv:
       case ScopeKind::Eval:
       case ScopeKind::StrictEval:
       case ScopeKind::Global:

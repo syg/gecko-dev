@@ -984,6 +984,7 @@ PopEnvironment(JSContext* cx, EnvironmentIter& ei)
       case ScopeKind::ParameterDefaults:
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
+      case ScopeKind::DeclEnv:
         if (cx->compartment()->isDebuggee())
             DebugEnvironments::onPopLexical(cx, ei);
         if (ei.scope().as<LexicalScope>().hasEnvironment())

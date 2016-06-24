@@ -131,6 +131,7 @@ AssertScopeMatchesEnvironment(JSContext* cx, JSScript* script, JSObject* env)
               case ScopeKind::ParameterDefaults:
               case ScopeKind::Lexical:
               case ScopeKind::Catch:
+              case ScopeKind::DeclEnv:
                 MOZ_ASSERT(&env->as<LexicalEnvironmentObject>().scope() == si.scope());
                 env = &env->as<LexicalEnvironmentObject>().enclosingEnvironment();
                 break;

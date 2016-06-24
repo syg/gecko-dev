@@ -262,7 +262,11 @@ class ParseContext : public Nestable<ParseContext>
         // Propagate all free names from the current scope to the enclosing
         // scope. Binding names that are used names from an inner function are
         // marked as closed over. Required on scope exit.
-        MOZ_MUST_USE bool propagateFreeNamesAndMarkClosedOverBindings(ParseContext* pc);
+        MOZ_MUST_USE bool propagateFreeNamesAndMarkClosedOverBindings(ParseContext* pc,
+                                                                      Scope* target);
+        MOZ_MUST_USE bool propagateFreeNamesAndMarkClosedOverBindings(ParseContext* pc) {
+            return propagateFreeNamesAndMarkClosedOverBindings(pc, enclosing());
+        }
 
         // Add the free names from an inner function as used names.
         template <typename NameRange>
@@ -442,8 +446,9 @@ class ParseContext : public Nestable<ParseContext>
 
     ~ParseContext();
 
-    bool init();
-    bool finishExtraFunctionScopes();
+    MOZ_MUST_USE bool init();
+    MOZ_MUST_USE bool finishFunctionBodyScope();
+    MOZ_MUST_USE bool finishExtraFunctionScopes();
 
     SharedContext* sc() {
         return sc_;
@@ -1185,7 +1190,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     mozilla::Maybe<FunctionScope::BindingData*> newFunctionScopeData(ParseContext::Scope& scope,
                                                                      bool hasDefaults);
     mozilla::Maybe<LexicalScope::BindingData*> newLexicalScopeData(ParseContext::Scope& scope);
-    Node makeLexicalScope(ParseContext::Scope& scope, Node body);
+    Node makeFunctionBodyLexicalScope(Node body);
     Node finishLexicalScope(ParseContext::Scope& scope, Node body);
 
     Node propertyName(YieldHandling yieldHandling, Node propList,

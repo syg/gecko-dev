@@ -199,11 +199,11 @@ ParseContext::Scope::removeVarForAnnexB(ParseContext* pc, JSAtom* name)
 }
 
 bool
-ParseContext::Scope::propagateFreeNamesAndMarkClosedOverBindings(ParseContext* pc)
+ParseContext::Scope::propagateFreeNamesAndMarkClosedOverBindings(ParseContext* pc, Scope* target)
 {
     for (UsedNameIter uni = usedNames(pc); uni; uni++) {
         if (uni.isFree()) {
-            if (enclosing() && !enclosing()->addUsedName(pc, uni.name(), uni.usedNameInfo()))
+            if (target && !target->addUsedName(pc, uni.name(), uni.usedNameInfo()))
                 return false;
         } else {
             uni.maybeMarkClosedOverBinding();
@@ -294,7 +294,7 @@ ParseContext::init()
                 return false;
             AddDeclaredNamePtr p = declEnvScope_->lookupDeclaredNameForAdd(fun->name());
             MOZ_ASSERT(!p);
-            if (!declEnvScope_->addDeclaredName(this, p, fun->name(), DeclarationKind::Var))
+            if (!declEnvScope_->addDeclaredName(this, p, fun->name(), DeclarationKind::Const))
                 return false;
         }
 
@@ -302,6 +302,19 @@ ParseContext::init()
             return false;
     }
     return varScope_->init(this);
+}
+
+bool
+ParseContext::finishFunctionBodyScope()
+{
+    // As an optimization, avoid useless propagation if there are no parameter
+    // defaults.
+    Scope* target;
+    if (functionBox()->hasDefaults())
+        target = varScope().enclosing();
+    else
+        target = defaultsScope().enclosing();
+    return varScope().propagateFreeNamesAndMarkClosedOverBindings(this, target);
 }
 
 bool
@@ -941,10 +954,6 @@ Parser<ParseHandler>::tryDeclareVar(HandlePropertyName name, DeclarationKind kin
                     *redeclaredKind = Some(p->value()->kind());
                     return true;
                 }
-
-                // Update the redeclared params' DeclarationKind for
-                // defaults handling.
-                p->value() = DeclaredNameInfo(kind);
             } else if (!DeclarationKindIsVar(p->value()->kind())) {
                 *redeclaredKind = Some(p->value()->kind());
                 return true;
@@ -1353,7 +1362,8 @@ Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope, bool 
         BindingName bindName;
         if (name) {
             DeclaredNamePtr p = scope.lookupDeclaredName(name);
-            MOZ_ASSERT(p->value()->kind() == DeclarationKind::PositionalFormalParameter);
+            MOZ_ASSERT(p->value()->kind() == DeclarationKind::PositionalFormalParameter ||
+                       DeclarationKindIsVar(p->value()->kind()));
             bindName = BindingName(name, closeOverAllBindings || p->value()->closedOver());
         }
 
@@ -1479,7 +1489,28 @@ Parser<FullParseHandler>::newLexicalScopeData(ParseContext::Scope& scope)
 
 template <>
 SyntaxParseHandler::Node
-Parser<SyntaxParseHandler>::makeLexicalScope(ParseContext::Scope& scope, Node body)
+Parser<SyntaxParseHandler>::makeFunctionBodyLexicalScope(Node body)
+{
+    if (!pc->finishFunctionBodyScope())
+        return null();
+    return body;
+}
+
+template <>
+ParseNode*
+Parser<FullParseHandler>::makeFunctionBodyLexicalScope(ParseNode* body)
+{
+    if (!pc->finishFunctionBodyScope())
+        return nullptr;
+    Maybe<LexicalScope::BindingData*> bindings = newLexicalScopeData(pc->varScope());
+    if (!bindings)
+        return nullptr;
+    return handler.newLexicalScope(*bindings, body);
+}
+
+template <>
+SyntaxParseHandler::Node
+Parser<SyntaxParseHandler>::finishLexicalScope(ParseContext::Scope& scope, Node body)
 {
     if (!scope.propagateFreeNamesAndMarkClosedOverBindings(pc))
         return null();
@@ -1488,23 +1519,15 @@ Parser<SyntaxParseHandler>::makeLexicalScope(ParseContext::Scope& scope, Node bo
 
 template <>
 ParseNode*
-Parser<FullParseHandler>::makeLexicalScope(ParseContext::Scope& scope, ParseNode* body)
+Parser<FullParseHandler>::finishLexicalScope(ParseContext::Scope& scope, ParseNode* body)
 {
     if (!scope.propagateFreeNamesAndMarkClosedOverBindings(pc))
         return nullptr;
     Maybe<LexicalScope::BindingData*> bindings = newLexicalScopeData(scope);
     if (!bindings)
         return nullptr;
-    return handler.newLexicalScope(*bindings, body);
-}
-
-template <typename ParseHandler>
-typename ParseHandler::Node
-Parser<ParseHandler>::finishLexicalScope(ParseContext::Scope& scope, Node body)
-{
-    Node node = makeLexicalScope(scope, body);
     scope.release(pc);
-    return node;
+    return handler.newLexicalScope(*bindings, body);
 }
 
 static bool
@@ -1954,16 +1977,20 @@ Parser<ParseHandler>::functionBody(InHandling inHandling, YieldHandling yieldHan
             return null();
     }
 
-    // Note that finishLexicalScope is not used here as to make the function's
-    // body-level lexical scope bindings (i.e., get the 'let' and 'const'
-    // bindings out of the var scope) without releasing it.
-    pn = makeLexicalScope(pc->varScope(), pn);
+    // Note that finishLexicalScope is not used here as to:
+    //
+    //   1. Make the function's body-level lexical scope bindings (i.e., get
+    //      the 'let' and 'const' bindings out of the var scope) without
+    //      releasing the ParseContext::Scope. It is still needed to generate
+    //      the 'var' bindings later.
+    //
+    //   2. Optimize away useless propagation if there is no defaults scope.
+    pn = makeFunctionBodyLexicalScope(pn);
     if (!pn)
         return null();
 
-    // After propagating all free names up to the var scope, declare the
-    // 'arguments' and 'this' bindings if necessary. Arrow functions don't
-    // have these bindings.
+    // After propagating all free names, declare the 'arguments' and 'this'
+    // bindings if necessary. Arrow functions don't have these bindings.
     if (kind != Arrow) {
         if (!declareFunctionArgumentsObject())
             return null();

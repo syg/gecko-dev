@@ -45,6 +45,8 @@ js::ScopeKindString(ScopeKind kind)
         return "lexical";
       case ScopeKind::Catch:
         return "catch";
+      case ScopeKind::DeclEnv:
+        return "decl env";
       case ScopeKind::With:
         return "with";
       case ScopeKind::Eval:
@@ -341,7 +343,8 @@ LexicalScope::create(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
                      uint32_t firstFrameSlot, HandleScope enclosing)
 {
     MOZ_ASSERT(data, "LexicalScopes should not be created if there are no bindings.");
-    MOZ_ASSERT(firstFrameSlot == computeNextFrameSlot(enclosing));
+    MOZ_ASSERT_IF(kind != ScopeKind::DeclEnv, firstFrameSlot == computeNextFrameSlot(enclosing));
+    MOZ_ASSERT_IF(kind == ScopeKind::DeclEnv, firstFrameSlot == LOCALNO_LIMIT);
 
     // The data that's passed in is from the frontend and is LifoAlloc'd or is
     // from Scope::copy. Copy it now that we're creating a permanent VM scope.
@@ -702,6 +705,7 @@ ScopeIter::hasSyntacticEnvironment() const
       case ScopeKind::ParameterDefaults:
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
+      case ScopeKind::DeclEnv:
       case ScopeKind::StrictEval:
         return !!environmentShape();
 
@@ -725,12 +729,8 @@ BindingIter::BindingIter(JSScript* script)
 void
 BindingIter::init(LexicalScope::BindingData& data, uint32_t firstFrameSlot)
 {
-    // Named lambdas have a separate environment for their name that. This
-    // scope cannot have frame slots and sets its firstFrameSlot to
-    // LOCALNO_LIMIT. Asking for the location of a non-closed-over callee will
-    // assert.
     init(0, 0, 0, data.constStart,
-         (firstFrameSlot == LOCALNO_LIMIT ? 0 : CanHaveFrameSlots) | CanHaveEnvironmentSlots,
+         CanHaveFrameSlots | CanHaveEnvironmentSlots,
          firstFrameSlot, JSSLOT_FREE(&LexicalEnvironmentObject::class_),
          data.names, data.length);
 }

@@ -1941,10 +1941,14 @@ FunctionConstructor(JSContext* cx, unsigned argc, Value* vp, GeneratorKind gener
     RootedObject globalLexical(cx, &global->lexicalEnvironment());
     RootedFunction fun(cx, NewFunctionWithProto(cx, nullptr, 0,
                                                 JSFunction::INTERPRETED_LAMBDA, globalLexical,
-                                                anonymousAtom, proto,
+                                                nullptr, proto,
                                                 AllocKind::FUNCTION, TenuredObject));
     if (!fun)
         return false;
+
+    // Set a guessed atom to prevent this function from appearing as a named
+    // lambda.
+    fun->setGuessedAtom(anonymousAtom);
 
     if (!JSFunction::setTypeForScriptedFunction(cx, fun))
         return false;

@@ -1422,7 +1422,7 @@ class JSScript : public js::gc::TenuredCell
         return &bodyScope()->enclosing()->as<js::LexicalScope>();
     }
 
-    inline js::Scope* declEnvScope() const;
+    inline js::LexicalScope* declEnvScope() const;
 
     js::Scope* enclosingScope() const {
         return outermostScope()->enclosing();

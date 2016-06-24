@@ -1422,8 +1422,12 @@ FunctionFormalParametersList(ParseNode* fn, unsigned* numFormals)
     ParseNode* argsBody = fn->pn_body;
     MOZ_ASSERT(argsBody->isKind(PNK_PARAMSBODY));
     *numFormals = argsBody->pn_count;
-    if (*numFormals > 0 && argsBody->last()->scopeBody()->isKind(PNK_STATEMENTLIST))
+    if (*numFormals > 0 &&
+        argsBody->last()->isKind(PNK_LEXICALSCOPE) &&
+        argsBody->last()->scopeBody()->isKind(PNK_STATEMENTLIST))
+    {
         (*numFormals)--;
+    }
     MOZ_ASSERT(argsBody->isArity(PN_LIST));
     return argsBody->pn_head;
 }

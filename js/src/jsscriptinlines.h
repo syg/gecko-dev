@@ -145,11 +145,11 @@ JSScript::global() const
     return *compartment()->maybeGlobal();
 }
 
-inline js::Scope*
+inline js::LexicalScope*
 JSScript::declEnvScope() const
 {
     MOZ_ASSERT(functionNonDelazifying()->isNamedLambda());
-    return outermostScope();
+    return &outermostScope()->as<js::LexicalScope>();
 }
 
 inline JSPrincipals*

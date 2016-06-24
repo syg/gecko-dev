@@ -40,6 +40,7 @@ enum class ScopeKind : uint8_t
     ParameterDefaults,
     Lexical,
     Catch,
+    DeclEnv,
     With,
     Eval,
     StrictEval,
@@ -339,7 +340,8 @@ Scope::is<LexicalScope>() const
 {
     return kind_ == ScopeKind::Lexical ||
            kind_ == ScopeKind::Catch ||
-           kind_ == ScopeKind::ParameterDefaults;
+           kind_ == ScopeKind::ParameterDefaults ||
+           kind_ == ScopeKind::DeclEnv;
 }
 
 //
@@ -754,6 +756,9 @@ class BindingIter
           case ScopeKind::Catch:
             init(scope->as<LexicalScope>().bindingData(),
                  scope->as<LexicalScope>().computeFirstFrameSlot());
+            break;
+          case ScopeKind::DeclEnv:
+            init(scope->as<LexicalScope>().bindingData(), LOCALNO_LIMIT);
             break;
           case ScopeKind::With:
             MOZ_CRASH("With scopes do not have bindings");

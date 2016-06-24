@@ -1228,6 +1228,7 @@ Scope::traceChildren(JSTracer* trc)
       case ScopeKind::ParameterDefaults:
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
+      case ScopeKind::DeclEnv:
         TraceBindingData(trc, reinterpret_cast<LexicalScope::BindingData*>(data_));
         break;
       case ScopeKind::Global:
@@ -1264,7 +1265,8 @@ js::GCMarker::eagerlyMarkChildren(Scope* scope)
       }
       case ScopeKind::ParameterDefaults:
       case ScopeKind::Lexical:
-      case ScopeKind::Catch: {
+      case ScopeKind::Catch:
+      case ScopeKind::DeclEnv: {
         LexicalScope::BindingData* data =
             reinterpret_cast<LexicalScope::BindingData*>(scope->data_);
         names = data->names;
