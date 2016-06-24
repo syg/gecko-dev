@@ -2635,7 +2635,7 @@ Parser<FullParseHandler>::trySyntaxParseInnerFunction(ParseNode* pn, HandleFunct
             return false;
         funbox->initWithEnclosingContext(pc->sc(), kind, /* isGenexpLambda = */ false);
 
-        if (tryAnnexB && !pc->innerAnnexBFunctionBoxes.append(funbox))
+        if (tryAnnexB && !pc->innerFunctionBoxesForAnnexB.append(funbox))
             return false;
 
         if (!parser->innerFunction(SyntaxParseHandler::NodeGeneric, pc, funbox, inHandling,

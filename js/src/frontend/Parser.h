@@ -384,7 +384,7 @@ class ParseContext : public Nestable<ParseContext>
 
     // Inner function boxes in this context to try Annex B.3.3 semantics
     // on. Only used when full parsing.
-    Vector<FunctionBox*> innerAnnexBFunctionBoxes;
+    Vector<FunctionBox*> innerFunctionBoxesForAnnexB;
 
     // In a function context, points to a Directive struct that can be updated
     // to reflect new directives encountered in the Directive Prologue that
@@ -422,7 +422,7 @@ class ParseContext : public Nestable<ParseContext>
         lastYieldOffset(NoYieldOffset),
         positionalFormalParameterNames(prs->context),
         innerFunctions(prs->context, GCVector<JSFunction*>(prs->context)),
-        innerAnnexBFunctionBoxes(prs->context),
+        innerFunctionBoxesForAnnexB(prs->context),
         newDirectives(newDirectives),
         inDeclDestructuring(false),
         funHasReturnExpr(false),
