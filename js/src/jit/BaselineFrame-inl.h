@@ -53,7 +53,7 @@ BaselineFrame::replaceInnermostEnvironment(EnvironmentObject& env)
 }
 
 inline bool
-BaselineFrame::pushBlock(JSContext* cx, Handle<LexicalScope*> scope)
+BaselineFrame::pushLexicalEnvironment(JSContext* cx, Handle<LexicalScope*> scope)
 {
     LexicalEnvironmentObject* env = LexicalEnvironmentObject::create(cx, scope, this);
     if (!env)
@@ -64,7 +64,7 @@ BaselineFrame::pushBlock(JSContext* cx, Handle<LexicalScope*> scope)
 }
 
 inline void
-BaselineFrame::popBlock(JSContext* cx)
+BaselineFrame::popLexicalEnvironment(JSContext* cx)
 {
     MOZ_ASSERT(envChain_->is<LexicalEnvironmentObject>());
 
@@ -72,7 +72,7 @@ BaselineFrame::popBlock(JSContext* cx)
 }
 
 inline bool
-BaselineFrame::freshenBlock(JSContext* cx)
+BaselineFrame::freshenLexicalEnvironment(JSContext* cx)
 {
     Rooted<LexicalEnvironmentObject*> current(cx, &envChain_->as<LexicalEnvironmentObject>());
     LexicalEnvironmentObject* clone = LexicalEnvironmentObject::clone(cx, current);
@@ -84,7 +84,7 @@ BaselineFrame::freshenBlock(JSContext* cx)
 }
 
 inline bool
-BaselineFrame::recreateBlock(JSContext* cx)
+BaselineFrame::recreateLexicalEnvironment(JSContext* cx)
 {
     Rooted<LexicalEnvironmentObject*> current(cx, &envChain_->as<LexicalEnvironmentObject>());
     LexicalEnvironmentObject* clone = LexicalEnvironmentObject::recreate(cx, current);

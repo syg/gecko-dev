@@ -254,7 +254,7 @@ class AbstractFramePtr
     inline HandleValue returnValue() const;
     inline void setReturnValue(const Value& rval) const;
 
-    inline void popBlock(JSContext* cx) const;
+    inline void popLexicalEnvironment(JSContext* cx) const;
     inline void popWith(JSContext* cx) const;
 
     friend void GDBTestInitAbstractFramePtr(AbstractFramePtr&, void*);
@@ -555,24 +555,25 @@ class InterpreterFrame
     inline void replaceInnermostEnvironment(EnvironmentObject& env);
 
     /*
-     * For blocks with aliased locals, these interfaces push and pop entries
-     * on the environment chain.  The "freshen" operation replaces the current
-     * block with a fresh copy of it, to implement semantics providing
-     * distinct bindings per iteration of a for(;;) loop whose head has a
-     * lexical declaration.  The "recreate" operation replaces the current
-     * block with a copy of it containing uninitialized bindings, to implement
-     * semantics providing distinct bindings per iteration of a for-in/of loop.
+     * For lexical envs with aliased locals, these interfaces push and pop
+     * entries on the environment chain.  The "freshen" operation replaces the
+     * current lexical env with a fresh copy of it, to implement semantics
+     * providing distinct bindings per iteration of a for(;;) loop whose head
+     * has a lexical declaration.  The "recreate" operation replaces the
+     * current lexical env with a copy of it containing uninitialized
+     * bindings, to implement semantics providing distinct bindings per
+     * iteration of a for-in/of loop.
      */
 
-    bool pushBlock(JSContext* cx, Handle<LexicalScope*> scope);
-    void popBlock(JSContext* cx);
-    bool freshenBlock(JSContext* cx);
-    bool recreateBlock(JSContext* cx);
+    bool pushLexicalEnvironment(JSContext* cx, Handle<LexicalScope*> scope);
+    void popLexicalEnvironment(JSContext* cx);
+    bool freshenLexicalEnvironment(JSContext* cx);
+    bool recreateLexicalEnvironment(JSContext* cx);
 
     /*
      * With
      *
-     * Entering/leaving a |with| block pushes/pops an object on the
+     * Entering/leaving a |with| lexical env pushes/pops an object on the
      * environment chain.  Pushing uses pushOnEnvironmentChain, popping should
      * use popWith.
      */

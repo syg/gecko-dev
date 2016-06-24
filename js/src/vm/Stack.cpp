@@ -331,7 +331,7 @@ InterpreterFrame::checkReturn(JSContext* cx, HandleValue thisv)
 }
 
 bool
-InterpreterFrame::pushBlock(JSContext* cx, Handle<LexicalScope*> scope)
+InterpreterFrame::pushLexicalEnvironment(JSContext* cx, Handle<LexicalScope*> scope)
 {
     LexicalEnvironmentObject* env = LexicalEnvironmentObject::create(cx, scope, this);
     if (!env)
@@ -342,7 +342,7 @@ InterpreterFrame::pushBlock(JSContext* cx, Handle<LexicalScope*> scope)
 }
 
 bool
-InterpreterFrame::freshenBlock(JSContext* cx)
+InterpreterFrame::freshenLexicalEnvironment(JSContext* cx)
 {
     Rooted<LexicalEnvironmentObject*> env(cx, &envChain_->as<LexicalEnvironmentObject>());
     LexicalEnvironmentObject* fresh = LexicalEnvironmentObject::clone(cx, env);
@@ -354,7 +354,7 @@ InterpreterFrame::freshenBlock(JSContext* cx)
 }
 
 bool
-InterpreterFrame::recreateBlock(JSContext* cx)
+InterpreterFrame::recreateLexicalEnvironment(JSContext* cx)
 {
     Rooted<LexicalEnvironmentObject*> env(cx, &envChain_->as<LexicalEnvironmentObject>());
     LexicalEnvironmentObject* fresh = LexicalEnvironmentObject::recreate(cx, env);
@@ -366,7 +366,7 @@ InterpreterFrame::recreateBlock(JSContext* cx)
 }
 
 void
-InterpreterFrame::popBlock(JSContext* cx)
+InterpreterFrame::popLexicalEnvironment(JSContext* cx)
 {
     MOZ_ASSERT(envChain_->is<LexicalEnvironmentObject>());
     popOffEnvironmentChain();

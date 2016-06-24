@@ -1949,11 +1949,11 @@
      */ \
     macro(JSOP_TYPEOFEXPR,    196,"typeofexpr",  NULL,    1,  1,  1, JOF_BYTE|JOF_DETECTING) \
     \
-    /* Block-local scope support. */ \
+    /* Lexical environment support. */ \
     /*
-     * Replaces the current block on the scope chain with a fresh block
+     * Replaces the current block on the env chain with a fresh block
      * that copies all the bindings in the bock.  This operation implements the
-     * behavior of inducing a fresh block scope for every iteration of a
+     * behavior of inducing a fresh lexical environment for every iteration of a
      * for(let ...; ...; ...) loop, if any declarations induced by such a loop
      * are captured within the loop.
      *   Category: Variables and Scopes
@@ -1961,34 +1961,34 @@
      *   Operands:
      *   Stack: =>
      */ \
-    macro(JSOP_FRESHENBLOCKSCOPE,197,"freshenblockscope", NULL, 1, 0, 0, JOF_BYTE) \
+    macro(JSOP_FRESHENLEXICALENV,197,"freshenlexicalenv", NULL, 1, 0, 0, JOF_BYTE) \
     /*
-     * Recreates the current block on the scope chain with a fresh block
+     * Recreates the current block on the env chain with a fresh block
      * with uninitialized bindings.  This operation implements the behavior of
-     * inducing a fresh block scope for every iteration of a for-in/of loop
+     * inducing a fresh lexical environment for every iteration of a for-in/of loop
      * whose loop-head has a (captured) lexical declaration.
      *   Category: Variables and Scopes
      *   Type: Block-local Scope
      *   Operands:
      *   Stack: =>
      */ \
-    macro(JSOP_RECREATEBLOCKSCOPE,198,"recreateblockscope",NULL,1,0,0,JOF_BYTE) \
+    macro(JSOP_RECREATELEXICALENV,198,"recreatelexicalenv",NULL,1,0,0,JOF_BYTE) \
     /*
-     * Pushes block onto the scope chain.
+     * Pushes lexical environment onto the env chain.
      *   Category: Variables and Scopes
      *   Type: Block-local Scope
      *   Operands: uint32_t staticBlockObjectIndex
      *   Stack: =>
      */ \
-    macro(JSOP_PUSHBLOCKSCOPE,199,"pushblockscope", NULL, 5,  0,  0,  JOF_SCOPE) \
+    macro(JSOP_PUSHLEXICALENV,199,"pushlexicalenv", NULL, 5,  0,  0,  JOF_SCOPE) \
     /*
-     * Pops block from the scope chain.
+     * Pops lexical environment from the env chain.
      *   Category: Variables and Scopes
      *   Type: Block-local Scope
      *   Operands:
      *   Stack: =>
      */ \
-    macro(JSOP_POPBLOCKSCOPE, 200,"popblockscope", NULL,  1,  0,  0,  JOF_BYTE) \
+    macro(JSOP_POPLEXICALENV, 200,"poplexicalenv", NULL,  1,  0,  0,  JOF_BYTE) \
     /*
      * The opcode to assist the debugger.
      *   Category: Statements
@@ -1996,7 +1996,7 @@
      *   Operands:
      *   Stack: =>
      */ \
-    macro(JSOP_DEBUGLEAVEBLOCK, 201,"debugleaveblock", NULL, 1,  0,  0,  JOF_BYTE) \
+    macro(JSOP_DEBUGLEAVELEXICALENV, 201,"debugleavelexicalenv", NULL, 1,  0,  0,  JOF_BYTE) \
     \
     /*
      * Pops the generator from the top of the stack, suspends it and stops

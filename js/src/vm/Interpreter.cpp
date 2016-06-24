@@ -985,9 +985,9 @@ PopEnvironment(JSContext* cx, EnvironmentIter& ei)
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
         if (cx->compartment()->isDebuggee())
-            DebugEnvironments::onPopBlock(cx, ei);
+            DebugEnvironments::onPopLexical(cx, ei);
         if (ei.scope().as<LexicalScope>().hasEnvironment())
-            ei.initialFrame().popBlock(cx);
+            ei.initialFrame().popLexicalEnvironment(cx);
         break;
       case ScopeKind::With:
         ei.initialFrame().popWith(cx);
@@ -1304,7 +1304,7 @@ JS_STATIC_ASSERT(JSOP_IFNE == JSOP_IFEQ + 1);
  *
  * 1. The nominal |this|, obj, is a global object.
  *
- * 2. The nominal |this|, obj, has one of Block, Call, or DeclEnv class (this
+ * 2. The nominal |this|, obj, has one of LexicalEnv, Call, or DeclEnv class (this
  *    is what IsCacheableNonGlobalEnvironment tests). Such objects-as-envs must be
  *    censored with undefined.
  *
@@ -3724,17 +3724,17 @@ CASE(JSOP_DEBUGGER)
 }
 END_CASE(JSOP_DEBUGGER)
 
-CASE(JSOP_PUSHBLOCKSCOPE)
+CASE(JSOP_PUSHLEXICALENV)
 {
     ReservedRooted<Scope*> scope(&rootScope0, script->getScope(REGS.pc));
 
     // Create block environment and push on scope chain.
-    if (!REGS.fp()->pushBlock(cx, scope.as<LexicalScope>()))
+    if (!REGS.fp()->pushLexicalEnvironment(cx, scope.as<LexicalScope>()))
         goto error;
 }
-END_CASE(JSOP_PUSHBLOCKSCOPE)
+END_CASE(JSOP_PUSHLEXICALENV)
 
-CASE(JSOP_POPBLOCKSCOPE)
+CASE(JSOP_POPLEXICALENV)
 {
 #ifdef DEBUG
     // Pop block from scope chain.
@@ -3743,14 +3743,14 @@ CASE(JSOP_POPBLOCKSCOPE)
 #endif
 
     if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
-        DebugEnvironments::onPopBlock(cx, REGS.fp(), REGS.pc);
+        DebugEnvironments::onPopLexical(cx, REGS.fp(), REGS.pc);
 
     // Pop block from scope chain.
-    REGS.fp()->popBlock(cx);
+    REGS.fp()->popLexicalEnvironment(cx);
 }
-END_CASE(JSOP_POPBLOCKSCOPE)
+END_CASE(JSOP_POPLEXICALENV)
 
-CASE(JSOP_DEBUGLEAVEBLOCK)
+CASE(JSOP_DEBUGLEAVELEXICALENV)
 {
     MOZ_ASSERT(script->lookupScope(REGS.pc));
     MOZ_ASSERT(script->lookupScope(REGS.pc)->is<LexicalScope>());
@@ -3760,29 +3760,29 @@ CASE(JSOP_DEBUGLEAVEBLOCK)
     // help from bytecode to do its job.  See bug 927782.
 
     if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
-        DebugEnvironments::onPopBlock(cx, REGS.fp(), REGS.pc);
+        DebugEnvironments::onPopLexical(cx, REGS.fp(), REGS.pc);
 }
-END_CASE(JSOP_DEBUGLEAVEBLOCK)
+END_CASE(JSOP_DEBUGLEAVELEXICALENV)
 
-CASE(JSOP_FRESHENBLOCKSCOPE)
+CASE(JSOP_FRESHENLEXICALENV)
 {
     if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
-        DebugEnvironments::onPopBlock(cx, REGS.fp(), REGS.pc);
+        DebugEnvironments::onPopLexical(cx, REGS.fp(), REGS.pc);
 
-    if (!REGS.fp()->freshenBlock(cx))
+    if (!REGS.fp()->freshenLexicalEnvironment(cx))
         goto error;
 }
-END_CASE(JSOP_FRESHENBLOCKSCOPE)
+END_CASE(JSOP_FRESHENLEXICALENV)
 
-CASE(JSOP_RECREATEBLOCKSCOPE)
+CASE(JSOP_RECREATELEXICALENV)
 {
     if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
-        DebugEnvironments::onPopBlock(cx, REGS.fp(), REGS.pc);
+        DebugEnvironments::onPopLexical(cx, REGS.fp(), REGS.pc);
 
-    if (!REGS.fp()->recreateBlock(cx))
+    if (!REGS.fp()->recreateLexicalEnvironment(cx))
         goto error;
 }
-END_CASE(JSOP_RECREATEBLOCKSCOPE)
+END_CASE(JSOP_RECREATELEXICALENV)
 
 CASE(JSOP_GENERATOR)
 {

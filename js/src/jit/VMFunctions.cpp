@@ -994,58 +994,58 @@ GlobalHasLiveOnDebuggerStatement(JSContext* cx)
 }
 
 bool
-PushBlockEnvironment(JSContext* cx, BaselineFrame* frame, Handle<LexicalScope*> scope)
+PushLexicalEnv(JSContext* cx, BaselineFrame* frame, Handle<LexicalScope*> scope)
 {
-    return frame->pushBlock(cx, scope);
+    return frame->pushLexicalEnvironment(cx, scope);
 }
 
 bool
-PopBlockEnvironment(JSContext* cx, BaselineFrame* frame)
+PopLexicalEnv(JSContext* cx, BaselineFrame* frame)
 {
-    frame->popBlock(cx);
+    frame->popLexicalEnvironment(cx);
     return true;
 }
 
 bool
-DebugLeaveThenPopBlockEnvironment(JSContext* cx, BaselineFrame* frame, jsbytecode* pc)
+DebugLeaveThenPopLexicalEnv(JSContext* cx, BaselineFrame* frame, jsbytecode* pc)
 {
-    MOZ_ALWAYS_TRUE(DebugLeaveBlock(cx, frame, pc));
-    frame->popBlock(cx);
+    MOZ_ALWAYS_TRUE(DebugLeaveLexicalEnv(cx, frame, pc));
+    frame->popLexicalEnvironment(cx);
     return true;
 }
 
 bool
-FreshenBlockEnvironment(JSContext* cx, BaselineFrame* frame)
+FreshenLexicalEnv(JSContext* cx, BaselineFrame* frame)
 {
-    return frame->freshenBlock(cx);
+    return frame->freshenLexicalEnvironment(cx);
 }
 
 bool
-DebugLeaveThenFreshenBlockEnvironment(JSContext* cx, BaselineFrame* frame, jsbytecode* pc)
+DebugLeaveThenFreshenLexicalEnv(JSContext* cx, BaselineFrame* frame, jsbytecode* pc)
 {
-    MOZ_ALWAYS_TRUE(DebugLeaveBlock(cx, frame, pc));
-    return frame->freshenBlock(cx);
+    MOZ_ALWAYS_TRUE(DebugLeaveLexicalEnv(cx, frame, pc));
+    return frame->freshenLexicalEnvironment(cx);
 }
 
 bool
-RecreateBlockEnvironment(JSContext* cx, BaselineFrame* frame)
+RecreateLexicalEnv(JSContext* cx, BaselineFrame* frame)
 {
-    return frame->recreateBlock(cx);
+    return frame->recreateLexicalEnvironment(cx);
 }
 
 bool
-DebugLeaveThenRecreateBlockEnvironment(JSContext* cx, BaselineFrame* frame, jsbytecode* pc)
+DebugLeaveThenRecreateLexicalEnv(JSContext* cx, BaselineFrame* frame, jsbytecode* pc)
 {
-    MOZ_ALWAYS_TRUE(DebugLeaveBlock(cx, frame, pc));
-    return frame->recreateBlock(cx);
+    MOZ_ALWAYS_TRUE(DebugLeaveLexicalEnv(cx, frame, pc));
+    return frame->recreateLexicalEnvironment(cx);
 }
 
 bool
-DebugLeaveBlock(JSContext* cx, BaselineFrame* frame, jsbytecode* pc)
+DebugLeaveLexicalEnv(JSContext* cx, BaselineFrame* frame, jsbytecode* pc)
 {
     MOZ_ASSERT(frame->script()->baselineScript()->hasDebugInstrumentation());
     if (cx->compartment()->isDebuggee())
-        DebugEnvironments::onPopBlock(cx, frame, pc);
+        DebugEnvironments::onPopLexical(cx, frame, pc);
     return true;
 }
 

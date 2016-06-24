@@ -732,21 +732,21 @@ MOZ_MUST_USE bool
 LeaveWith(JSContext* cx, BaselineFrame* frame);
 
 MOZ_MUST_USE bool
-PushBlockEnvironment(JSContext* cx, BaselineFrame* frame, Handle<LexicalScope*> scope);
+PushLexicalEnv(JSContext* cx, BaselineFrame* frame, Handle<LexicalScope*> scope);
 MOZ_MUST_USE bool
-PopBlockEnvironment(JSContext* cx, BaselineFrame* frame);
+PopLexicalEnv(JSContext* cx, BaselineFrame* frame);
 MOZ_MUST_USE bool
-DebugLeaveThenPopBlockEnvironment(JSContext* cx, BaselineFrame* frame, jsbytecode* pc);
+DebugLeaveThenPopLexicalEnv(JSContext* cx, BaselineFrame* frame, jsbytecode* pc);
 MOZ_MUST_USE bool
-FreshenBlockEnvironment(JSContext* cx, BaselineFrame* frame);
+FreshenLexicalEnv(JSContext* cx, BaselineFrame* frame);
 MOZ_MUST_USE bool
-DebugLeaveThenFreshenBlockEnvironment(JSContext* cx, BaselineFrame* frame, jsbytecode* pc);
+DebugLeaveThenFreshenLexicalEnv(JSContext* cx, BaselineFrame* frame, jsbytecode* pc);
 MOZ_MUST_USE bool
-RecreateBlockEnvironment(JSContext* cx, BaselineFrame* frame);
+RecreateLexicalEnv(JSContext* cx, BaselineFrame* frame);
 MOZ_MUST_USE bool
-DebugLeaveThenRecreateBlockEnvironment(JSContext* cx, BaselineFrame* frame, jsbytecode* pc);
+DebugLeaveThenRecreateLexicalEnv(JSContext* cx, BaselineFrame* frame, jsbytecode* pc);
 MOZ_MUST_USE bool
-DebugLeaveBlock(JSContext* cx, BaselineFrame* frame, jsbytecode* pc);
+DebugLeaveLexicalEnv(JSContext* cx, BaselineFrame* frame, jsbytecode* pc);
 
 MOZ_MUST_USE bool
 InitBaselineFrameForOsr(BaselineFrame* frame, InterpreterFrame* interpFrame,

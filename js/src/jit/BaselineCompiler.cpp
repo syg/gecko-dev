@@ -3403,11 +3403,11 @@ BaselineCompiler::emit_JSOP_RETSUB()
     return emitOpIC(stubCompiler.getStub(&stubSpace_));
 }
 
-typedef bool (*PushBlockEnvFn)(JSContext*, BaselineFrame*, Handle<LexicalScope*>);
-static const VMFunction PushBlockEnvInfo = FunctionInfo<PushBlockEnvFn>(jit::PushBlockEnvironment);
+typedef bool (*PushLexicalEnvFn)(JSContext*, BaselineFrame*, Handle<LexicalScope*>);
+static const VMFunction PushLexicalEnvInfo = FunctionInfo<PushLexicalEnvFn>(jit::PushLexicalEnv);
 
 bool
-BaselineCompiler::emit_JSOP_PUSHBLOCKSCOPE()
+BaselineCompiler::emit_JSOP_PUSHLEXICALENV()
 {
     LexicalScope& scope = script->getScope(pc)->as<LexicalScope>();
 
@@ -3418,18 +3418,18 @@ BaselineCompiler::emit_JSOP_PUSHBLOCKSCOPE()
     pushArg(ImmGCPtr(&scope));
     pushArg(R0.scratchReg());
 
-    return callVM(PushBlockEnvInfo);
+    return callVM(PushLexicalEnvInfo);
 }
 
-typedef bool (*PopBlockEnvFn)(JSContext*, BaselineFrame*);
-static const VMFunction PopBlockEnvInfo = FunctionInfo<PopBlockEnvFn>(jit::PopBlockEnvironment);
+typedef bool (*PopLexicalEnvFn)(JSContext*, BaselineFrame*);
+static const VMFunction PopLexicalEnvInfo = FunctionInfo<PopLexicalEnvFn>(jit::PopLexicalEnv);
 
-typedef bool (*DebugLeaveThenPopBlockEnvFn)(JSContext*, BaselineFrame*, jsbytecode*);
-static const VMFunction DebugLeaveThenPopBlockEnvInfo =
-    FunctionInfo<DebugLeaveThenPopBlockEnvFn>(jit::DebugLeaveThenPopBlockEnvironment);
+typedef bool (*DebugLeaveThenPopLexicalEnvFn)(JSContext*, BaselineFrame*, jsbytecode*);
+static const VMFunction DebugLeaveThenPopLexicalEnvInfo =
+    FunctionInfo<DebugLeaveThenPopLexicalEnvFn>(jit::DebugLeaveThenPopLexicalEnv);
 
 bool
-BaselineCompiler::emit_JSOP_POPBLOCKSCOPE()
+BaselineCompiler::emit_JSOP_POPLEXICALENV()
 {
     prepareVMCall();
 
@@ -3438,23 +3438,23 @@ BaselineCompiler::emit_JSOP_POPBLOCKSCOPE()
     if (compileDebugInstrumentation_) {
         pushArg(ImmPtr(pc));
         pushArg(R0.scratchReg());
-        return callVM(DebugLeaveThenPopBlockEnvInfo);
+        return callVM(DebugLeaveThenPopLexicalEnvInfo);
     }
 
     pushArg(R0.scratchReg());
-    return callVM(PopBlockEnvInfo);
+    return callVM(PopLexicalEnvInfo);
 }
 
-typedef bool (*FreshenBlockEnvFn)(JSContext*, BaselineFrame*);
-static const VMFunction FreshenBlockEnvInfo =
-    FunctionInfo<FreshenBlockEnvFn>(jit::FreshenBlockEnvironment);
+typedef bool (*FreshenLexicalEnvFn)(JSContext*, BaselineFrame*);
+static const VMFunction FreshenLexicalEnvInfo =
+    FunctionInfo<FreshenLexicalEnvFn>(jit::FreshenLexicalEnv);
 
-typedef bool (*DebugLeaveThenFreshenBlockEnvFn)(JSContext*, BaselineFrame*, jsbytecode*);
-static const VMFunction DebugLeaveThenFreshenBlockEnvInfo =
-    FunctionInfo<DebugLeaveThenFreshenBlockEnvFn>(jit::DebugLeaveThenFreshenBlockEnvironment);
+typedef bool (*DebugLeaveThenFreshenLexicalEnvFn)(JSContext*, BaselineFrame*, jsbytecode*);
+static const VMFunction DebugLeaveThenFreshenLexicalEnvInfo =
+    FunctionInfo<DebugLeaveThenFreshenLexicalEnvFn>(jit::DebugLeaveThenFreshenLexicalEnv);
 
 bool
-BaselineCompiler::emit_JSOP_FRESHENBLOCKSCOPE()
+BaselineCompiler::emit_JSOP_FRESHENLEXICALENV()
 {
     prepareVMCall();
 
@@ -3463,23 +3463,23 @@ BaselineCompiler::emit_JSOP_FRESHENBLOCKSCOPE()
     if (compileDebugInstrumentation_) {
         pushArg(ImmPtr(pc));
         pushArg(R0.scratchReg());
-        return callVM(DebugLeaveThenFreshenBlockEnvInfo);
+        return callVM(DebugLeaveThenFreshenLexicalEnvInfo);
     }
 
     pushArg(R0.scratchReg());
-    return callVM(FreshenBlockEnvInfo);
+    return callVM(FreshenLexicalEnvInfo);
 }
 
-typedef bool (*RecreateBlockEnvFn)(JSContext*, BaselineFrame*);
-static const VMFunction RecreateBlockEnvInfo =
-    FunctionInfo<RecreateBlockEnvFn>(jit::RecreateBlockEnvironment);
+typedef bool (*RecreateLexicalEnvFn)(JSContext*, BaselineFrame*);
+static const VMFunction RecreateLexicalEnvInfo =
+    FunctionInfo<RecreateLexicalEnvFn>(jit::RecreateLexicalEnv);
 
-typedef bool (*DebugLeaveThenRecreateBlockEnvFn)(JSContext*, BaselineFrame*, jsbytecode*);
-static const VMFunction DebugLeaveThenRecreateBlockEnvInfo =
-    FunctionInfo<DebugLeaveThenRecreateBlockEnvFn>(jit::DebugLeaveThenRecreateBlockEnvironment);
+typedef bool (*DebugLeaveThenRecreateLexicalEnvFn)(JSContext*, BaselineFrame*, jsbytecode*);
+static const VMFunction DebugLeaveThenRecreateLexicalEnvInfo =
+    FunctionInfo<DebugLeaveThenRecreateLexicalEnvFn>(jit::DebugLeaveThenRecreateLexicalEnv);
 
 bool
-BaselineCompiler::emit_JSOP_RECREATEBLOCKSCOPE()
+BaselineCompiler::emit_JSOP_RECREATELEXICALENV()
 {
     prepareVMCall();
 
@@ -3488,18 +3488,19 @@ BaselineCompiler::emit_JSOP_RECREATEBLOCKSCOPE()
     if (compileDebugInstrumentation_) {
         pushArg(ImmPtr(pc));
         pushArg(R0.scratchReg());
-        return callVM(DebugLeaveThenRecreateBlockEnvInfo);
+        return callVM(DebugLeaveThenRecreateLexicalEnvInfo);
     }
 
     pushArg(R0.scratchReg());
-    return callVM(RecreateBlockEnvInfo);
+    return callVM(RecreateLexicalEnvInfo);
 }
 
-typedef bool (*DebugLeaveBlockFn)(JSContext*, BaselineFrame*, jsbytecode*);
-static const VMFunction DebugLeaveBlockInfo = FunctionInfo<DebugLeaveBlockFn>(jit::DebugLeaveBlock);
+typedef bool (*DebugLeaveLexicalEnvFn)(JSContext*, BaselineFrame*, jsbytecode*);
+static const VMFunction DebugLeaveLexicalEnvInfo =
+    FunctionInfo<DebugLeaveLexicalEnvFn>(jit::DebugLeaveLexicalEnv);
 
 bool
-BaselineCompiler::emit_JSOP_DEBUGLEAVEBLOCK()
+BaselineCompiler::emit_JSOP_DEBUGLEAVELEXICALENV()
 {
     if (!compileDebugInstrumentation_)
         return true;
@@ -3509,7 +3510,7 @@ BaselineCompiler::emit_JSOP_DEBUGLEAVEBLOCK()
     pushArg(ImmPtr(pc));
     pushArg(R0.scratchReg());
 
-    return callVM(DebugLeaveBlockInfo);
+    return callVM(DebugLeaveLexicalEnvInfo);
 }
 
 typedef bool (*EnterWithFn)(JSContext*, BaselineFrame*, HandleValue, Handle<WithScope*>);

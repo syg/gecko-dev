@@ -762,7 +762,7 @@ BytecodeEmitter::EmitterScope::enterLexical(BytecodeEmitter* bce, ScopeKind kind
 
     if (ScopeKindIsInBody(kind) && hasEnvironment_) {
         // After interning the VM scope we can get the scope index.
-        if (!bce->emitInternedScopeOp(index(), JSOP_PUSHBLOCKSCOPE))
+        if (!bce->emitInternedScopeOp(index(), JSOP_PUSHLEXICALENV))
             return false;
     }
 
@@ -1070,7 +1070,7 @@ BytecodeEmitter::EmitterScope::leave(BytecodeEmitter* bce, bool nonLocal)
     switch (kind) {
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
-        if (!bce->emit1(hasEnvironment_ ? JSOP_POPBLOCKSCOPE : JSOP_DEBUGLEAVEBLOCK))
+        if (!bce->emit1(hasEnvironment_ ? JSOP_POPLEXICALENV : JSOP_DEBUGLEAVELEXICALENV))
             return false;
         break;
 
@@ -1741,7 +1741,7 @@ NonLocalExitControl::prepareForNonLocalJump(BytecodeEmitter::NestableControl* ta
 #undef FLUSH_POPS
 
     // Walk the scope stack and leave the scopes we popped. Leaving a scope
-    // may emit administrative ops like JSOP_POPBLOCKSCOPE but never anything
+    // may emit administrative ops like JSOP_POPLEXICALENV but never anything
     // that manipulates the stack.
     for (EmitterScope* es = bce_->innermostEmitterScope;
          es != (target ? target->emitterScope() : nullptr);
@@ -4969,7 +4969,7 @@ BytecodeEmitter::emitTry(ParseNode* pn)
 
         // The emitted code for a catch block looks like:
         //
-        // [pushblockscope]             only if any local aliased
+        // [pushlexicalenv]             only if any local aliased
         // exception
         // if there is a catchguard:
         //   dup
@@ -4978,13 +4978,13 @@ BytecodeEmitter::emitTry(ParseNode* pn)
         //   < catchguard code >
         //   ifne POST
         //   debugleaveblock
-        //   [popblockscope]            only if any local aliased
+        //   [poplexicalenv]            only if any local aliased
         //   throwing                   pop exception to cx->exception
         //   goto <next catch block>
         //   POST: pop
         // < catch block contents >
         // debugleaveblock
-        // [popblockscope]              only if any local aliased
+        // [poplexicalenv]              only if any local aliased
         // goto <end of catch blocks>   non-local; finally applies
         //
         // If there's no catch block without a catchguard, the last <next catch
@@ -5525,7 +5525,7 @@ BytecodeEmitter::emitForOf(ParseNode* forOfLoop)
         MOZ_ASSERT(forLexicalScope->kind() == ScopeKind::Lexical);
 
         if (forLexicalScope->hasEnvironment()) {
-            if (!emit1(JSOP_RECREATEBLOCKSCOPE))          // ITER RESULT
+            if (!emit1(JSOP_RECREATELEXICALENV))          // ITER RESULT
                 return false;
         }
     }
@@ -5658,7 +5658,7 @@ BytecodeEmitter::emitForIn(ParseNode* forInLoop)
         MOZ_ASSERT(forLexicalScope->kind() == ScopeKind::Lexical);
 
         if (forLexicalScope->hasEnvironment()) {
-            if (!emit1(JSOP_RECREATEBLOCKSCOPE))          // ITER ITERVAL
+            if (!emit1(JSOP_RECREATELEXICALENV))          // ITER ITERVAL
                 return false;
         }
     }
@@ -5818,7 +5818,7 @@ BytecodeEmitter::emitCStyleFor(ParseNode* pn)
         MOZ_ASSERT(forLexicalScope->kind() == ScopeKind::Lexical);
 
         if (forLexicalScope->hasEnvironment()) {
-            if (!emit1(JSOP_FRESHENBLOCKSCOPE))
+            if (!emit1(JSOP_FRESHENLEXICALENV))
                 return false;
         }
     }
@@ -5915,11 +5915,9 @@ BytecodeEmitter::emitComprehensionForInOrOfVariables(ParseNode* pn, bool* lexica
 
     *lexicalScope = pn->isKind(PNK_LEXICALSCOPE);
     if (*lexicalScope) {
-        // This is initially-ES7-tracked syntax, now with considerably
-        // murkier outlook.  The |enterBlockScope()| precipitated by the
-        // outparam-set here initializes the let-binding in
-        // |emitComprehensionFor{In,Of}| with |undefined|, so there's nothing
-        // to do here.
+        // This is initially-ES7-tracked syntax, now with considerably murkier
+        // outlook. The scope work is done by the caller by instantiating an
+        // EmitterScope. There's nothing to do here.
     } else {
         // This is legacy comprehension syntax.  We'll have PNK_LET here, using
         // a lexical scope provided by/for the entire comprehension.  Name

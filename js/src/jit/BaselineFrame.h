@@ -260,10 +260,10 @@ class BaselineFrame
         return &flags_;
     }
 
-    inline MOZ_MUST_USE bool pushBlock(JSContext* cx, Handle<LexicalScope*> scope);
-    inline void popBlock(JSContext* cx);
-    inline MOZ_MUST_USE bool freshenBlock(JSContext* cx);
-    inline MOZ_MUST_USE bool recreateBlock(JSContext* cx);
+    inline MOZ_MUST_USE bool pushLexicalEnvironment(JSContext* cx, Handle<LexicalScope*> scope);
+    inline void popLexicalEnvironment(JSContext* cx);
+    inline MOZ_MUST_USE bool freshenLexicalEnvironment(JSContext* cx);
+    inline MOZ_MUST_USE bool recreateLexicalEnvironment(JSContext* cx);
 
     MOZ_MUST_USE bool initStrictEvalEnvironmentObjects(JSContext* cx);
     MOZ_MUST_USE bool initFunctionEnvironmentObjects(JSContext* cx);

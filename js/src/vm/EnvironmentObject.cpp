@@ -1988,7 +1988,8 @@ class DebugEnvironmentProxyHandler : public BaseProxyHandler
                 if (inScope)
                     props[j++].set(props[i]);
             }
-            props.resize(j);
+            if (!props.resize(j))
+                return false;
         }
 
         /*
@@ -2435,7 +2436,7 @@ DebugEnvironments::onPopCall(AbstractFramePtr frame, JSContext* cx)
 }
 
 void
-DebugEnvironments::onPopBlock(JSContext* cx, AbstractFramePtr frame, jsbytecode* pc)
+DebugEnvironments::onPopLexical(JSContext* cx, AbstractFramePtr frame, jsbytecode* pc)
 {
     assertSameCompartment(cx, frame);
 
@@ -2444,11 +2445,11 @@ DebugEnvironments::onPopBlock(JSContext* cx, AbstractFramePtr frame, jsbytecode*
         return;
 
     EnvironmentIter ei(cx, frame, pc);
-    onPopBlock(cx, ei);
+    onPopLexical(cx, ei);
 }
 
 void
-DebugEnvironments::onPopBlock(JSContext* cx, const EnvironmentIter& ei)
+DebugEnvironments::onPopLexical(JSContext* cx, const EnvironmentIter& ei)
 {
     DebugEnvironments* envs = cx->compartment()->debugEnvs;
     if (!envs)

@@ -822,13 +822,13 @@ AbstractFramePtr::newTarget() const
 }
 
 inline void
-AbstractFramePtr::popBlock(JSContext* cx) const
+AbstractFramePtr::popLexicalEnvironment(JSContext* cx) const
 {
     if (isInterpreterFrame()) {
-        asInterpreterFrame()->popBlock(cx);
+        asInterpreterFrame()->popLexicalEnvironment(cx);
         return;
     }
-    asBaselineFrame()->popBlock(cx);
+    asBaselineFrame()->popLexicalEnvironment(cx);
 }
 
 inline void

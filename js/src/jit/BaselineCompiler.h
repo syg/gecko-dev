@@ -181,11 +181,11 @@ namespace jit {
     _(JSOP_FINALLY)            \
     _(JSOP_GOSUB)              \
     _(JSOP_RETSUB)             \
-    _(JSOP_PUSHBLOCKSCOPE)     \
-    _(JSOP_POPBLOCKSCOPE)      \
-    _(JSOP_FRESHENBLOCKSCOPE)  \
-    _(JSOP_RECREATEBLOCKSCOPE) \
-    _(JSOP_DEBUGLEAVEBLOCK)    \
+    _(JSOP_PUSHLEXICALENV)     \
+    _(JSOP_POPLEXICALENV)      \
+    _(JSOP_FRESHENLEXICALENV)  \
+    _(JSOP_RECREATELEXICALENV) \
+    _(JSOP_DEBUGLEAVELEXICALENV) \
     _(JSOP_EXCEPTION)          \
     _(JSOP_DEBUGGER)           \
     _(JSOP_ARGUMENTS)          \
