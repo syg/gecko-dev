@@ -847,7 +847,8 @@ static bool
 DeclarationKindIsVar(DeclarationKind kind)
 {
     return kind == DeclarationKind::Var ||
-           kind == DeclarationKind::BodyLevelFunction;
+           kind == DeclarationKind::BodyLevelFunction ||
+           kind == DeclarationKind::AnnexBVar;
 }
 
 template <typename ParseHandler>
@@ -942,10 +943,6 @@ Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind 
         break;
       }
 
-      case DeclarationKind::PositionalFormalParameter:
-        MOZ_CRASH("Positional formal parameter names should use notePositionalFormalParameter");
-        break;
-
       case DeclarationKind::LexicalFunction: {
         ParseContext::Scope* scope = pc->innermostScope();
         AddDeclaredNamePtr p = scope->lookupDeclaredNameForAdd(name);
@@ -953,7 +950,10 @@ Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind 
         if (p) {
             // In sloppy mode, lexical functions may be redeclared for web
             // compatibility reasons.
-            if (pc->sc()->strict() || p->value()->kind() != DeclarationKind::LexicalFunction) {
+            if (pc->sc()->strict() ||
+                (p->value()->kind() != DeclarationKind::LexicalFunction &&
+                 p->value()->kind() != DeclarationKind::AnnexBVar))
+            {
                 reportRedeclaration(name, p->value()->kind());
                 return false;
             }
@@ -984,8 +984,6 @@ Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind 
 
         ParseContext::Scope* scope = pc->innermostScope();
         AddDeclaredNamePtr p = scope->lookupDeclaredNameForAdd(name);
-        // In sloppy mode, lexical functions may be redeclared for web
-        // compatibility reasons.
         if (p) {
             reportRedeclaration(name, p->value()->kind());
             return false;
@@ -996,6 +994,14 @@ Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind 
 
         break;
       }
+
+      case DeclarationKind::PositionalFormalParameter:
+        MOZ_CRASH("Positional formal parameter names should use notePositionalFormalParameter");
+        break;
+
+      case DeclarationKind::AnnexBVar:
+        MOZ_CRASH("Synthesized Annex B vars should go through tryDeclareVar");
+        break;
     }
 
     return true;
@@ -2333,12 +2339,19 @@ Parser<ParseHandler>::checkFunctionDefinition(HandleAtom funAtom, Node pn, Funct
                 return false;
         } else {
             if (!pc->sc()->strict()) {
-                // Under sloppy mode, try Annex B.3.3 semantics. If
-                // making an additional 'var' binding of the same name does
-                // not throw an early error, do so. This 'var' binding would
-                // be assigned the function object when its declaration is
-                // reached, not at the start of the block.
-                *tryAnnexB = true;
+                // Under sloppy mode, try Annex B.3.3 semantics. If making an
+                // additional 'var' binding of the same name does not throw an
+                // early error, do so. This 'var' binding would be assigned
+                // the function object when its declaration is reached, not at
+                // the start of the block.
+
+                Maybe<DeclarationKind> redeclaredKind;
+                if (!tryDeclareVar(funName, DeclarationKind::AnnexBVar, &redeclaredKind))
+                    return false;
+
+                // FIXMEshu this is wrong
+                if (!redeclaredKind)
+                    *tryAnnexB = true;
             }
 
             if (!noteDeclaredName(funName, DeclarationKind::LexicalFunction, pn))

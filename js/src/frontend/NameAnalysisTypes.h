@@ -77,6 +77,7 @@ enum class DeclarationKind : uint8_t
     Import,
     BodyLevelFunction,
     LexicalFunction,
+    AnnexBVar,
     CatchParameter
 };
 

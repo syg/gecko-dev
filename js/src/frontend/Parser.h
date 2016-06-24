@@ -183,8 +183,7 @@ class ParseContext : public Nestable<ParseContext>
         // default expression scope.
         static MOZ_MUST_USE bool moveFormalParameterDeclaredNamesForDefaults(ParseContext* pc);
 
-        // An iterator for the set of free names in the current scope: the set
-        // of uses subtracting the set of declared names.
+        // An iterator for the set of used names in the current scope.
         class UsedNameIter
         {
             friend class Scope;
