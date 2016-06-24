@@ -583,7 +583,7 @@ ModuleObject::isInstance(HandleValue value)
 }
 
 /* static */ ModuleObject*
-ModuleObject::create(ExclusiveContext* cx, HandleObject enclosingStaticScope)
+ModuleObject::create(ExclusiveContext* cx)
 {
     RootedObject proto(cx, cx->global()->getModulePrototype());
     RootedObject obj(cx, NewObjectWithGivenProto(cx, &class_, proto));
@@ -591,7 +591,6 @@ ModuleObject::create(ExclusiveContext* cx, HandleObject enclosingStaticScope)
         return nullptr;
 
     RootedModuleObject self(cx, &obj->as<ModuleObject>());
-    self->initReservedSlot(StaticScopeSlot, ObjectOrNullValue(enclosingStaticScope));
 
     Zone* zone = cx->zone();
     IndirectBindingMap* bindings = zone->new_<IndirectBindingMap>(zone);
@@ -755,19 +754,23 @@ ModuleObject::AssertArrayPropertiesFrozen(JSContext* cx, HandleModuleObject self
 inline static void
 AssertModuleScopesMatch(ModuleObject* module)
 {
-    MOZ_ASSERT(IsStaticGlobalLexicalScope(module->enclosingStaticScope()));
+    /* TODOshu
+    MOZ_ASSERT(IsStaticGlobalLexicalScope(module->enclosingScope()));
     MOZ_ASSERT(module->initialEnvironment().enclosingScope().as<ClonedBlockObject>().staticScope() ==
                module->enclosingStaticScope());
+    */
 }
 
 void
 ModuleObject::fixScopesAfterCompartmentMerge(JSContext* cx)
 {
+    /* TODOshu
     AssertModuleScopesMatch(this);
     Rooted<ClonedBlockObject*> lexicalScope(cx, &script()->global().lexicalScope());
     setReservedSlot(StaticScopeSlot, ObjectValue(lexicalScope->staticBlock()));
     initialEnvironment().setEnclosingScope(lexicalScope);
     AssertModuleScopesMatch(this);
+    */
 }
 
 bool
@@ -808,10 +811,10 @@ ModuleObject::initialEnvironment() const
     return getReservedSlot(InitialEnvironmentSlot).toObject().as<ModuleEnvironmentObject>();
 }
 
-JSObject*
-ModuleObject::enclosingStaticScope() const
+Scope*
+ModuleObject::enclosingScope() const
 {
-    return getReservedSlot(StaticScopeSlot).toObjectOrNull();
+    return script()->bodyScope()->enclosing();
 }
 
 /* static */ void

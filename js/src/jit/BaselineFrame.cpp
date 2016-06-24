@@ -9,7 +9,7 @@
 #include "jit/BaselineJIT.h"
 #include "jit/Ion.h"
 #include "vm/Debugger.h"
-#include "vm/ScopeObject.h"
+#include "vm/EnvironmentObject.h"
 
 #include "jit/JitFrames-inl.h"
 #include "vm/Stack-inl.h"
@@ -40,9 +40,9 @@ BaselineFrame::trace(JSTracer* trc, JitFrameIterator& frameIterator)
         TraceRootRange(trc, numArgs + isConstructing(), argv(), "baseline-args");
     }
 
-    // Mark scope chain, if it exists.
-    if (scopeChain_)
-        TraceRoot(trc, &scopeChain_, "baseline-scopechain");
+    // Mark environment chain, if it exists.
+    if (envChain_)
+        TraceRoot(trc, &envChain_, "baseline-envchain");
 
     // Mark return value.
     if (hasReturnValue())
@@ -87,8 +87,7 @@ BaselineFrame::trace(JSTracer* trc, JitFrameIterator& frameIterator)
 bool
 BaselineFrame::isNonGlobalEvalFrame() const
 {
-    return isEvalFrame() &&
-           script()->enclosingStaticScope()->as<StaticEvalScope>().isNonGlobal();
+    return isEvalFrame() && script()->enclosingScope()->as<EvalScope>().isNonGlobal();
 }
 
 bool
@@ -107,7 +106,7 @@ BaselineFrame::copyRawFrameSlots(MutableHandle<GCVector<Value>> vec) const
 }
 
 bool
-BaselineFrame::initStrictEvalScopeObjects(JSContext* cx)
+BaselineFrame::initStrictEvalEnvironmentObjects(JSContext* cx)
 {
     MOZ_ASSERT(isStrictEvalFrame());
 
@@ -115,23 +114,20 @@ BaselineFrame::initStrictEvalScopeObjects(JSContext* cx)
     if (!callobj)
         return false;
 
-    pushOnScopeChain(*callobj);
+    pushOnEnvironmentChain(*callobj);
     flags_ |= HAS_CALL_OBJ;
     return true;
 }
 
 bool
-BaselineFrame::initFunctionScopeObjects(JSContext* cx)
+BaselineFrame::initFunctionEnvironmentObjects(JSContext* cx)
 {
-    MOZ_ASSERT(isFunctionFrame());
-    MOZ_ASSERT(callee()->needsCallObject());
-
-    CallObject* callobj = CallObject::createForFunction(cx, this);
-    if (!callobj)
+    if (!InitFunctionEnvironmentObjects(cx, this))
         return false;
 
-    pushOnScopeChain(*callobj);
-    flags_ |= HAS_CALL_OBJ;
+    if (environmentChain()->is<CallObject>())
+        flags_ |= HAS_CALL_OBJ;
+
     return true;
 }
 
@@ -140,7 +136,7 @@ BaselineFrame::initForOsr(InterpreterFrame* fp, uint32_t numStackValues)
 {
     mozilla::PodZero(this);
 
-    scopeChain_ = fp->scopeChain();
+    envChain_ = fp->environmentChain();
 
     if (fp->hasCallObjUnchecked())
         flags_ |= BaselineFrame::HAS_CALL_OBJ;

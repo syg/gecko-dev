@@ -274,8 +274,8 @@ class FrameInfo
     Address addressOfCalleeToken() const {
         return Address(BaselineFrameReg, BaselineFrame::offsetOfCalleeToken());
     }
-    Address addressOfScopeChain() const {
-        return Address(BaselineFrameReg, BaselineFrame::reverseOffsetOfScopeChain());
+    Address addressOfEnvironmentChain() const {
+        return Address(BaselineFrameReg, BaselineFrame::reverseOffsetOfEnvironmentChain());
     }
     Address addressOfFlags() const {
         return Address(BaselineFrameReg, BaselineFrame::reverseOffsetOfFlags());

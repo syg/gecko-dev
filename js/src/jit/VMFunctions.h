@@ -17,7 +17,7 @@
 namespace js {
 
 class DeclEnvObject;
-class StaticWithScope;
+class WithScope;
 class InlineTypedObject;
 class GeneratorObject;
 
@@ -282,8 +282,8 @@ template <> struct TypeToDataType<Handle<InlineTypedObject*> > { static const Da
 template <> struct TypeToDataType<Handle<ArrayObject*> > { static const DataType result = Type_Handle; };
 template <> struct TypeToDataType<Handle<GeneratorObject*> > { static const DataType result = Type_Handle; };
 template <> struct TypeToDataType<Handle<PlainObject*> > { static const DataType result = Type_Handle; };
-template <> struct TypeToDataType<Handle<StaticWithScope*> > { static const DataType result = Type_Handle; };
-template <> struct TypeToDataType<Handle<StaticBlockScope*> > { static const DataType result = Type_Handle; };
+template <> struct TypeToDataType<Handle<WithScope*> > { static const DataType result = Type_Handle; };
+template <> struct TypeToDataType<Handle<LexicalScope*> > { static const DataType result = Type_Handle; };
 template <> struct TypeToDataType<HandleScript> { static const DataType result = Type_Handle; };
 template <> struct TypeToDataType<HandleValue> { static const DataType result = Type_Handle; };
 template <> struct TypeToDataType<MutableHandleValue> { static const DataType result = Type_Handle; };
@@ -323,11 +323,11 @@ template <> struct TypeToArgProperties<Handle<GeneratorObject*> > {
 template <> struct TypeToArgProperties<Handle<PlainObject*> > {
     static const uint32_t result = TypeToArgProperties<PlainObject*>::result | VMFunction::ByRef;
 };
-template <> struct TypeToArgProperties<Handle<StaticWithScope*> > {
-    static const uint32_t result = TypeToArgProperties<StaticWithScope*>::result | VMFunction::ByRef;
+template <> struct TypeToArgProperties<Handle<WithScope*> > {
+    static const uint32_t result = TypeToArgProperties<WithScope*>::result | VMFunction::ByRef;
 };
-template <> struct TypeToArgProperties<Handle<StaticBlockScope*> > {
-    static const uint32_t result = TypeToArgProperties<StaticBlockScope*>::result | VMFunction::ByRef;
+template <> struct TypeToArgProperties<Handle<LexicalScope*> > {
+    static const uint32_t result = TypeToArgProperties<LexicalScope*>::result | VMFunction::ByRef;
 };
 template <> struct TypeToArgProperties<HandleScript> {
     static const uint32_t result = TypeToArgProperties<JSScript*>::result | VMFunction::ByRef;
@@ -400,10 +400,10 @@ template <> struct TypeToRootType<Handle<GeneratorObject*> > {
 template <> struct TypeToRootType<Handle<PlainObject*> > {
     static const uint32_t result = VMFunction::RootObject;
 };
-template <> struct TypeToRootType<Handle<StaticBlockScope*> > {
-    static const uint32_t result = VMFunction::RootObject;
+template <> struct TypeToRootType<Handle<LexicalScope*> > {
+    static const uint32_t result = VMFunction::RootCell;
 };
-template <> struct TypeToRootType<Handle<StaticWithScope*> > {
+template <> struct TypeToRootType<Handle<WithScope*> > {
     static const uint32_t result = VMFunction::RootCell;
 };
 template <class T> struct TypeToRootType<Handle<T> > {
@@ -624,9 +624,8 @@ bool SetProperty(JSContext* cx, HandleObject obj, HandlePropertyName name, Handl
 bool InterruptCheck(JSContext* cx);
 
 void* MallocWrapper(JSRuntime* rt, size_t nbytes);
-JSObject* NewCallObject(JSContext* cx, HandleShape shape, HandleObjectGroup group,
-                        uint32_t lexicalBegin);
-JSObject* NewSingletonCallObject(JSContext* cx, HandleShape shape, uint32_t lexicalBegin);
+JSObject* NewCallObject(JSContext* cx, HandleShape shape, HandleObjectGroup group);
+JSObject* NewSingletonCallObject(JSContext* cx, HandleShape shape);
 JSObject* NewStringObject(JSContext* cx, HandleString str);
 
 bool OperatorIn(JSContext* cx, HandleValue key, HandleObject obj, bool* out);
@@ -660,8 +659,8 @@ bool GeneratorThrowOrClose(JSContext* cx, BaselineFrame* frame, Handle<Generator
                            HandleValue arg, uint32_t resumeKind);
 
 bool GlobalNameConflictsCheckFromIon(JSContext* cx, HandleScript script);
-bool InitGlobalOrEvalScopeObjects(JSContext* cx, BaselineFrame* frame);
-bool InitFunctionScopeObjects(JSContext* cx, BaselineFrame* frame);
+bool InitGlobalOrEvalEnvironmentObjects(JSContext* cx, BaselineFrame* frame);
+bool InitFunctionEnvironmentObjects(JSContext* cx, BaselineFrame* frame);
 
 bool NewArgumentsObject(JSContext* cx, BaselineFrame* frame, MutableHandleValue res);
 
@@ -672,15 +671,16 @@ bool HandleDebugTrap(JSContext* cx, BaselineFrame* frame, uint8_t* retAddr, bool
 bool OnDebuggerStatement(JSContext* cx, BaselineFrame* frame, jsbytecode* pc, bool* mustReturn);
 bool GlobalHasLiveOnDebuggerStatement(JSContext* cx);
 
-bool EnterWith(JSContext* cx, BaselineFrame* frame, HandleValue val,
-               Handle<StaticWithScope*> templ);
+bool EnterWith(JSContext* cx, BaselineFrame* frame, HandleValue val, Handle<WithScope*> templ);
 bool LeaveWith(JSContext* cx, BaselineFrame* frame);
 
-bool PushBlockScope(JSContext* cx, BaselineFrame* frame, Handle<StaticBlockScope*> block);
+bool PushBlockScope(JSContext* cx, BaselineFrame* frame, Handle<LexicalScope*> scope);
 bool PopBlockScope(JSContext* cx, BaselineFrame* frame);
 bool DebugLeaveThenPopBlockScope(JSContext* cx, BaselineFrame* frame, jsbytecode* pc);
 bool FreshenBlockScope(JSContext* cx, BaselineFrame* frame);
 bool DebugLeaveThenFreshenBlockScope(JSContext* cx, BaselineFrame* frame, jsbytecode* pc);
+bool RecreateBlockScope(JSContext* cx, BaselineFrame* frame);
+bool DebugLeaveThenRecreateBlockScope(JSContext* cx, BaselineFrame* frame, jsbytecode* pc);
 bool DebugLeaveBlock(JSContext* cx, BaselineFrame* frame, jsbytecode* pc);
 
 bool InitBaselineFrameForOsr(BaselineFrame* frame, InterpreterFrame* interpFrame,
