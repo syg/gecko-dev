@@ -592,6 +592,8 @@ class MOZ_RAII EnvironmentIter
     }
 
     void operator++(int) {
+        if (hasAnyEnvironmentObject())
+            env_ = &env_->as<EnvironmentObject>().enclosingEnvironment();
         incrementScopeIter();
         settle();
     }

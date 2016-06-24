@@ -2592,12 +2592,6 @@ JSScript::fullyInitFromEmitter(ExclusiveContext* cx, HandleScript script, Byteco
     if (!SaveSharedScriptData(cx, script, ssd, nsrcnotes))
         return false;
 
-    // Compute whether this script is under a non-syntactic scope. We don't
-    // need to walk the entire static scope chain if the script is nested in a
-    // function. In that case, we can propagate the cached value from the
-    // outer script.
-    script->hasNonSyntacticScope_ = bce->outermostScope()->hasEnclosing(ScopeKind::NonSyntactic);
-
     if (bce->constList.length() != 0)
         bce->constList.finish(script->consts());
     if (bce->objectList.length != 0)
@@ -2613,9 +2607,6 @@ JSScript::fullyInitFromEmitter(ExclusiveContext* cx, HandleScript script, Byteco
     script->bindingsAccessedDynamically_ = bce->sc->bindingsAccessedDynamically();
     script->hasSingletons_ = bce->hasSingletons;
 
-    if (bce->yieldOffsetList.length() != 0)
-        bce->yieldOffsetList.finish(script->yieldOffsets(), prologueLength);
-
     uint64_t nslots = bce->maxFixedSlots + bce->maxStackDepth;
     if (nslots > UINT32_MAX) {
         bce->reportError(nullptr, JSMSG_NEED_DIET, js_script_str);
@@ -2624,13 +2615,18 @@ JSScript::fullyInitFromEmitter(ExclusiveContext* cx, HandleScript script, Byteco
 
     script->nfixed_ = bce->maxFixedSlots;
     script->nslots_ = nslots;
-
     script->bodyScopeIndex_ = bce->bodyScopeIndex;
+    script->hasNonSyntacticScope_ = bce->outermostScope()->hasEnclosing(ScopeKind::NonSyntactic);
 
     if (bce->sc->isFunctionBox())
         initFromFunctionBox(cx, script, bce->sc->asFunctionBox());
     else if (bce->sc->isModuleBox())
         initFromModuleBox(cx, script, bce->sc->asModuleBox());
+
+    // Copy yield offsets last, as the generator kind is set in
+    // initFromFunctionBox.
+    if (bce->yieldOffsetList.length() != 0)
+        bce->yieldOffsetList.finish(script->yieldOffsets(), prologueLength);
 
 #ifdef DEBUG
     script->assertValidJumpTargets();

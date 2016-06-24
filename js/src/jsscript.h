@@ -1017,7 +1017,10 @@ class JSScript : public js::gc::TenuredCell
     }
 
     bool hasDefaults() const {
-        return bodyScope()->enclosing()->kind() == js::ScopeKind::ParameterDefaults;
+        js::Scope* scope = bodyScope();
+        if (!scope->is<js::FunctionScope>())
+            return false;
+        return scope->enclosing()->kind() == js::ScopeKind::ParameterDefaults;
     }
 
     bool hasAnyAliasedBindings() const {

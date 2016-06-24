@@ -248,7 +248,7 @@ class Scope : public js::gc::TenuredCell
     void traceChildren(JSTracer* trc);
     void finalize(FreeOp* fop);
 
-    void dump() const;
+    void dump();
 };
 
 //

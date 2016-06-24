@@ -1125,12 +1125,9 @@ EnvironmentIter::incrementScopeIter()
         // GlobalObject.
         //
         // Thus regardless of whether the GlobalScope is syntactic, only
-        // advance si_ once we see the global lexical scope.
-        if (env_->is<LexicalEnvironmentObject>() &&
-            env_->as<LexicalEnvironmentObject>().isGlobal())
-        {
+        // advance si_ once we see the GlobalObject.
+        if (env_->is<GlobalObject>())
             si_++;
-        }
     } else {
         si_++;
     }

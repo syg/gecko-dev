@@ -122,7 +122,7 @@ BaselineFrame::initStrictEvalEnvironmentObjects(JSContext* cx)
 bool
 BaselineFrame::initFunctionEnvironmentObjects(JSContext* cx)
 {
-    if (!InitFunctionEnvironmentObjects(cx, this))
+    if (!js::InitFunctionEnvironmentObjects(cx, this))
         return false;
 
     if (environmentChain()->is<CallObject>())

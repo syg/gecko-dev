@@ -597,11 +597,6 @@ BytecodeEmitter::EmitterScope::searchInEnclosingScope(JSAtom* name, Scope* scope
     for (ScopeIter si(scope); si; si++) {
         bool hasEnv = si.hasSyntacticEnvironment();
 
-        if (hasEnv) {
-            MOZ_ASSERT(hops < ENVCOORD_HOPS_LIMIT - 1);
-            hops++;
-        }
-
         switch (si.kind()) {
           case ScopeKind::Function:
           case ScopeKind::ParameterDefaults:
@@ -636,6 +631,11 @@ BytecodeEmitter::EmitterScope::searchInEnclosingScope(JSAtom* name, Scope* scope
           case ScopeKind::Eval:
           case ScopeKind::NonSyntactic:
             return NameLocation::Dynamic();
+        }
+
+        if (hasEnv) {
+            MOZ_ASSERT(hops < ENVCOORD_HOPS_LIMIT - 1);
+            hops++;
         }
     }
 

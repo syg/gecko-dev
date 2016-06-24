@@ -1361,7 +1361,6 @@ struct JSRuntime : public JS::shadow::Runtime,
     friend class js::AutoKeepAtoms;
   public:
     bool keepAtoms() {
-        MOZ_ASSERT(CurrentThreadCanAccessRuntime(this));
         return keepAtoms_ != 0 || exclusiveThreadsPresent();
     }
 

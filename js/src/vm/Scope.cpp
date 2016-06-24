@@ -312,13 +312,14 @@ Scope::finalize(FreeOp* fop)
 }
 
 void
-Scope::dump() const
+Scope::dump()
 {
-    for (ScopeIter si(const_cast<Scope*>(this)); si; si++) {
-        fprintf(stdout, "%s [%p]", ScopeKindString(si.kind()), si.scope());
+    for (ScopeIter si(this); si; si++) {
+        fprintf(stderr, "%s [%p]", ScopeKindString(si.kind()), si.scope());
         if (si.scope()->enclosing())
-            fprintf(stdout, " -> ");
+            fprintf(stderr, " -> ");
     }
+    fprintf(stderr, "\n");
 }
 
 /* static */ uint32_t

@@ -82,7 +82,7 @@ InterpreterFrame::initExecuteFrame(JSContext* cx, HandleScript script,
 bool
 InterpreterFrame::isNonGlobalEvalFrame() const
 {
-    return isEvalFrame() && script()->enclosingScope()->as<EvalScope>().isNonGlobal();
+    return isEvalFrame() && script()->bodyScope()->as<EvalScope>().isNonGlobal();
 }
 
 bool
