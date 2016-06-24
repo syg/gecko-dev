@@ -144,6 +144,12 @@ class DeclaredNameInfo
     }
 };
 
+enum class UsedNameInfo
+{
+    FromSameFunction,
+    FromInnerFunction
+};
+
 // Used in BytecodeEmitter to map names to locations.
 class NameLocation
 {
@@ -323,6 +329,9 @@ namespace mozilla {
 
 template <>
 struct IsPod<js::frontend::DeclaredNameInfo> : TrueType {};
+
+template <>
+struct IsPod<js::frontend::UsedNameInfo> : TrueType {};
 
 template <>
 struct IsPod<js::frontend::NameLocation> : TrueType {};

@@ -265,8 +265,7 @@ PushNodeChildren(ParseNode* pn, NodeStack* stack)
       case PNK_NEWTARGET:
       case PNK_SETTHIS:
       case PNK_FOR:
-      case PNK_COMPREHENSIONFOR:
-      case PNK_ANNEXB_FUNCTION: {
+      case PNK_COMPREHENSIONFOR: {
         MOZ_ASSERT(pn->isArity(PN_BINARY));
         stack->push(pn->pn_left);
         stack->push(pn->pn_right);
@@ -1120,4 +1119,12 @@ void
 ObjectBox::trace(JSTracer* trc)
 {
     TraceRoot(trc, &object, "parser.object");
+}
+
+void
+FunctionBox::trace(JSTracer* trc)
+{
+    ObjectBox::trace(trc);
+    if (enclosingScope_)
+        TraceRoot(trc, &enclosingScope_, "funbox-enclosingScope");
 }

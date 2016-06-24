@@ -453,6 +453,8 @@ class InlineMap
         InlineEntry* inlineEntry_;
 
       public:
+        Entry() = default;
+
         explicit Entry(MapEntry* mapEntry)
           : mapEntry_(mapEntry),
             inlineEntry_(nullptr)
@@ -585,6 +587,8 @@ class InlineSet
         InlineEntry* inlineEntry_;
 
       public:
+        Entry() = default;
+
         explicit Entry(const SetEntry* setEntry)
           : setEntry_(const_cast<SetEntry*>(setEntry)),
             inlineEntry_(nullptr)

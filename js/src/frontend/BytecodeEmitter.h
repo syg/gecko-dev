@@ -216,6 +216,7 @@ struct MOZ_STACK_CLASS BytecodeEmitter
 
     uint32_t        bodyScopeIndex; /* index into scopeList of the body scope */
 
+    EmitterScope*    bodyEmitterScope;
     NestableControl* innermostNestableControl;
     EmitterScope*    innermostEmitterScope;
     TDZCheckCache*   innermostTDZCheckCache;
@@ -305,6 +306,12 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     // returns the access location of a name that is known to be bound in a
     // target scope.
     mozilla::Maybe<NameLocation> locationOfNameBoundInScope(JSAtom* name, EmitterScope* target);
+
+    void setBodyEmitterScope(EmitterScope* emitterScope) {
+        MOZ_ASSERT(emitterScope);
+        MOZ_ASSERT(!bodyEmitterScope);
+        bodyEmitterScope = emitterScope;
+    }
 
     Scope* bodyScope() const { return scopeList.vector[bodyScopeIndex]; }
     Scope* outermostScope() const { return scopeList.vector[0]; }
@@ -513,11 +520,20 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     MOZ_MUST_USE bool emitArgOp(JSOp op, uint16_t slot);
     MOZ_MUST_USE bool emitEnvCoordOp(JSOp op, EnvironmentCoordinate ec);
 
-    MOZ_MUST_USE bool emitGetName(JSAtom* name, bool callContext = false);
+    MOZ_MUST_USE bool emitGetNameAtLocation(JSAtom* name, const NameLocation& loc,
+                                            bool callContext = false);
+    MOZ_MUST_USE bool emitGetName(JSAtom* name, bool callContext = false) {
+        return emitGetNameAtLocation(name, lookupName(name), callContext);
+    }
     MOZ_MUST_USE bool emitGetName(ParseNode* pn, bool callContext = false);
 
     template <typename RHSEmitter>
-    MOZ_MUST_USE bool emitSetOrInitializeName(JSAtom* name, RHSEmitter emitRhs, bool initialize);
+    MOZ_MUST_USE bool emitSetOrInitializeNameAtLocation(JSAtom* name, const NameLocation& loc,
+                                                        RHSEmitter emitRhs, bool initialize);
+    template <typename RHSEmitter>
+    MOZ_MUST_USE bool emitSetOrInitializeName(JSAtom* name, RHSEmitter emitRhs, bool initialize) {
+        return emitSetOrInitializeNameAtLocation(name, lookupName(name), emitRhs, initialize);
+    }
     template <typename RHSEmitter>
     MOZ_MUST_USE bool emitSetName(ParseNode* pn, RHSEmitter emitRhs) {
         return emitSetName(pn->name(), emitRhs);

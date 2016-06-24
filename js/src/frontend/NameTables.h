@@ -66,10 +66,9 @@ using DeclaredNameMap = RECYCLABLE_NAME_MAP_TYPE(DeclaredNameInfo);
 using CheckTDZMap = RECYCLABLE_NAME_MAP_TYPE(MaybeCheckTDZ);
 using NameLocationMap = RECYCLABLE_NAME_MAP_TYPE(NameLocation);
 using AtomIndexMap = RECYCLABLE_NAME_MAP_TYPE(uint32_t);
+using UsedNameSet = RECYCLABLE_NAME_MAP_TYPE(UsedNameInfo);
 
 #undef RECYCLABLE_NAME_MAP_TYPE
-
-using UsedNameSet = InlineSet<JSAtom*, 24, DefaultHasher<JSAtom*>, SystemAllocPolicy>;
 
 // A pool of recyclable InlineTables for use in the frontend. The Parser and
 // BytecodeEmitter create many maps for name analysis that are short-lived
@@ -169,8 +168,7 @@ class InlineTablePool
 
 class NameTablePools
 {
-    InlineTablePool<AtomIndexMap> mapPool_;
-    InlineTablePool<UsedNameSet> setPool_;
+    InlineTablePool<AtomIndexMap> pool_;
     uint32_t activeCompilations_;
 
   public:
@@ -192,34 +190,20 @@ class NameTablePools
     }
 
     template <typename Map>
-    Map* acquireMap(ExclusiveContext* cx) {
+    Map* acquire(ExclusiveContext* cx) {
         MOZ_ASSERT(hasActiveCompilation());
-        return mapPool_.acquire<Map>(cx);
-    }
-
-    template <typename Set>
-    Set* acquireSet(ExclusiveContext* cx) {
-        MOZ_ASSERT(hasActiveCompilation());
-        return setPool_.acquire<Set>(cx);
+        return pool_.acquire<Map>(cx);
     }
 
     template <typename Map>
-    void releaseMap(Map** map) {
+    void release(Map** map) {
         MOZ_ASSERT(hasActiveCompilation());
-        mapPool_.release(map);
-    }
-
-    template <typename Set>
-    void releaseSet(Set** set) {
-        MOZ_ASSERT(hasActiveCompilation());
-        setPool_.release(set);
+        pool_.release(map);
     }
 
     void purge() {
-        if (!hasActiveCompilation()) {
-            mapPool_.purgeAll();
-            setPool_.purgeAll();
-        }
+        if (!hasActiveCompilation())
+            pool_.purgeAll();
     }
 };
 

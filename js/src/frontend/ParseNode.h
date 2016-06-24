@@ -102,7 +102,6 @@ class ObjectBox;
     F(FORIN) \
     F(FOROF) \
     F(FORHEAD) \
-    F(ANNEXB_FUNCTION) \
     F(PARAMSBODY) \
     F(SPREAD) \
     F(MUTATEPROTO) \
@@ -206,13 +205,7 @@ IsDeleteKind(ParseNodeKind kind)
  *                            time to specialize arg and var bytecodes early.
  *                          pn_body: PNK_PARAMSBODY, ordinarily;
  *                            PNK_LEXICALSCOPE for implicit function in genexpr
- *                          pn_scopecoord: hops and var index for function
- *                          pn_dflags: PND_* definition/use flags (see below)
- *                          pn_blockid: block id number
- * PNK_ANNEXB_FUNCTION binary pn_left: PNK_FUNCTION
- *                            pn_right: assignment for annex B semantics for
- *                              block-scoped function
- * PNK_PARAMSBODY list        list of formal parameters with
+ * PNK_PARAMSBODY list      list of formal parameters with
  *                              PNK_NAME node with non-empty name for
  *                                SingleNameBinding without Initializer
  *                              PNK_ASSIGN node for SingleNameBinding with
@@ -398,7 +391,6 @@ IsDeleteKind(ParseNodeKind kind)
  * PNK_NAME,    name        pn_atom: name, string, or object atom
  * PNK_STRING               pn_op: JSOP_GETNAME, JSOP_STRING, or JSOP_OBJECT
  *                          If JSOP_GETNAME, pn_op may be JSOP_*ARG or JSOP_*VAR
- *                          with pn_scoppecord telling (hops, slot) and pn_dflags
  *                          telling const-ness and static analysis results
  * PNK_TEMPLATE_STRING_LIST pn_head: list of alternating expr and template strings
  *              list

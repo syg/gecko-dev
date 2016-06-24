@@ -71,7 +71,7 @@ class BytecodeEmitter::TDZCheckCache : public Nestable<BytecodeEmitter::TDZCheck
 
     MOZ_MUST_USE bool ensureCache() {
         if (!cache_) {
-            cache_ = cx_->frontendTablePools().acquireMap<CheckTDZMap>(cx_);
+            cache_ = cx_->frontendTablePools().acquire<CheckTDZMap>(cx_);
             if (!cache_)
                 return false;
         }
@@ -92,7 +92,7 @@ class BytecodeEmitter::TDZCheckCache : public Nestable<BytecodeEmitter::TDZCheck
 
     ~TDZCheckCache() {
         if (cache_)
-            cx_->frontendTablePools().releaseMap(&cache_);
+            cx_->frontendTablePools().release(&cache_);
     }
 
     Maybe<MaybeCheckTDZ> needsTDZCheck(JSAtom* name);
@@ -361,7 +361,7 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
 
     MOZ_MUST_USE bool ensureCache(BytecodeEmitter* bce) {
         MOZ_ASSERT(!nameCache_);
-        nameCache_ = bce->cx->frontendTablePools().acquireMap<NameLocationMap>(bce->cx);
+        nameCache_ = bce->cx->frontendTablePools().acquire<NameLocationMap>(bce->cx);
         return !!nameCache_;
     }
 
@@ -831,6 +831,8 @@ BytecodeEmitter::EmitterScope::enterFunctionBody(BytecodeEmitter* bce, FunctionB
 {
     MOZ_ASSERT(this == bce->innermostEmitterScope);
 
+    bce->setBodyEmitterScope(this);
+
     if (!ensureCache(bce))
         return false;
 
@@ -937,6 +939,8 @@ BytecodeEmitter::EmitterScope::enterGlobal(BytecodeEmitter* bce, GlobalSharedCon
 {
     MOZ_ASSERT(this == bce->innermostEmitterScope);
 
+    bce->setBodyEmitterScope(this);
+
     if (!ensureCache(bce))
         return false;
 
@@ -999,6 +1003,8 @@ bool
 BytecodeEmitter::EmitterScope::enterEval(BytecodeEmitter* bce, EvalSharedContext* evalsc)
 {
     MOZ_ASSERT(this == bce->innermostEmitterScope);
+
+    bce->setBodyEmitterScope(this);
 
     if (!ensureCache(bce))
         return false;
@@ -1102,7 +1108,7 @@ BytecodeEmitter::EmitterScope::leave(BytecodeEmitter* bce, bool nonLocal)
             bce->scopeNoteList.recordEnd(noteIndex_, bce->offset(), bce->inPrologue());
 
         // Release the name cache.
-        bce->cx->frontendTablePools().releaseMap(&nameCache_);
+        bce->cx->frontendTablePools().release(&nameCache_);
     }
 
     return true;
@@ -1174,6 +1180,7 @@ BytecodeEmitter::BytecodeEmitter(BytecodeEmitter* parent,
     arrayCompDepth(0),
     emitLevel(0),
     bodyScopeIndex(UINT32_MAX),
+    bodyEmitterScope(nullptr),
     innermostNestableControl(nullptr),
     innermostEmitterScope(nullptr),
     innermostTDZCheckCache(nullptr),
@@ -1206,13 +1213,13 @@ BytecodeEmitter::BytecodeEmitter(BytecodeEmitter* parent,
 
 BytecodeEmitter::~BytecodeEmitter()
 {
-    cx->frontendTablePools().releaseMap(&atomIndices);
+    cx->frontendTablePools().release(&atomIndices);
 }
 
 bool
 BytecodeEmitter::init()
 {
-    atomIndices = cx->frontendTablePools().acquireMap<AtomIndexMap>(cx);
+    atomIndices = cx->frontendTablePools().acquire<AtomIndexMap>(cx);
     return !!atomIndices;
 }
 
@@ -2362,22 +2369,6 @@ BytecodeEmitter::checkSideEffects(ParseNode* pn, bool* answer)
         MOZ_ASSERT(pn->pn_count == 1);
         return checkSideEffects(pn->pn_head, answer);
 
-      case PNK_ANNEXB_FUNCTION:
-        MOZ_ASSERT(pn->isArity(PN_BINARY));
-
-        // XXXshu NOP check used only for phasing in block-scope function
-        // XXXshu early errors.
-        // XXXshu
-        // XXXshu Back out when major version >= 50. See [1].
-        // XXXshu
-        // XXXshu [1] https://bugzilla.mozilla.org/show_bug.cgi?id=1235590#c10
-        if (pn->pn_left->isKind(PNK_NOP)) {
-            *answer = false;
-            return true;
-        }
-
-        return checkSideEffects(pn->pn_left, answer);
-
       case PNK_PARAMSBODY:
         *answer = true;
         return true;
@@ -2581,47 +2572,46 @@ BytecodeEmitter::emitFinishIteratorResult(bool done)
     return true;
 }
 
-static bool
-EmitGetNameAtLocation(BytecodeEmitter* bce, JSAtom* name, const NameLocation& loc,
-                      bool callContext = false)
+bool
+BytecodeEmitter::emitGetNameAtLocation(JSAtom* name, const NameLocation& loc, bool callContext)
 {
     switch (loc.kind()) {
       case NameLocation::Kind::Dynamic:
-        if (!bce->emitAtomOp(name, JSOP_GETNAME))
+        if (!emitAtomOp(name, JSOP_GETNAME))
             return false;
         break;
 
       case NameLocation::Kind::Global:
-        if (!bce->emitAtomOp(name, JSOP_GETGNAME))
+        if (!emitAtomOp(name, JSOP_GETGNAME))
             return false;
         break;
 
       case NameLocation::Kind::Intrinsic:
-        if (!bce->emitAtomOp(name, JSOP_GETINTRINSIC))
+        if (!emitAtomOp(name, JSOP_GETINTRINSIC))
             return false;
         break;
 
       case NameLocation::Kind::NamedLambdaCallee:
-        if (!bce->emitAtomOp(name, JSOP_CALLEE))
+        if (!emitAtomOp(name, JSOP_CALLEE))
             return false;
         break;
 
       case NameLocation::Kind::ArgumentSlot:
-        if (!bce->emitArgOp(JSOP_GETARG, loc.argumentSlot()))
+        if (!emitArgOp(JSOP_GETARG, loc.argumentSlot()))
             return false;
         break;
 
       case NameLocation::Kind::FrameSlot:
-        if (loc.isLexical() && !bce->emitTDZCheckIfNeeded(name, loc))
+        if (loc.isLexical() && !emitTDZCheckIfNeeded(name, loc))
             return false;
-        if (!bce->emitLocalOp(JSOP_GETLOCAL, loc.frameSlot()))
+        if (!emitLocalOp(JSOP_GETLOCAL, loc.frameSlot()))
             return false;
         break;
 
       case NameLocation::Kind::EnvironmentCoordinate:
-        if (loc.isLexical() && !bce->emitTDZCheckIfNeeded(name, loc))
+        if (loc.isLexical() && !emitTDZCheckIfNeeded(name, loc))
             return false;
-        if (!bce->emitEnvCoordOp(JSOP_GETALIASEDVAR, loc.environmentCoordinate()))
+        if (!emitEnvCoordOp(JSOP_GETALIASEDVAR, loc.environmentCoordinate()))
             return false;
         break;
     }
@@ -2631,8 +2621,8 @@ EmitGetNameAtLocation(BytecodeEmitter* bce, JSAtom* name, const NameLocation& lo
         switch (loc.kind()) {
           case NameLocation::Kind::Dynamic:
           case NameLocation::Kind::Global: {
-            JSOp thisOp = bce->needsImplicitThis() ? JSOP_IMPLICITTHIS : JSOP_GIMPLICITTHIS;
-            if (!bce->emitAtomOp(name, thisOp))
+            JSOp thisOp = needsImplicitThis() ? JSOP_IMPLICITTHIS : JSOP_GIMPLICITTHIS;
+            if (!emitAtomOp(name, thisOp))
                 return false;
             break;
           }
@@ -2642,19 +2632,13 @@ EmitGetNameAtLocation(BytecodeEmitter* bce, JSAtom* name, const NameLocation& lo
           case NameLocation::Kind::ArgumentSlot:
           case NameLocation::Kind::FrameSlot:
           case NameLocation::Kind::EnvironmentCoordinate:
-            if (!bce->emit1(JSOP_UNDEFINED))
+            if (!emit1(JSOP_UNDEFINED))
                 return false;
             break;
         }
     }
 
     return true;
-}
-
-bool
-BytecodeEmitter::emitGetName(JSAtom* name, bool callContext)
-{
-    return EmitGetNameAtLocation(this, name, lookupName(name), callContext);
 }
 
 bool
@@ -2665,9 +2649,9 @@ BytecodeEmitter::emitGetName(ParseNode* pn, bool callContext)
 
 template <typename RHSEmitter>
 bool
-BytecodeEmitter::emitSetOrInitializeName(JSAtom* name, RHSEmitter emitRhs, bool initialize)
+BytecodeEmitter::emitSetOrInitializeNameAtLocation(JSAtom* name, const NameLocation& loc,
+                                                   RHSEmitter emitRhs, bool initialize)
 {
-    NameLocation loc = lookupName(name);
     bool emittedBindOp = false;
 
     switch (loc.kind()) {
@@ -2784,8 +2768,11 @@ BytecodeEmitter::emitSetOrInitializeName(JSAtom* name, RHSEmitter emitRhs, bool 
             return false;
         if (!emitEnvCoordOp(op, loc.environmentCoordinate()))
             return false;
-        if (op == JSOP_INITALIASEDLEXICAL && !innermostTDZCheckCache->noteEmittedTDZCheck(name))
+        if (op == JSOP_INITALIASEDLEXICAL &&
+            !innermostTDZCheckCache->noteEmittedTDZCheck(name))
+        {
             return false;
+        }
         break;
       }
     }
@@ -2980,7 +2967,7 @@ BytecodeEmitter::emitNameIncDec(ParseNode* pn)
                                      bool emittedBindOp)
     {
         JSAtom* name = pn->pn_kid->name();
-        if (!EmitGetNameAtLocation(bce, name, loc, false)) // SCOPE? V
+        if (!bce->emitGetNameAtLocation(name, loc, false)) // SCOPE? V
             return false;
         if (!bce->emit1(JSOP_POS))                         // SCOPE? N
             return false;
@@ -3646,7 +3633,7 @@ BytecodeEmitter::emitSetThis(ParseNode* pn)
 
     auto emitRhs = [name, pn](BytecodeEmitter* bce, const NameLocation& loc, bool) {
         // First, get the original |this| and throw if we already initialized it.
-        if (!EmitGetNameAtLocation(bce, name, loc, false))
+        if (!bce->emitGetNameAtLocation(name, loc, false))
             return false;
         if (!bce->emit1(JSOP_CHECKTHISREINIT))
             return false;
@@ -4489,7 +4476,7 @@ BytecodeEmitter::emitAssignment(ParseNode* lhs, JSOp op, ParseNode* rhs)
                     if (!bce->emitAtomOp(lhs, JSOP_GETXPROP))
                         return false;
                 } else {
-                    if (!EmitGetNameAtLocation(bce, lhs->name(), lhsLoc))
+                    if (!bce->emitGetNameAtLocation(lhs->name(), lhsLoc))
                         return false;
                 }
             }
@@ -5219,9 +5206,7 @@ BytecodeEmitter::emitHoistedFunctionsInList(ParseNode* list)
                 maybeFun = maybeFun->as<LabeledStatement>().statement();
         }
 
-        if (maybeFun->isKind(PNK_ANNEXB_FUNCTION) ||
-            (maybeFun->isKind(PNK_FUNCTION) && maybeFun->functionIsHoisted()))
-        {
+        if (maybeFun->isKind(PNK_FUNCTION) && maybeFun->functionIsHoisted()) {
             if (!emitTree(maybeFun))
                 return false;
         }
@@ -6211,14 +6196,9 @@ BytecodeEmitter::emitComprehensionFor(ParseNode* compFor)
 MOZ_NEVER_INLINE bool
 BytecodeEmitter::emitFunction(ParseNode* pn, bool needsProto)
 {
-    ParseNode* assignmentForAnnexB = nullptr;
-    if (pn->isKind(PNK_ANNEXB_FUNCTION)) {
-        assignmentForAnnexB = pn->pn_right;
-        pn = pn->pn_left;
-    }
-
     FunctionBox* funbox = pn->pn_funbox;
     RootedFunction fun(cx, funbox->function());
+    RootedAtom name(cx, fun->name());
     MOZ_ASSERT_IF(fun->isInterpretedLazy(), fun->lazyScript());
 
     /*
@@ -6231,20 +6211,20 @@ BytecodeEmitter::emitFunction(ParseNode* pn, bool needsProto)
         // block-scoped function to the top of their scope. When their
         // definitions are seen for the second time, we need to emit the
         // assignment that assigns the function to the outer 'var' binding.
-        if (assignmentForAnnexB) {
-            if (assignmentForAnnexB->isKind(PNK_VAR)) {
-                MOZ_CRASH("TODOshu");
-                /*
-                if (!emitDeclarationList(assignmentForAnnexB, AnnexB))
-                    return false;
-                */
-            } else {
-                MOZ_ASSERT(assignmentForAnnexB->isKind(PNK_ASSIGN));
-                if (!emitTree(assignmentForAnnexB))
-                    return false;
-                if (!emit1(JSOP_POP))
-                    return false;
-            }
+        if (funbox->isAnnexB) {
+            auto emitRhs = [&name](BytecodeEmitter* bce, const NameLocation&, bool) {
+                // The RHS is the value of the lexically bound name in the
+                // innermost scope.
+                return bce->emitGetName(name);
+            };
+
+            // Get the location of the 'var' binding in the body scope. The
+            // name must be found, else there is a bug in the Annex B handling
+            // in Parser.
+            Maybe<NameLocation> lhsLoc = locationOfNameBoundInScope(name, bodyEmitterScope);
+            MOZ_ASSERT(lhsLoc && lhsLoc->bindingKind() == BindingKind::Var);
+            if (!emitSetOrInitializeNameAtLocation(name, *lhsLoc, emitRhs, false))
+                return false;
         }
 
         MOZ_ASSERT_IF(fun->hasScript(), fun->nonLazyScript());
@@ -6343,7 +6323,6 @@ BytecodeEmitter::emitFunction(ParseNode* pn, bool needsProto)
 
     MOZ_ASSERT(!needsProto);
 
-    RootedAtom name(cx, fun->name());
     if (sc->isGlobalContext() && lookupName(name).bindingKind() == BindingKind::Var) {
         // For global and eval scripts we put the bytecode for top-level
         // functions in the prologue to predefine their names in the variable
@@ -8161,9 +8140,12 @@ BytecodeEmitter::emitFunctionFormalParametersAndBody(ParseNode *pn)
     //   function f(x, y = 42) { var y; }
     //
     if (hasDefaults) {
+        // After un-popping the body scope, it should again be the innermost
+        // scope.
         popBodyScope.reset();
+        MOZ_ASSERT(bodyEmitterScope == innermostEmitterScope);
 
-        EmitterScope* varScope = innermostEmitterScope;
+        EmitterScope* varScope = bodyEmitterScope;
         EmitterScope* defaultsScope = varScope->enclosingInFrame();
         for (BindingIter bi(*sc->asFunctionBox()->defaultsScopeBindings, 0); bi; bi++) {
             JSAtom* name = bi.name();
@@ -8176,7 +8158,7 @@ BytecodeEmitter::emitFunctionFormalParametersAndBody(ParseNode *pn)
             NameLocation defaultsLoc = *locationOfNameBoundInScope(name, defaultsScope);
 
             auto emitRhs = [name, defaultsLoc](BytecodeEmitter* bce, const NameLocation&, bool) {
-                return EmitGetNameAtLocation(bce, name, defaultsLoc);
+                return bce->emitGetNameAtLocation(name, defaultsLoc);
             };
 
             if (!emitInitializeName(name, emitRhs))
@@ -8338,19 +8320,6 @@ BytecodeEmitter::emitTree(ParseNode* pn, EmitLineNumberNote emitLineNote)
 
     switch (pn->getKind()) {
       case PNK_FUNCTION:
-        if (!emitFunction(pn))
-            return false;
-        break;
-
-      case PNK_ANNEXB_FUNCTION:
-        // XXXshu NOP check used only for phasing in block-scope function
-        // XXXshu early errors.
-        // XXXshu
-        // XXXshu Back out when major version >= 50. See [1].
-        // XXXshu
-        // XXXshu [1] https://bugzilla.mozilla.org/show_bug.cgi?id=1235590#c10
-        if (pn->pn_left->isKind(PNK_NOP))
-            break;
         if (!emitFunction(pn))
             return false;
         break;

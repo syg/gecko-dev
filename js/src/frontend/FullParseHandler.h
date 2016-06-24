@@ -431,7 +431,7 @@ class FullParseHandler
     MOZ_MUST_USE bool isFunctionStmt(ParseNode* stmt) {
         while (stmt->isKind(PNK_LABEL))
             stmt = stmt->as<LabeledStatement>().statement();
-        return stmt->isKind(PNK_FUNCTION) || stmt->isKind(PNK_ANNEXB_FUNCTION);
+        return stmt->isKind(PNK_FUNCTION);
     }
 
     void addStatementToList(ParseNode* list, ParseNode* stmt) {
@@ -655,11 +655,6 @@ class FullParseHandler
         MOZ_ASSERT(pn->isKind(PNK_FUNCTION));
         pn->pn_funbox = funbox;
         funbox->functionNode = pn;
-    }
-    ParseNode* newFunctionDefinitionForAnnexB(ParseNode* pn, ParseNode* assignment) {
-        MOZ_ASSERT(pn->isKind(PNK_FUNCTION));
-        MOZ_ASSERT(assignment->isKind(PNK_ASSIGN) || assignment->isKind(PNK_VAR));
-        return new_<BinaryNode>(PNK_ANNEXB_FUNCTION, JSOP_NOP, pos(), pn, assignment);
     }
     void addFunctionFormalParameter(ParseNode* pn, ParseNode* argpn) {
         pn->pn_body->append(argpn);

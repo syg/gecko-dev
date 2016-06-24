@@ -136,8 +136,8 @@ class ParseContext : public Nestable<ParseContext>
 
         void release(ParseContext* pc) {
             ExclusiveContext* cx = pc->sc()->context;
-            cx->frontendTablePools().releaseMap(&declared_);
-            cx->frontendTablePools().releaseSet(&used_);
+            cx->frontendTablePools().release(&declared_);
+            cx->frontendTablePools().release(&used_);
         }
 
         void dump(ParseContext* pc);
@@ -146,8 +146,8 @@ class ParseContext : public Nestable<ParseContext>
             MOZ_ASSERT(!declared_);
             MOZ_ASSERT(!used_);
             ExclusiveContext* cx = pc->sc()->context;
-            declared_ = cx->frontendTablePools().acquireMap<DeclaredNameMap>(cx);
-            used_ = cx->frontendTablePools().acquireSet<UsedNameSet>(cx);
+            declared_ = cx->frontendTablePools().acquire<DeclaredNameMap>(cx);
+            used_ = cx->frontendTablePools().acquire<UsedNameSet>(cx);
             return declared_ && used_;
         }
 
@@ -165,8 +165,14 @@ class ParseContext : public Nestable<ParseContext>
             return maybeReportOOM(pc, declared().add(p, name, DeclaredNameInfo(kind)));
         }
 
-        MOZ_MUST_USE bool addUsedName(ParseContext* pc, JSAtom* name) {
-            return maybeReportOOM(pc, used().put(name));
+        MOZ_MUST_USE bool addUsedName(ParseContext* pc, JSAtom* name, UsedNameInfo info) {
+            UsedNameSet::AddPtr p = used().lookupForAdd(name);
+            if (p) {
+                if (info == UsedNameInfo::FromInnerFunction)
+                    p->value() = info;
+                return true;
+            }
+            return maybeReportOOM(pc, used().add(p, name, info));
         }
 
         bool hasUsedName(JSAtom* name) {
@@ -179,34 +185,27 @@ class ParseContext : public Nestable<ParseContext>
 
         // An iterator for the set of free names in the current scope: the set
         // of uses subtracting the set of declared names.
-        class FreeNameIter
+        class UsedNameIter
         {
             friend class Scope;
 
             bool isVarScope_;
             Scope& scope_;
             UsedNameSet::Range usedRange_;
+            DeclaredNameMap::Ptr declaredPtr_;
 
-            FreeNameIter(Scope& scope, bool isVarScope)
+            UsedNameIter(Scope& scope, bool isVarScope)
               : isVarScope_(isVarScope),
                 scope_(scope),
-                usedRange_(scope.used().all())
+                usedRange_(scope.used().all()),
+                declaredPtr_()
             {
-                settle();
+                lookupDeclaredPtr();
             }
 
-            void settle() {
-                while (!usedRange_.empty()) {
-                    DeclaredNameMap::Ptr p = scope_.declared().lookup(usedRange_.front());
-                    if (!p)
-                        break;
-                    // A use of a var-scoped name declared in a lexical scope
-                    // is considered free, as it's not binding in that lexical
-                    // scope.
-                    if (!isVarScope_ && !DeclarationKindIsLexical(p->value()->kind()))
-                        break;
-                    usedRange_.popFront();
-                }
+            void lookupDeclaredPtr() {
+                if (!done())
+                    declaredPtr_ = scope_.declared().lookup(name());
             }
 
           public:
@@ -220,25 +219,49 @@ class ParseContext : public Nestable<ParseContext>
 
             JSAtom* name() {
                 MOZ_ASSERT(!done());
-                return usedRange_.front();
+                return usedRange_.front().key();
+            }
+
+            UsedNameInfo usedNameInfo() {
+                return usedRange_.front().value();
             }
 
             void operator++(int) {
                 MOZ_ASSERT(!done());
                 usedRange_.popFront();
-                settle();
+                lookupDeclaredPtr();
+            }
+
+            bool isFree() {
+                MOZ_ASSERT(!done());
+
+                if (!declaredPtr_)
+                    return true;
+
+                // A use of a var-scoped name declared in a lexical scope
+                // is considered free, as it's not binding in that lexical
+                // scope.
+                if (!isVarScope_ && !DeclarationKindIsLexical(declaredPtr_->value()->kind()))
+                    return true;
+
+                return false;
+            }
+
+            void maybeMarkClosedOverBinding() {
+                MOZ_ASSERT(!isFree());
+                if (declaredPtr_ && usedNameInfo() == UsedNameInfo::FromInnerFunction)
+                    declaredPtr_->value()->setClosedOver();
             }
         };
 
-        inline FreeNameIter freeNames(ParseContext* pc);
+        inline UsedNameIter usedNames(ParseContext* pc);
 
         // Propagate all free names from the current scope to the enclosing
-        // scope. Required on scope exit.
-        MOZ_MUST_USE bool propagateFreeNames(ParseContext* pc);
+        // scope. Binding names that are used names from an inner function are
+        // marked as closed over. Required on scope exit.
+        MOZ_MUST_USE bool propagateFreeNamesAndMarkClosedOverBindings(ParseContext* pc);
 
-        // Mark the free names from an inner function as closed over. For each
-        // name in the range, mark the name as used in scopes where it is not
-        // a binding, and closed over in scopes where it is a binding.
+        // Add the free names from an inner function as used names.
         template <typename NameRange>
         MOZ_MUST_USE bool addClosedOverNames(ParseContext* pc, NameRange r);
 
@@ -360,6 +383,10 @@ class ParseContext : public Nestable<ParseContext>
     // All inner functions in this context. Only used when syntax parsing.
     Rooted<GCVector<JSFunction*>> innerFunctions;
 
+    // Inner function boxes in this context to try Annex B.3.3 semantics
+    // on. Only used when full parsing.
+    Vector<FunctionBox*> innerAnnexBFunctionBoxes;
+
     // In a function context, points to a Directive struct that can be updated
     // to reflect new directives encountered in the Directive Prologue that
     // require reparsing the function. In global/module/generator-tail contexts,
@@ -396,6 +423,7 @@ class ParseContext : public Nestable<ParseContext>
         lastYieldOffset(NoYieldOffset),
         positionalFormalParameterNames(prs->context),
         innerFunctions(prs->context, GCVector<JSFunction*>(prs->context)),
+        innerAnnexBFunctionBoxes(prs->context),
         newDirectives(newDirectives),
         inDeclDestructuring(false),
         funHasReturnExpr(false),
@@ -546,10 +574,10 @@ ParseContext::Statement::is<ParseContext::LabelStatement>() const
     return kind_ == StatementKind::Label;
 }
 
-inline ParseContext::Scope::FreeNameIter
-ParseContext::Scope::freeNames(ParseContext* pc)
+inline ParseContext::Scope::UsedNameIter
+ParseContext::Scope::usedNames(ParseContext* pc)
 {
-    return FreeNameIter(*this, &pc->varScope() == this);
+    return UsedNameIter(*this, &pc->varScope() == this);
 }
 
 inline ParseContext::Scope::BindingIter
@@ -626,6 +654,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
      */
     class MOZ_STACK_CLASS PossibleError
     {
+      protected:
         enum ErrorState { None, Pending };
         ErrorState state_;
 
@@ -636,28 +665,28 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
         Parser<ParseHandler>& parser_;
         bool strict_;
 
-        public:
-          explicit PossibleError(Parser<ParseHandler>& parser);
+      public:
+        explicit PossibleError(Parser<ParseHandler>& parser);
 
-          // Set a pending error. Only a single error may be set per instance.
-          // Returns true on success or false on failure.
-          bool setPending(ParseReportKind kind, unsigned errorNumber, bool strict);
+        // Set a pending error. Only a single error may be set per instance.
+        // Returns true on success or false on failure.
+        bool setPending(ParseReportKind kind, unsigned errorNumber, bool strict);
 
-          // Resolve any pending error.
-          void setResolved();
+        // Resolve any pending error.
+        void setResolved();
 
-          // Return true if an error is pending without reporting
-          bool hasError();
+        // Return true if an error is pending without reporting
+        bool hasError();
 
-          // If there is a pending error report it and return false, otherwise return
-          // true.
-          bool checkForExprErrors();
+        // If there is a pending error report it and return false, otherwise return
+        // true.
+        bool checkForExprErrors();
 
-          // Pass pending errors between possible error instances. This is useful
-          // for extending the lifetime of a pending error beyond the scope of
-          // the PossibleError where it was initially set (keeping in mind that
-          // PossibleError is a MOZ_STACK_CLASS).
-          void transferErrorTo(PossibleError* other);
+        // Pass pending errors between possible error instances. This is useful
+        // for extending the lifetime of a pending error beyond the scope of
+        // the PossibleError where it was initially set (keeping in mind that
+        // PossibleError is a MOZ_STACK_CLASS).
+        void transferErrorTo(PossibleError* other);
     };
 
   public:
@@ -668,9 +697,6 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     TokenStream tokenStream;
     LifoAlloc::Mark tempPoolMark;
 
-  private:
-
-  public:
     /* list of parsed objects for GC tracing */
     ObjectBox* traceListHead;
 
@@ -1027,8 +1053,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
 
     Node functionDefinition(InHandling inHandling, YieldHandling yieldHandling, HandleAtom name,
                             FunctionSyntaxKind kind, GeneratorKind generatorKind,
-                            InvokedPrediction invoked = PredictUninvoked,
-                            Node* assignmentForAnnexBOut = nullptr);
+                            InvokedPrediction invoked = PredictUninvoked);
 
     // Parse a function body.  Pass StatementListBody if the body is a list of
     // statements; pass ExpressionBody if the body is a single expression.
@@ -1096,14 +1121,16 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     bool declareDotGeneratorName();
 
     bool checkFunctionDefinition(HandleAtom funAtom, Node pn, FunctionSyntaxKind kind,
-                                 Node* assignmentForAnnexBOut);
+                                 bool *tryAnnexB);
     bool skipLazyInnerFunction(Node pn);
     bool innerFunction(Node pn, ParseContext* outerpc, HandleFunction fun,
-                       InHandling inHandling, FunctionSyntaxKind kind, GeneratorKind generatorKind,
+                       InHandling inHandling, FunctionSyntaxKind kind,
+                       GeneratorKind generatorKind, bool tryAnnexB,
                        Directives inheritedDirectives, Directives* newDirectives);
     bool trySyntaxParseInnerFunction(Node pn, HandleFunction fun, InHandling inHandling,
                                      FunctionSyntaxKind kind, GeneratorKind generatorKind,
-                                     Directives inheritedDirectives, Directives* newDirectives);
+                                     bool tryAnnexB, Directives inheritedDirectives,
+                                     Directives* newDirectives);
     bool finishFunction();
     bool leaveInnerFunction(ParseContext* outerpc);
 
@@ -1138,8 +1165,10 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
                                        bool disallowDuplicateParams = false,
                                        bool* duplicatedParam = nullptr);
     bool noteDestructuredPositionalFormalParameter();
+    bool tryDeclareVar(HandlePropertyName name, DeclarationKind kind,
+                       mozilla::Maybe<DeclarationKind>* redeclaredKind);
     bool noteDeclaredName(HandlePropertyName name, DeclarationKind kind, Node node = null());
-    bool noteUsedName(HandlePropertyName name);
+    bool noteUsedName(HandlePropertyName name, UsedNameInfo info);
 
     mozilla::Maybe<GlobalScope::BindingData*> newGlobalScopeData(ParseContext::Scope& scope,
                                                                  uint32_t* functionBindingEnd);

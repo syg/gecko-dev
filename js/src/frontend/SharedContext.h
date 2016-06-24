@@ -470,9 +470,9 @@ class MOZ_STACK_CLASS EvalSharedContext : public SharedContext
 
 class FunctionBox : public ObjectBox, public SharedContext
 {
-    void initWithEnclosingScope(Scope* enclosingScope);
-
     Scope* enclosingScope_;
+
+    void initWithEnclosingScope(Scope* enclosingScope);
 
   public:
     // Names from the named lambda scope, if a named lambda.
@@ -496,6 +496,7 @@ class FunctionBox : public ObjectBox, public SharedContext
     bool            hasDestructuringArgs:1; /* arguments list contains destructuring expression */
     bool            useAsm:1;               /* see useAsmOrInsideUseAsm */
     bool            insideUseAsm:1;         /* see useAsmOrInsideUseAsm */
+    bool            isAnnexB:1;             /* need to emit a synthesized Annex B assignment */
     bool            wasEmitted:1;           /* Bytecode has been emitted for this function. */
 
     // Fields for use in heuristics.
@@ -587,6 +588,8 @@ class FunctionBox : public ObjectBox, public SharedContext
         startLine = tokenStream.getLineno();
         startColumn = tokenStream.getColumn();
     }
+
+    void trace(JSTracer* trc) override;
 };
 
 class ModuleBox : public ObjectBox, public SharedContext
