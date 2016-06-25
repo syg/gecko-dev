@@ -2158,6 +2158,7 @@ IonBuilder::inspectOpcode(JSOp op)
         // compile scripts with defaults yet and creates the call object up
         // front. Assert that now.
         MOZ_ASSERT(!script()->functionNonDelazifying()->needsDefaultsEnvironment());
+        MOZ_ASSERT(script()->code() == pc);
         MOZ_ASSERT(current->environmentChain()->op() == MDefinition::Op_NewCallObject ||
                    current->environmentChain()->op() == MDefinition::Op_NewRunOnceCallObject);
         break;
