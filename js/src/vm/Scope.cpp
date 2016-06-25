@@ -422,7 +422,7 @@ LexicalScope::XDR(XDRState<XDR_DECODE>* xdr, ScopeKind kind, HandleScope enclosi
 FunctionScope::create(ExclusiveContext* cx, BindingData* bindings, uint32_t firstFrameSlot,
                       HandleFunction fun, HandleScope enclosing)
 {
-    MOZ_ASSERT_IF(enclosing, firstFrameSlot == computeNextFrameSlot(enclosing));
+    MOZ_ASSERT_IF(firstFrameSlot != 0, firstFrameSlot == computeNextFrameSlot(enclosing));
     MOZ_ASSERT(fun->isTenured());
 
     Data* data = NewEmptyScopeData<Data>(cx, sizeof(Data));
