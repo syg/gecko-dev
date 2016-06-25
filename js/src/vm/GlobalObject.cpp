@@ -336,21 +336,15 @@ GlobalObject::createInternal(JSContext* cx, const Class* clasp)
         return nullptr;
     global->setReservedSlot(LEXICAL_ENVIRONMENT, ObjectValue(*lexical));
 
-    if (!cx->runtime()->emptyGlobalScope) {
-        // Allocate the empty global scopes in the atoms zone, as these are
-        // shared across the runtime and will be on Scope chains that are
-        // allocated in other zones.
-        AutoLockForExclusiveAccess lock(cx);
-        AutoCompartment ac(cx, cx->atomsCompartment(lock));
-
-        JSRuntime* rt = cx->runtime();
-        rt->emptyGlobalScope = GlobalScope::create(cx, ScopeKind::Global, nullptr);
-        if (!rt->emptyGlobalScope)
+    if (!cx->zone()->emptyGlobalScope) {
+        Zone* zone = cx->zone();
+        zone->emptyGlobalScope = GlobalScope::create(cx, ScopeKind::Global, nullptr);
+        if (!zone->emptyGlobalScope)
             return nullptr;
 
-        MOZ_ASSERT(!rt->emptyNonSyntacticScope);
-        rt->emptyNonSyntacticScope = GlobalScope::create(cx, ScopeKind::NonSyntactic, nullptr);
-        if (!rt->emptyNonSyntacticScope)
+        MOZ_ASSERT(!zone->emptyNonSyntacticScope);
+        zone->emptyNonSyntacticScope = GlobalScope::create(cx, ScopeKind::NonSyntactic, nullptr);
+        if (!zone->emptyNonSyntacticScope)
             return nullptr;
     }
 

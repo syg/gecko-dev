@@ -763,13 +763,6 @@ struct JSRuntime : public JS::shadow::Runtime,
      */
     js::EnterDebuggeeNoExecute* noExecuteDebuggerTop;
 
-    /*
-     * Cached empty global scopes to avoid needlessly creating the final node
-     * in scope chains. Created by the first GlobalObject.
-     */
-    JS::PersistentRooted<js::GlobalScope*> emptyGlobalScope;
-    JS::PersistentRooted<js::GlobalScope*> emptyNonSyntacticScope;
-
     js::Activation* const* addressOfActivation() const {
         return &activation_;
     }

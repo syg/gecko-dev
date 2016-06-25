@@ -3092,8 +3092,7 @@ JSRuntime::cloneSelfHostedFunctionScript(JSContext* cx, HandlePropertyName name,
     // global lexical scope on the scope chain is for uniformity and engine
     // invariants.
     MOZ_ASSERT(sourceScript->bodyScope()->enclosing()->kind() == ScopeKind::Global);
-    MOZ_ASSERT(emptyGlobalScope);
-    if (!CloneScriptIntoFunction(cx, emptyGlobalScope, targetFun, sourceScript))
+    if (!CloneScriptIntoFunction(cx, cx->emptyGlobalScope(), targetFun, sourceScript))
         return false;
     MOZ_ASSERT(!targetFun->isInterpretedLazy());
 
