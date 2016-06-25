@@ -700,6 +700,8 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     MOZ_MUST_USE bool emitContinue(PropertyName* label);
 
     MOZ_MUST_USE bool emitFunctionFormalParametersAndBody(ParseNode* pn);
+    MOZ_MUST_USE bool emitInitializeFunctionSpecialNames();
+    MOZ_MUST_USE bool emitFunctionBody(ParseNode* pn);
     MOZ_MUST_USE bool emitLexicalInitialization(ParseNode* pn);
 
     // Emit bytecode for the spread operator.

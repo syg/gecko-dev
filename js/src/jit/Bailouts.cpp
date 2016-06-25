@@ -262,12 +262,23 @@ jit::EnsureHasEnvironmentObjects(JSContext* cx, AbstractFramePtr fp)
     // Ion does not compile eval scripts.
     MOZ_ASSERT(!fp.isEvalFrame());
 
-    if (fp.isFunctionFrame() &&
-        fp.callee()->needsCallObject() &&
-        !fp.hasCallObj())
-    {
-        return fp.initFunctionEnvironmentObjects(cx);
+    if (fp.isFunctionFrame()) {
+        // Ion does not handle defaults scopes yet.
+        MOZ_ASSERT(!fp.callee()->needsDefaultsEnvironment());
+
+        if (!fp.hasCallObj()) {
+            if (fp.callee()->needsDeclEnvObject()) {
+                if (!fp.initExtraFunctionEnvironmentObjects(cx))
+                    return false;
+            }
+
+            if (fp.callee()->needsCallObject()) {
+                if (!fp.pushCallObject(cx))
+                    return false;
+            }
+        }
     }
+
     return true;
 }
 

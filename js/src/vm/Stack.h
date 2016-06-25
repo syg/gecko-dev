@@ -199,7 +199,8 @@ class AbstractFramePtr
 
     inline JSObject* environmentChain() const;
     inline CallObject& callObj() const;
-    inline bool initFunctionEnvironmentObjects(JSContext* cx);
+    inline bool initExtraFunctionEnvironmentObjects(JSContext* cx);
+    inline bool pushCallObject(JSContext* cx);
     inline void pushOnEnvironmentChain(EnvironmentObject& env);
 
     inline JSCompartment* compartment() const;
@@ -403,7 +404,7 @@ class InterpreterFrame
 
     bool checkReturn(JSContext* cx, HandleValue thisv);
 
-    bool initFunctionEnvironmentObjects(JSContext* cx);
+    bool initExtraFunctionEnvironmentObjects(JSContext* cx);
 
     /*
      * Initialize local variables of newly-pushed frame. 'var' bindings are
@@ -553,6 +554,9 @@ class InterpreterFrame
     inline void pushOnEnvironmentChain(EnvironmentObject& env);
     inline void popOffEnvironmentChain();
     inline void replaceInnermostEnvironment(EnvironmentObject& env);
+
+    // Push a CallObject for function frames with closed over var bindings.
+    bool pushCallObject(JSContext* cx);
 
     /*
      * For lexical envs with aliased locals, these interfaces push and pop

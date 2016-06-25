@@ -711,7 +711,7 @@ GlobalNameConflictsCheckFromIon(JSContext* cx, HandleScript script);
 MOZ_MUST_USE bool
 InitGlobalOrEvalEnvironmentObjects(JSContext* cx, BaselineFrame* frame);
 MOZ_MUST_USE bool
-InitFunctionEnvironmentObjects(JSContext* cx, BaselineFrame* frame);
+InitExtraFunctionEnvironmentObjects(JSContext* cx, BaselineFrame* frame);
 
 MOZ_MUST_USE bool
 NewArgumentsObject(JSContext* cx, BaselineFrame* frame, MutableHandleValue res);
@@ -747,6 +747,9 @@ MOZ_MUST_USE bool
 DebugLeaveThenRecreateLexicalEnv(JSContext* cx, BaselineFrame* frame, jsbytecode* pc);
 MOZ_MUST_USE bool
 DebugLeaveLexicalEnv(JSContext* cx, BaselineFrame* frame, jsbytecode* pc);
+
+MOZ_MUST_USE bool
+PushCallObject(JSContext* cx, BaselineFrame* frame);
 
 MOZ_MUST_USE bool
 InitBaselineFrameForOsr(BaselineFrame* frame, InterpreterFrame* interpFrame,

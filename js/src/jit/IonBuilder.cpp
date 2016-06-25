@@ -1250,9 +1250,14 @@ IonBuilder::initEnvironmentChain(MDefinition* callee)
                     return false;
             }
 
-            env = createCallObject(callee, env);
-            if (!env)
-                return false;
+            // TODO: Defaults not yet handled.
+            MOZ_ASSERT(!fun->needsDefaultsEnvironment());
+
+            if (fun->needsCallObject()) {
+                env = createCallObject(callee, env);
+                if (!env)
+                    return false;
+            }
         }
     } else if (ModuleObject* module = info().module()) {
         // Modules use a pre-created env object.

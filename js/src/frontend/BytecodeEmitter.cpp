@@ -879,16 +879,11 @@ BytecodeEmitter::EmitterScope::enterFunctionBody(BytecodeEmitter* bce, FunctionB
     if (!internBodyScope(bce, createScope))
         return false;
 
+    if (hasEnvironment_ && !bce->emit1(JSOP_PUSHCALLOBJ))
+        return false;
+
     return checkEnvironmentChainLength(bce);
 }
-
-class TemporarilyPopEmitterScope : public TemporarilyPopNestable<BytecodeEmitter::EmitterScope>
-{
-  public:
-    explicit TemporarilyPopEmitterScope(BytecodeEmitter* bce)
-      : TemporarilyPopNestable<BytecodeEmitter::EmitterScope>(&bce->innermostEmitterScope)
-    { }
-};
 
 class PrologueBindingIter : public BindingIter
 {
@@ -1101,7 +1096,7 @@ BytecodeEmitter::EmitterScope::leave(BytecodeEmitter* bce, bool nonLocal)
         //
         // Also note that ParameterDefaults scopes are an exception. Their
         // notes are not finished here but in emitFunctionFormalParametersAndBody.
-        if (ScopeKindIsInBody(kind))
+        if (ScopeKindIsInBody(kind) && kind != ScopeKind::ParameterDefaults)
             bce->scopeNoteList.recordEnd(noteIndex_, bce->offset(), bce->inPrologue());
 
         // Release the name cache.
@@ -1749,7 +1744,7 @@ NonLocalExitControl::prepareForNonLocalJump(BytecodeEmitter::NestableControl* ta
     // may emit administrative ops like JSOP_POPLEXICALENV but never anything
     // that manipulates the stack.
     for (EmitterScope* es = bce_->innermostEmitterScope;
-         es != (target ? target->emitterScope() : nullptr);
+         es != (target ? target->emitterScope() : bce_->bodyEmitterScope);
          es = es->enclosingInFrame())
     {
         if (!es->leave(bce_, /* nonLocal = */ true))
@@ -3615,12 +3610,10 @@ BytecodeEmitter::emitInitializeFunctionSpecialName(JSAtom* name, JSOp initialOp)
         return bce->emit1(initialOp);
     };
 
-    switchToPrologue();
     if (!emitInitializeName(name, emitInitial))
         return false;
     if (!emit1(JSOP_POP))
         return false;
-    switchToMain();
 
     return true;
 }
@@ -3686,7 +3679,6 @@ bool
 BytecodeEmitter::emitFunctionScript(ParseNode* body)
 {
     FunctionBox* funbox = sc->asFunctionBox();
-    TDZCheckCache tdzCache(this);
 
     // The ordering of these EmitterScopes is important. The decl env scope
     // needs to enclose the defaults scope needs to enclose the function
@@ -3699,120 +3691,36 @@ BytecodeEmitter::emitFunctionScript(ParseNode* body)
             return false;
     }
 
-    Maybe<EmitterScope> defaultsEmitterScope;
-    if (funbox->defaultsScopeBindings) {
-        defaultsEmitterScope.emplace(this);
-        if (!defaultsEmitterScope->enterParameterDefaults(this, funbox))
+    /*
+     * Emit a prologue for run-once scripts which will deoptimize JIT code
+     * if the script ends up running multiple times via foo.caller related
+     * shenanigans.
+     *
+     * Also mark the script so that initializers created within it may be
+     * given more precise types.
+     */
+    if (isRunOnceLambda()) {
+        script->setTreatAsRunOnce();
+        MOZ_ASSERT(!script->hasRunOnce());
+
+        switchToPrologue();
+        if (!emit1(JSOP_RUNONCE))
             return false;
+        switchToMain();
     }
 
-    {
-        EmitterScope bodyEmitterScope(this);
-        if (!bodyEmitterScope.enterFunctionBody(this, funbox))
-            return false;
+    setFunctionBodyEndPos(body->pn_pos);
+    if (!emitTree(body))
+        return false;
 
-        /*
-         * IonBuilder has assumptions about what may occur immediately after
-         * script->main (e.g., in the case of destructuring params). Thus, put
-         * the following ops into the range [script->code,
-         * script->main). Note: execution starts from script->code, so this
-         * has no semantic effect.
-         */
+    if (!updateSourceCoordNotes(body->pn_pos.end))
+        return false;
 
-        if (funbox->argumentsHasLocalBinding()) {
-            if (!emitInitializeFunctionSpecialName(cx->names().arguments, JSOP_ARGUMENTS))
-                return false;
-        }
-
-        // Do nothing if the function doesn't have a this-binding (this
-        // happens for instance if it doesn't use this/eval or if it's an
-        // arrow function).
-        if (sc->asFunctionBox()->hasThisBinding()) {
-            if (!emitInitializeFunctionSpecialName(cx->names().dotThis, JSOP_FUNCTIONTHIS))
-                return false;
-        }
-
-        /*
-         * Emit a prologue for run-once scripts which will deoptimize JIT code
-         * if the script ends up running multiple times via foo.caller related
-         * shenanigans.
-         *
-         * Also mark the script so that initializers created within it may be
-         * given more precise types.
-         */
-        if (isRunOnceLambda()) {
-            script->setTreatAsRunOnce();
-            MOZ_ASSERT(!script->hasRunOnce());
-
-            switchToPrologue();
-            if (!emit1(JSOP_RUNONCE))
-                return false;
-            switchToMain();
-        }
-
-        setFunctionBodyEndPos(body->pn_pos);
-        if (!emitTree(body))
-            return false;
-
-        if (!updateSourceCoordNotes(body->pn_pos.end))
-            return false;
-
-        if (sc->isFunctionBox()) {
-            if (sc->asFunctionBox()->isGenerator()) {
-                // If we fall off the end of a generator, do a final yield.
-                if (sc->asFunctionBox()->isStarGenerator() && !emitPrepareIteratorResult())
-                    return false;
-
-                if (!emit1(JSOP_UNDEFINED))
-                    return false;
-
-                if (sc->asFunctionBox()->isStarGenerator() && !emitFinishIteratorResult(true))
-                    return false;
-
-                if (!emit1(JSOP_SETRVAL))
-                    return false;
-
-                if (!emitGetName(cx->names().dotGenerator))
-                    return false;
-
-                // No need to check for finally blocks, etc as in EmitReturn.
-                if (!emitYieldOp(JSOP_FINALYIELDRVAL))
-                    return false;
-            } else {
-                // Non-generator functions just return |undefined|. The
-                // JSOP_RETRVAL emitted below will do that, except if the
-                // script has a finally block: there can be a non-undefined
-                // value in the return value slot. Make sure the return value
-                // is |undefined|.
-                if (hasTryFinally) {
-                    if (!emit1(JSOP_UNDEFINED))
-                        return false;
-                    if (!emit1(JSOP_SETRVAL))
-                        return false;
-                }
-            }
-        }
-
-        if (sc->isFunctionBox() && sc->asFunctionBox()->isDerivedClassConstructor()) {
-            if (!emitCheckDerivedClassConstructorReturn())
-                return false;
-        }
-
-        // Always end the script with a JSOP_RETRVAL. Some other parts of the
-        // codebase depend on this opcode,
-        // e.g. InterpreterRegs::setToEndOfScript.
-        if (!emit1(JSOP_RETRVAL))
-            return false;
-
-        if (!bodyEmitterScope.leave(this))
-            return false;
-    }
-
-    if (defaultsEmitterScope) {
-        if (!defaultsEmitterScope->leave(this))
-            return false;
-        defaultsEmitterScope.reset();
-    }
+    // Always end the script with a JSOP_RETRVAL. Some other parts of the
+    // codebase depend on this opcode,
+    // e.g. InterpreterRegs::setToEndOfScript.
+    if (!emit1(JSOP_RETRVAL))
+        return false;
 
     if (declEnvEmitterScope) {
         if (!declEnvEmitterScope->leave(this))
@@ -8030,14 +7938,22 @@ BytecodeEmitter::emitFunctionFormalParametersAndBody(ParseNode *pn)
 
     // No work needs be done for a simple parameter list.
     if (!hasDestructuringArgs && !hasDefaults && !hasRest)
-        return emitTree(funBody);
+        return emitFunctionBody(funBody);
 
-    // When parameter default expressions are present, formal parameters have
-    // TDZ and are in their own scope which encloses the function body
-    // scope. Pop the body scope while emitting defaults and destructuring.
-    Maybe<TemporarilyPopEmitterScope> popBodyScope;
-    if (hasDefaults)
-        popBodyScope.emplace(this);
+    // Parameter defaults have their own scope.
+    Maybe<TDZCheckCache> defaultsTDZCache;
+    Maybe<EmitterScope> defaultsEmitterScope;
+    if (funbox->defaultsScopeBindings) {
+        defaultsTDZCache.emplace(this);
+        defaultsEmitterScope.emplace(this);
+        if (!defaultsEmitterScope->enterParameterDefaults(this, funbox))
+            return false;
+
+        // Special bindings like arguments and this are available even in the
+        // defaults scope.
+        if (!emitInitializeFunctionSpecialNames())
+            return false;
+    }
 
     uint16_t argSlot = 0;
     for (ParseNode* arg = pn->pn_head; arg != funBody; arg = arg->pn_next, argSlot++) {
@@ -8123,25 +8039,63 @@ BytecodeEmitter::emitFunctionFormalParametersAndBody(ParseNode *pn)
         }
     }
 
+    if (!emitFunctionBody(funBody))
+        return false;
+
+    if (defaultsEmitterScope) {
+        if (!defaultsEmitterScope->leave(this))
+            return false;
+        defaultsEmitterScope.reset();
+    }
+
+    return true;
+}
+
+bool
+BytecodeEmitter::emitInitializeFunctionSpecialNames()
+{
+    FunctionBox* funbox = sc->asFunctionBox();
+
+    // Do nothing if the function doesn't have an arguments binding.
+    if (funbox->argumentsHasLocalBinding()) {
+        if (!emitInitializeFunctionSpecialName(cx->names().arguments, JSOP_ARGUMENTS))
+            return false;
+    }
+
+    // Do nothing if the function doesn't have a this-binding (this
+    // happens for instance if it doesn't use this/eval or if it's an
+    // arrow function).
+    if (funbox->hasThisBinding()) {
+        if (!emitInitializeFunctionSpecialName(cx->names().dotThis, JSOP_FUNCTIONTHIS))
+            return false;
+    }
+
+    return true;
+}
+
+bool
+BytecodeEmitter::emitFunctionBody(ParseNode* funBody)
+{
+    FunctionBox* funbox = sc->asFunctionBox();
+
+    TDZCheckCache tdzCache(this);
+    EmitterScope varEmitterScope(this);
+    if (!varEmitterScope.enterFunctionBody(this, funbox))
+        return false;
+
     // After emitting default expressions for all parameters, copy over any
     // formal parameters which have been redeclared as vars. For example, in
     // the following, the var y in the body scope is 42:
     //
     //   function f(x, y = 42) { var y; }
     //
-    if (hasDefaults) {
-        // After un-popping the body scope, it should again be the innermost
-        // scope.
-        popBodyScope.reset();
-        MOZ_ASSERT(bodyEmitterScope == innermostEmitterScope);
-
-        EmitterScope* varScope = bodyEmitterScope;
-        EmitterScope* defaultsScope = varScope->enclosingInFrame();
+    if (funbox->hasDefaults()) {
+        EmitterScope* defaultsScope = varEmitterScope.enclosingInFrame();
         for (BindingIter bi(*sc->asFunctionBox()->defaultsScopeBindings, 0); bi; bi++) {
             JSAtom* name = bi.name();
 
             // There may not be a var binding of the same name.
-            Maybe<NameLocation> varLoc = locationOfNameBoundInScope(name, varScope);
+            Maybe<NameLocation> varLoc = locationOfNameBoundInScope(name, &varEmitterScope);
             if (!varLoc || varLoc->bindingKind() != BindingKind::Var)
                 continue;
 
@@ -8159,9 +8113,54 @@ BytecodeEmitter::emitFunctionFormalParametersAndBody(ParseNode *pn)
         // direct eval that happens while processing the parameter list always get
         // their own var scopes regardless of strictness.
         scopeNoteList.recordEnd(defaultsScope->noteIndex(), offset(), inPrologue());
+    } else {
+        if (!emitInitializeFunctionSpecialNames())
+            return false;
     }
 
-    return emitTree(funBody);
+    if (!emitTree(funBody))
+        return false;
+
+    if (funbox->isGenerator()) {
+        // If we fall off the end of a generator, do a final yield.
+        if (funbox->isStarGenerator() && !emitPrepareIteratorResult())
+            return false;
+
+        if (!emit1(JSOP_UNDEFINED))
+            return false;
+
+        if (sc->asFunctionBox()->isStarGenerator() && !emitFinishIteratorResult(true))
+            return false;
+
+        if (!emit1(JSOP_SETRVAL))
+            return false;
+
+        if (!emitGetName(cx->names().dotGenerator))
+            return false;
+
+        // No need to check for finally blocks, etc as in EmitReturn.
+        if (!emitYieldOp(JSOP_FINALYIELDRVAL))
+            return false;
+    } else {
+        // Non-generator functions just return |undefined|. The
+        // JSOP_RETRVAL emitted below will do that, except if the
+        // script has a finally block: there can be a non-undefined
+        // value in the return value slot. Make sure the return value
+        // is |undefined|.
+        if (hasTryFinally) {
+            if (!emit1(JSOP_UNDEFINED))
+                return false;
+            if (!emit1(JSOP_SETRVAL))
+                return false;
+        }
+    }
+
+    if (funbox->isDerivedClassConstructor()) {
+        if (!emitCheckDerivedClassConstructorReturn())
+            return false;
+    }
+
+    return true;
 }
 
 bool

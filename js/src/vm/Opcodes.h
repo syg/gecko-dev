@@ -1829,7 +1829,14 @@
      *   Stack: =>
      */ \
     macro(JSOP_THROWSETCALLEE,     179, "throwsetcallee",        NULL, 1,  1,  1, JOF_SET|JOF_BYTE) \
-    macro(JSOP_UNUSED180,     180,"unused180",  NULL,     1,  0,  0,  JOF_BYTE) \
+    /*
+     * Pushes the call object onto the env chain.
+     *   Category: Variables and Scopes
+     *   Type: Function scope
+     *   Operands:
+     *   Stack: =>
+     */ \
+    macro(JSOP_PUSHCALLOBJ,       180,  "pushcallobj",           NULL, 1,  0,  0,  JOF_BYTE) \
     macro(JSOP_UNUSED181,     181,"unused181",  NULL,     1,  0,  0,  JOF_BYTE) \
     macro(JSOP_UNUSED182,     182,"unused182",  NULL,     1,  0,  0,  JOF_BYTE) \
     macro(JSOP_UNUSED183,     183,"unused183",  NULL,     1,  0,  0,  JOF_BYTE) \

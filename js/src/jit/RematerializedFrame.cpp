@@ -141,13 +141,22 @@ RematerializedFrame::pushOnEnvironmentChain(EnvironmentObject& env)
 }
 
 bool
-RematerializedFrame::initFunctionEnvironmentObjects(JSContext* cx)
+RematerializedFrame::initExtraFunctionEnvironmentObjects(JSContext* cx)
+{
+    return js::InitExtraFunctionEnvironmentObjects(cx, this);
+}
+
+bool
+RematerializedFrame::pushCallObject(JSContext* cx)
 {
     MOZ_ASSERT(isFunctionFrame());
     MOZ_ASSERT(callee()->needsCallObject());
+    MOZ_ASSERT(!hasCallObj_);
+
     CallObject* callobj = CallObject::createForFunction(cx, this);
     if (!callobj)
         return false;
+
     pushOnEnvironmentChain(*callobj);
     hasCallObj_ = true;
     return true;

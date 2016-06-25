@@ -1644,19 +1644,32 @@ Parser<ParseHandler>::declareFunctionThis()
 
     FunctionBox* funbox = pc->functionBox();
     HandlePropertyName dotThis = context->names().dotThis;
-    ParseContext::Scope& varScope = pc->varScope();
+
+    // The this binding is accessible from the defaults scope if there is
+    // one. For simplicity, since the defaults scope is a lexical scope (it
+    // has TDZ), declare '.this' as a let if it needs to go on the defaults
+    // scope.
+    ParseContext::Scope* thisScope;
+    DeclarationKind thisDeclKind;
+    if (funbox->hasDefaults()) {
+        thisScope = &pc->defaultsScope();
+        thisDeclKind = DeclarationKind::Let;
+    } else {
+        thisScope = &pc->varScope();
+        thisDeclKind = DeclarationKind::Var;
+    }
 
     // Declare '.this' if there is a free use of '.this', or if direct eval is
     // used, or in derived class constructors (JSOP_CHECKRETURN relies on it),
     // or if there's a debugger statement.
-    if (varScope.hasUsedName(dotThis) ||
+    if (thisScope->hasUsedName(dotThis) ||
         funbox->hasDirectEval() ||
         funbox->isDerivedClassConstructor() ||
         funbox->hasDebuggerStatement())
     {
-        AddDeclaredNamePtr p = varScope.lookupDeclaredNameForAdd(dotThis);
+        AddDeclaredNamePtr p = thisScope->lookupDeclaredNameForAdd(dotThis);
         MOZ_ASSERT(!p);
-        if (!varScope.addDeclaredName(pc, p, dotThis, DeclarationKind::Var))
+        if (!thisScope->addDeclaredName(pc, p, dotThis, thisDeclKind))
             return false;
         funbox->setHasThisBinding();
     }
@@ -1854,18 +1867,36 @@ template <>
 bool
 Parser<FullParseHandler>::declareFunctionArgumentsObject()
 {
+    FunctionBox* funbox = pc->functionBox();
+
     // Time to implement the odd semantics of 'arguments'.
     HandlePropertyName argumentsName = context->names().arguments;
-    ParseContext::Scope& varScope = pc->varScope();
+
+    // The arguments object is accessible from the defaults scope if there is
+    // one. For simplicity, since the defaults scope is a lexical scope (it
+    // has TDZ), declare 'arguments' as a let if it needs to go on the
+    // defaults scope.
+    ParseContext::Scope* argumentsScope;
+    DeclarationKind argumentsDeclKind;
+    if (funbox->hasDefaults()) {
+        argumentsScope = &pc->defaultsScope();
+        argumentsDeclKind = DeclarationKind::Let;
+    } else {
+        argumentsScope = &pc->varScope();
+        argumentsDeclKind = DeclarationKind::Var;
+    }
 
     // If there any free uses of 'arguments' in the function body, or if names
     // may be dynamically looked up, declare it as a 'var' binding.
-    if (varScope.hasUsedName(argumentsName) || pc->sc()->bindingsAccessedDynamically()) {
-        AddDeclaredNamePtr p = varScope.lookupDeclaredNameForAdd(argumentsName);
+    if (argumentsScope->hasUsedName(argumentsName) || pc->sc()->bindingsAccessedDynamically()) {
+        AddDeclaredNamePtr p = argumentsScope->lookupDeclaredNameForAdd(argumentsName);
         if (!p) {
-            if (!varScope.addDeclaredName(pc, p, argumentsName, DeclarationKind::Var))
+            if (!argumentsScope->addDeclaredName(pc, p, argumentsName, argumentsDeclKind))
                 return false;
-            pc->functionBox()->usesArguments = true;
+            funbox->usesArguments = true;
+        } else if (argumentsScope == &pc->defaultsScope()) {
+            // Formal parameters shadow the arguments object.
+            return true;
         }
     }
 
@@ -1876,7 +1907,9 @@ Parser<FullParseHandler>::declareFunctionArgumentsObject()
         // and body-level functions named 'arguments' shadow the arguments
         // object.
         //
-        // So, anything but 'var' bindings shadow.
+        // If we have parameter defaults, we checked if there's a parameter
+        // named 'arguments' above. So, anything but 'var' bindings here
+        // shadows.
         if (p->value()->kind() != DeclarationKind::Var)
             return true;
 
@@ -1884,7 +1917,6 @@ Parser<FullParseHandler>::declareFunctionArgumentsObject()
         // needed?
         //
         // Also see the flags' comments in ContextFlags.
-        FunctionBox* funbox = pc->functionBox();
         funbox->setArgumentsHasLocalBinding();
 
         // Dynamic scope access destroys all hope of optimization.

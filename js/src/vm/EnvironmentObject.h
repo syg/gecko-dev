@@ -940,24 +940,29 @@ CreateObjectsForEnvironmentChain(JSContext* cx, AutoObjectVector& chain,
 
 ModuleEnvironmentObject* GetModuleEnvironmentForScript(JSScript* script);
 
-MOZ_MUST_USE bool GetThisValueForDebuggerMaybeOptimizedOut(JSContext* cx, AbstractFramePtr frame,
-                                                           jsbytecode* pc, MutableHandleValue res);
+MOZ_MUST_USE bool
+GetThisValueForDebuggerMaybeOptimizedOut(JSContext* cx, AbstractFramePtr frame,
+                                         jsbytecode* pc, MutableHandleValue res);
 
-MOZ_MUST_USE bool CheckVarNameConflict(JSContext* cx, Handle<LexicalEnvironmentObject*> lexicalEnv,
-                                       HandlePropertyName name);
+MOZ_MUST_USE bool
+CheckVarNameConflict(JSContext* cx, Handle<LexicalEnvironmentObject*> lexicalEnv,
+                     HandlePropertyName name);
 
-MOZ_MUST_USE bool CheckLexicalNameConflict(JSContext* cx,
-                                           Handle<LexicalEnvironmentObject*> lexicalScope,
-                                           HandleObject varObj, HandlePropertyName name);
+MOZ_MUST_USE bool
+CheckLexicalNameConflict(JSContext* cx, Handle<LexicalEnvironmentObject*> lexicalScope,
+                         HandleObject varObj, HandlePropertyName name);
 
-MOZ_MUST_USE bool CheckGlobalDeclarationConflicts(JSContext* cx, HandleScript script,
-                                                  Handle<LexicalEnvironmentObject*> lexicalScope,
-                                                  HandleObject varObj);
+MOZ_MUST_USE bool
+CheckGlobalDeclarationConflicts(JSContext* cx, HandleScript script,
+                                Handle<LexicalEnvironmentObject*> lexicalScope,
+                                HandleObject varObj);
 
-MOZ_MUST_USE bool CheckEvalDeclarationConflicts(JSContext* cx, HandleScript script,
-                                                HandleObject scopeChain, HandleObject varObj);
+MOZ_MUST_USE bool
+CheckEvalDeclarationConflicts(JSContext* cx, HandleScript script, HandleObject scopeChain,
+                              HandleObject varObj);
 
-MOZ_MUST_USE bool InitFunctionEnvironmentObjects(JSContext* cx, AbstractFramePtr frame);
+MOZ_MUST_USE bool
+InitExtraFunctionEnvironmentObjects(JSContext* cx, AbstractFramePtr frame);
 
 #ifdef DEBUG
 bool

@@ -124,7 +124,8 @@ class RematerializedFrame
     }
 
     void pushOnEnvironmentChain(EnvironmentObject& env);
-    MOZ_MUST_USE bool initFunctionEnvironmentObjects(JSContext* cx);
+    MOZ_MUST_USE bool initExtraFunctionEnvironmentObjects(JSContext* cx);
+    MOZ_MUST_USE bool pushCallObject(JSContext* cx);
 
     bool hasCallObj() const {
         MOZ_ASSERT(callee()->needsCallObject());

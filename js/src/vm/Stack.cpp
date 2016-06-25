@@ -107,10 +107,10 @@ InterpreterFrame::createRestParameter(JSContext* cx)
 }
 
 static inline void
-AssertScopeMatchesEnvironment(JSContext* cx, JSScript* script, JSObject* env)
+AssertScopeMatchesEnvironment(Scope* scope, JSObject* env)
 {
-    RootedObject originalEnv(cx, env);
-    for (ScopeIter si(script->bodyScope()); si; si++) {
+    JSObject* originalEnv = env;
+    for (ScopeIter si(scope); si; si++) {
         if (si.kind() == ScopeKind::NonSyntactic) {
             while (env->is<WithEnvironmentObject>() ||
                    env->is<NonSyntacticVariablesObject>() ||
@@ -177,15 +177,9 @@ AssertScopeMatchesEnvironment(JSContext* cx, JSScript* script, JSObject* env)
 }
 
 bool
-InterpreterFrame::initFunctionEnvironmentObjects(JSContext* cx)
+InterpreterFrame::initExtraFunctionEnvironmentObjects(JSContext* cx)
 {
-    if (!InitFunctionEnvironmentObjects(cx, this))
-        return false;
-
-    if (environmentChain()->is<CallObject>())
-        flags_ |= HAS_CALL_OBJ;
-
-    return true;
+    return js::InitExtraFunctionEnvironmentObjects(cx, this);
 }
 
 bool
@@ -230,11 +224,13 @@ InterpreterFrame::prologue(JSContext* cx)
     if (isModuleFrame())
         return probes::EnterScript(cx, script, nullptr, this);
 
-    MOZ_ASSERT(isFunctionFrame());
-    if (callee().needsSomeEnvironmentObject() && !initFunctionEnvironmentObjects(cx))
-        return false;
+    // At this point, we've yet to push any environments. Check that they
+    // match the enclosing scope.
+    AssertScopeMatchesEnvironment(script->enclosingScope(), environmentChain());
 
-    AssertScopeMatchesEnvironment(cx, script, environmentChain());
+    MOZ_ASSERT(isFunctionFrame());
+    if (callee().needsExtraEnvironmentObjects() && !initExtraFunctionEnvironmentObjects(cx))
+        return false;
 
     if (isConstructing()) {
         if (callee().isBoundFunction()) {
@@ -289,12 +285,10 @@ InterpreterFrame::epilogue(JSContext* cx)
 
     MOZ_ASSERT(isFunctionFrame());
 
-    if (callee().needsCallObject()) {
-        MOZ_ASSERT_IF(hasCallObj() && !callee().isGenerator(),
-                      environmentChain()->as<CallObject>().callee().nonLazyScript() == script);
-    } else {
-        AssertScopeMatchesEnvironment(cx, script, environmentChain());
-    }
+    // At this point, we have popped all environments except the call object,
+    // the defaults environment, and the decl env, if they exist. That is,
+    // environments starting at the body scope.
+    AssertScopeMatchesEnvironment(script->bodyScope(), environmentChain());
 
     if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
         DebugEnvironments::onPopCall(this, cx);
@@ -328,6 +322,22 @@ InterpreterFrame::checkReturn(JSContext* cx, HandleValue thisv)
         return ThrowUninitializedThis(cx, this);
 
     setReturnValue(thisv);
+    return true;
+}
+
+bool
+InterpreterFrame::pushCallObject(JSContext* cx)
+{
+    MOZ_ASSERT(isFunctionFrame());
+    MOZ_ASSERT(callee().needsCallObject());
+    MOZ_ASSERT(!hasCallObjUnchecked());
+
+    CallObject* callobj = CallObject::createForFunction(cx, this);
+    if (!callobj)
+        return false;
+
+    pushOnEnvironmentChain(*callobj);
+    flags_ |= HAS_CALL_OBJ;
     return true;
 }
 

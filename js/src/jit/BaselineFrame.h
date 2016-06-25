@@ -266,7 +266,8 @@ class BaselineFrame
     inline MOZ_MUST_USE bool recreateLexicalEnvironment(JSContext* cx);
 
     MOZ_MUST_USE bool initStrictEvalEnvironmentObjects(JSContext* cx);
-    MOZ_MUST_USE bool initFunctionEnvironmentObjects(JSContext* cx);
+    MOZ_MUST_USE bool initExtraFunctionEnvironmentObjects(JSContext* cx);
+    MOZ_MUST_USE bool pushCallObject(JSContext* cx);
 
     void initArgsObjUnchecked(ArgumentsObject& argsobj) {
         flags_ |= HAS_ARGS_OBJ;

@@ -470,13 +470,23 @@ AbstractFramePtr::callObj() const
 }
 
 inline bool
-AbstractFramePtr::initFunctionEnvironmentObjects(JSContext* cx)
+AbstractFramePtr::initExtraFunctionEnvironmentObjects(JSContext* cx)
 {
     if (isInterpreterFrame())
-        return asInterpreterFrame()->initFunctionEnvironmentObjects(cx);
+        return asInterpreterFrame()->initExtraFunctionEnvironmentObjects(cx);
     if (isBaselineFrame())
-        return asBaselineFrame()->initFunctionEnvironmentObjects(cx);
-    return asRematerializedFrame()->initFunctionEnvironmentObjects(cx);
+        return asBaselineFrame()->initExtraFunctionEnvironmentObjects(cx);
+    return asRematerializedFrame()->initExtraFunctionEnvironmentObjects(cx);
+}
+
+inline bool
+AbstractFramePtr::pushCallObject(JSContext* cx)
+{
+    if (isInterpreterFrame())
+        return asInterpreterFrame()->pushCallObject(cx);
+    if (isBaselineFrame())
+        return asBaselineFrame()->pushCallObject(cx);
+    return asRematerializedFrame()->pushCallObject(cx);
 }
 
 inline JSCompartment*

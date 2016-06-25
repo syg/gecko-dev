@@ -873,9 +873,9 @@ GlobalNameConflictsCheckFromIon(JSContext* cx, HandleScript script)
 }
 
 bool
-InitFunctionEnvironmentObjects(JSContext* cx, BaselineFrame* frame)
+InitExtraFunctionEnvironmentObjects(JSContext* cx, BaselineFrame* frame)
 {
-    return frame->initFunctionEnvironmentObjects(cx);
+    return frame->initExtraFunctionEnvironmentObjects(cx);
 }
 
 bool
@@ -1047,6 +1047,12 @@ DebugLeaveLexicalEnv(JSContext* cx, BaselineFrame* frame, jsbytecode* pc)
     if (cx->compartment()->isDebuggee())
         DebugEnvironments::onPopLexical(cx, frame, pc);
     return true;
+}
+
+bool
+PushCallObject(JSContext* cx, BaselineFrame* frame)
+{
+    return frame->pushCallObject(cx);
 }
 
 bool

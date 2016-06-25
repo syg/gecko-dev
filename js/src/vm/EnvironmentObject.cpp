@@ -3068,7 +3068,7 @@ js::CheckEvalDeclarationConflicts(JSContext* cx, HandleScript script,
 }
 
 bool
-js::InitFunctionEnvironmentObjects(JSContext* cx, AbstractFramePtr frame)
+js::InitExtraFunctionEnvironmentObjects(JSContext* cx, AbstractFramePtr frame)
 {
     MOZ_ASSERT(frame.isFunctionFrame());
     MOZ_ASSERT(frame.callee()->needsSomeEnvironmentObject());
@@ -3092,13 +3092,6 @@ js::InitFunctionEnvironmentObjects(JSContext* cx, AbstractFramePtr frame)
         if (!defaultsEnv)
             return false;
         frame.pushOnEnvironmentChain(*defaultsEnv);
-    }
-
-    if (callee->needsCallObject()) {
-        CallObject* callobj = CallObject::createForFunction(cx, frame);
-        if (!callobj)
-            return false;
-        frame.pushOnEnvironmentChain(*callobj);
     }
 
     return true;

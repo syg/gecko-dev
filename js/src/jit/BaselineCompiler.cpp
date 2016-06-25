@@ -637,9 +637,9 @@ typedef bool (*InitGlobalOrEvalEnvironmentObjectsFn)(JSContext*, BaselineFrame*)
 static const VMFunction InitGlobalOrEvalEnvironmentObjectsInfo =
     FunctionInfo<InitGlobalOrEvalEnvironmentObjectsFn>(jit::InitGlobalOrEvalEnvironmentObjects);
 
-typedef bool (*InitFunctionEnvironmentObjectsFn)(JSContext*, BaselineFrame*);
-static const VMFunction InitFunctionEnvironmentObjectsInfo =
-    FunctionInfo<InitFunctionEnvironmentObjectsFn>(jit::InitFunctionEnvironmentObjects);
+typedef bool (*InitExtraFunctionEnvironmentObjectsFn)(JSContext*, BaselineFrame*);
+static const VMFunction InitExtraFunctionEnvironmentObjectsInfo =
+    FunctionInfo<InitExtraFunctionEnvironmentObjectsFn>(jit::InitExtraFunctionEnvironmentObjects);
 
 bool
 BaselineCompiler::initEnvironmentChain()
@@ -659,14 +659,14 @@ BaselineCompiler::initEnvironmentChain()
         masm.loadPtr(Address(callee, JSFunction::offsetOfEnvironment()), scope);
         masm.storePtr(scope, frame.addressOfEnvironmentChain());
 
-        if (fun->needsSomeEnvironmentObject()) {
-            // Call into the VM to create a new call object.
+        if (fun->needsExtraEnvironmentObjects()) {
+            // Call into the VM to create the extra environment object.
             prepareVMCall();
 
             masm.loadBaselineFramePtr(BaselineFrameReg, R0.scratchReg());
             pushArg(R0.scratchReg());
 
-            if (!callVMNonOp(InitFunctionEnvironmentObjectsInfo, phase))
+            if (!callVMNonOp(InitExtraFunctionEnvironmentObjectsInfo, phase))
                 return false;
         }
     } else if (module()) {
@@ -3511,6 +3511,19 @@ BaselineCompiler::emit_JSOP_DEBUGLEAVELEXICALENV()
     pushArg(R0.scratchReg());
 
     return callVM(DebugLeaveLexicalEnvInfo);
+}
+
+typedef bool (*PushCallObjectFn)(JSContext*, BaselineFrame*);
+static const VMFunction PushCallObjectInfo = FunctionInfo<PushCallObjectFn>(jit::PushCallObject);
+
+bool
+BaselineCompiler::emit_JSOP_PUSHCALLOBJ()
+{
+    prepareVMCall();
+    masm.loadBaselineFramePtr(BaselineFrameReg, R0.scratchReg());
+    pushArg(R0.scratchReg());
+
+    return callVM(PushCallObjectInfo);
 }
 
 typedef bool (*EnterWithFn)(JSContext*, BaselineFrame*, HandleValue, Handle<WithScope*>);

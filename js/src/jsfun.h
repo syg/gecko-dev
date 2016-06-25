@@ -148,8 +148,12 @@ class JSFunction : public js::NativeObject
     bool needsDefaultsEnvironment() const;
     bool needsDeclEnvObject() const;
 
+    bool needsExtraEnvironmentObjects() const {
+        return needsDefaultsEnvironment() || needsDeclEnvObject();
+    }
+
     bool needsSomeEnvironmentObject() const {
-        return needsCallObject() || needsDefaultsEnvironment() || needsDeclEnvObject();
+        return needsCallObject() || needsExtraEnvironmentObjects();
     }
 
     size_t nargs() const {
