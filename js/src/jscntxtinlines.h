@@ -362,20 +362,6 @@ ExclusiveContext::typeLifoAlloc()
     return zone()->types.typeLifoAlloc;
 }
 
-inline Handle<GlobalScope*>
-ExclusiveContext::emptyGlobalScope() const
-{
-    MOZ_ASSERT(zone()->emptyGlobalScope);
-    return zone()->emptyGlobalScope;
-}
-
-inline Handle<GlobalScope*>
-ExclusiveContext::emptyNonSyntacticScope() const
-{
-    MOZ_ASSERT(zone()->emptyNonSyntacticScope);
-    return zone()->emptyNonSyntacticScope;
-}
-
 }  /* namespace js */
 
 inline void

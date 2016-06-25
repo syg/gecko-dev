@@ -298,14 +298,6 @@ struct Zone : public JS::shadow::Zone,
     DebuggerVector* getOrCreateDebuggers(JSContext* cx);
 
     /*
-     * Cached empty global scopes to avoid needlessly creating the final node
-     * in scope chains. Created by the first GlobalObject allocated in the
-     * Zone.
-     */
-    JS::PersistentRooted<js::GlobalScope*> emptyGlobalScope;
-    JS::PersistentRooted<js::GlobalScope*> emptyNonSyntacticScope;
-
-    /*
      * When true, skip calling the metadata callback. We use this:
      * - to avoid invoking the callback recursively;
      * - to avoid observing lazy prototype setup (which confuses callbacks that

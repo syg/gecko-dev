@@ -272,11 +272,6 @@ class ExclusiveContext : public ContextFriendFields,
     // AutoCompartment from which it's called.
     inline js::Handle<js::GlobalObject*> global() const;
 
-    // The cached empty global scopes on the zone. This is only safe if called
-    // after the first GlobalObject has been created on the zone.
-    inline js::Handle<js::GlobalScope*> emptyGlobalScope() const;
-    inline js::Handle<js::GlobalScope*> emptyNonSyntacticScope() const;
-
     // Methods to access runtime data that must be protected by locks.
     AtomSet& atoms(js::AutoLockForExclusiveAccess& lock) {
         return runtime_->atoms(lock);

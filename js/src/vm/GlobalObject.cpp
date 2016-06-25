@@ -330,23 +330,16 @@ GlobalObject::createInternal(JSContext* cx, const Class* clasp)
     if (clasp->flags & JSCLASS_HAS_PRIVATE)
         global->setPrivate(nullptr);
 
-    Rooted<LexicalEnvironmentObject*> lexical(
-        cx, LexicalEnvironmentObject::createGlobal(cx, global));
+    Rooted<LexicalEnvironmentObject*> lexical(cx,
+        LexicalEnvironmentObject::createGlobal(cx, global));
     if (!lexical)
         return nullptr;
     global->setReservedSlot(LEXICAL_ENVIRONMENT, ObjectValue(*lexical));
 
-    if (!cx->zone()->emptyGlobalScope) {
-        Zone* zone = cx->zone();
-        zone->emptyGlobalScope = GlobalScope::create(cx, ScopeKind::Global, nullptr);
-        if (!zone->emptyGlobalScope)
-            return nullptr;
-
-        MOZ_ASSERT(!zone->emptyNonSyntacticScope);
-        zone->emptyNonSyntacticScope = GlobalScope::create(cx, ScopeKind::NonSyntactic, nullptr);
-        if (!zone->emptyNonSyntacticScope)
-            return nullptr;
-    }
+    Rooted<GlobalScope*> emptyGlobalScope(cx, GlobalScope::createEmpty(cx, ScopeKind::Global));
+    if (!emptyGlobalScope)
+        return nullptr;
+    global->setReservedSlot(EMPTY_GLOBAL_SCOPE, PrivateGCThingValue(emptyGlobalScope));
 
     cx->compartment()->initGlobal(*global);
 
@@ -405,6 +398,14 @@ LexicalEnvironmentObject&
 GlobalObject::lexicalEnvironment() const
 {
     return getReservedSlot(LEXICAL_ENVIRONMENT).toObject().as<LexicalEnvironmentObject>();
+}
+
+GlobalScope&
+GlobalObject::emptyGlobalScope() const
+{
+    const Value& v = getReservedSlot(EMPTY_GLOBAL_SCOPE);
+    MOZ_ASSERT(v.isPrivateGCThing() && v.traceKind() == JS::TraceKind::Scope);
+    return static_cast<Scope*>(v.toGCThing())->as<GlobalScope>();
 }
 
 /* static */ bool

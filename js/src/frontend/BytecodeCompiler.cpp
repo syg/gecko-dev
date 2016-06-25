@@ -685,7 +685,8 @@ frontend::CompileModule(ExclusiveContext* cx, const ReadOnlyCompileOptions& opti
     options.maybeMakeStrictMode(true); // ES6 10.2.1 Module code is always strict mode code.
     options.setIsRunOnce(true);
 
-    BytecodeCompiler compiler(cx, alloc, options, srcBuf, cx->emptyGlobalScope(),
+    RootedScope emptyGlobalScope(cx, &cx->global()->emptyGlobalScope());
+    BytecodeCompiler compiler(cx, alloc, options, srcBuf, emptyGlobalScope,
                               TraceLogger_ParserCompileModule);
     AutoInitializeSourceObject autoSSO(compiler, sourceObjectOut);
     return compiler.compileModule();
@@ -792,7 +793,8 @@ frontend::CompileFunctionBody(JSContext* cx, MutableHandleFunction fun,
                               const ReadOnlyCompileOptions& options,
                               Handle<PropertyNameVector> formals, JS::SourceBufferHolder& srcBuf)
 {
-    return CompileFunctionBody(cx, fun, options, formals, srcBuf, cx->emptyGlobalScope(),
+    RootedScope emptyGlobalScope(cx, &cx->global()->emptyGlobalScope());
+    return CompileFunctionBody(cx, fun, options, formals, srcBuf, emptyGlobalScope,
                                NotGenerator);
 }
 
@@ -803,6 +805,7 @@ frontend::CompileStarGeneratorBody(JSContext* cx, MutableHandleFunction fun,
                                    Handle<PropertyNameVector> formals,
                                    JS::SourceBufferHolder& srcBuf)
 {
-    return CompileFunctionBody(cx, fun, options, formals, srcBuf, cx->emptyGlobalScope(),
+    RootedScope emptyGlobalScope(cx, &cx->global()->emptyGlobalScope());
+    return CompileFunctionBody(cx, fun, options, formals, srcBuf, emptyGlobalScope,
                                StarGenerator);
 }

@@ -3459,7 +3459,9 @@ CreateNonSyntacticEnvironmentChain(JSContext* cx, AutoObjectVector& envChain,
         return false;
 
     if (!envChain.empty()) {
-        scope.set(cx->emptyNonSyntacticScope());
+        scope.set(GlobalScope::createEmpty(cx, ScopeKind::NonSyntactic));
+        if (!scope)
+            return false;
 
         // The XPConnect subscript loader, which may pass in its own
         // environments to load scripts in, expects the environment chain to
@@ -3483,7 +3485,7 @@ CreateNonSyntacticEnvironmentChain(JSContext* cx, AutoObjectVector& envChain,
         if (!env)
             return false;
     } else if (scope) {
-        scope.set(cx->emptyGlobalScope());
+        scope.set(&cx->global()->emptyGlobalScope());
     }
 
     return true;
@@ -3596,7 +3598,8 @@ JS_PUBLIC_API(JSObject*)
 JS::CloneFunctionObject(JSContext* cx, HandleObject funobj)
 {
     RootedObject globalLexical(cx, &cx->global()->lexicalEnvironment());
-    return CloneFunctionObject(cx, funobj, globalLexical, cx->emptyGlobalScope());
+    RootedScope emptyGlobalScope(cx, &cx->global()->emptyGlobalScope());
+    return CloneFunctionObject(cx, funobj, globalLexical, emptyGlobalScope);
 }
 
 extern JS_PUBLIC_API(JSObject*)

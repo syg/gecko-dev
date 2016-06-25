@@ -286,7 +286,7 @@ EvalKernel(JSContext* cx, HandleValue v, EvalType evalType, AbstractFramePtr cal
         if (evalType == DIRECT_EVAL)
             enclosing = callerScript->innermostScope(pc);
         else
-            enclosing = cx->emptyGlobalScope();
+            enclosing = &cx->global()->emptyGlobalScope();
 
         CompileOptions options(cx);
         options.setIsRunOnce(true)

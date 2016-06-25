@@ -944,7 +944,7 @@ BytecodeEmitter::EmitterScope::enterGlobal(BytecodeEmitter* bce, GlobalSharedCon
 
         auto createScope = [](ExclusiveContext* cx, HandleScope enclosing) {
             MOZ_ASSERT(!enclosing);
-            return cx->emptyGlobalScope();
+            return &cx->global()->emptyGlobalScope();
         };
         return internBodyScope(bce, createScope);
     }

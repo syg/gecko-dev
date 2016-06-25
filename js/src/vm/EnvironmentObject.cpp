@@ -2767,7 +2767,7 @@ js::GetDebugEnvironmentForFrame(JSContext* cx, AbstractFramePtr frame, jsbytecod
 JSObject*
 js::GetDebugEnvironmentForGlobalLexicalEnvironment(JSContext* cx)
 {
-    EnvironmentIter ei(cx, &cx->global()->lexicalEnvironment(), cx->emptyGlobalScope());
+    EnvironmentIter ei(cx, &cx->global()->lexicalEnvironment(), &cx->global()->emptyGlobalScope());
     return GetDebugEnvironment(cx, ei);
 }
 

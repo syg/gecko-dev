@@ -96,6 +96,7 @@ class GlobalObject : public NativeObject
 
         /* One-off properties stored after slots for built-ins. */
         LEXICAL_ENVIRONMENT,
+        EMPTY_GLOBAL_SCOPE,
         ITERATOR_PROTO,
         ARRAY_ITERATOR_PROTO,
         STRING_ITERATOR_PROTO,
@@ -146,6 +147,7 @@ class GlobalObject : public NativeObject
 
   public:
     LexicalEnvironmentObject& lexicalEnvironment() const;
+    GlobalScope& emptyGlobalScope() const;
 
     void setThrowTypeError(JSFunction* fun) {
         MOZ_ASSERT(getSlotRef(THROWTYPEERROR).isUndefined());

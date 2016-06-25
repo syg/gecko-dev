@@ -7563,7 +7563,8 @@ EvaluateInEnv(JSContext* cx, Handle<Env*> env, AbstractFramePtr frame,
         scopeKind = ScopeKind::NonSyntactic;
 
     if (frame) {
-        script = frontend::CompileEvalScript(cx, &cx->tempLifoAlloc(), env, cx->emptyGlobalScope(),
+        RootedScope emptyGlobalScope(cx, &cx->global()->emptyGlobalScope());
+        script = frontend::CompileEvalScript(cx, &cx->tempLifoAlloc(), env, emptyGlobalScope,
                                              options, srcBuf);
         if (script)
             script->setActiveEval();

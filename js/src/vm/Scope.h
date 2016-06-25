@@ -517,6 +517,10 @@ class GlobalScope : public Scope
 
     static GlobalScope* create(ExclusiveContext* cx, ScopeKind kind, BindingData* data);
 
+    static GlobalScope* createEmpty(ExclusiveContext* cx, ScopeKind kind) {
+        return create(cx, kind, nullptr);
+    }
+
     template <XDRMode mode>
     static bool XDR(XDRState<mode>* xdr, ScopeKind kind, MutableHandleScope scope);
 
