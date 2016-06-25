@@ -118,8 +118,12 @@ CopyBindingData(ExclusiveContext* cx, ScopeData* data, size_t dataSize)
     MOZ_ASSERT(cx->compartment()->runtimeFromAnyThread()->keepAtoms());
 
     uint8_t* copyBytes = cx->zone()->pod_malloc<uint8_t>(dataSize);
-    if (copyBytes)
-        mozilla::PodCopy<uint8_t>(copyBytes, reinterpret_cast<uint8_t*>(data), dataSize);
+    if (!copyBytes) {
+        ReportOutOfMemory(cx);
+        return nullptr;
+    }
+
+    mozilla::PodCopy<uint8_t>(copyBytes, reinterpret_cast<uint8_t*>(data), dataSize);
     return reinterpret_cast<ScopeData*>(copyBytes);
 }
 
@@ -155,6 +159,8 @@ static ScopeData*
 NewEmptyScopeData(ExclusiveContext* cx, size_t dataSize)
 {
     uint8_t* bytes = cx->zone()->pod_calloc<uint8_t>(dataSize);
+    if (!bytes)
+        ReportOutOfMemory(cx);
     return reinterpret_cast<ScopeData*>(bytes);
 }
 
@@ -359,8 +365,11 @@ LexicalScope::create(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
         return nullptr;
 
     Scope* scope = Scope::create(cx, kind, enclosing, envShape, reinterpret_cast<uintptr_t>(copy));
-    if (!scope)
+    if (!scope) {
         js_free(copy);
+        return nullptr;
+    }
+
     copy->addRef();
     return &scope->as<LexicalScope>();
 }
@@ -440,8 +449,12 @@ FunctionScope::create(ExclusiveContext* cx, BindingData* bindings, uint32_t firs
 
     Scope* scope = Scope::create(cx, ScopeKind::Function, enclosing, envShape,
                                  reinterpret_cast<uintptr_t>(data));
-    if (!scope)
+    if (!scope) {
+        js_free(data->bindings);
         js_free(data);
+        return nullptr;
+    }
+
     data->bindings->addRef();
     return &scope->as<FunctionScope>();
 }
@@ -548,8 +561,11 @@ GlobalScope::create(ExclusiveContext* cx, ScopeKind kind, BindingData* data)
         return nullptr;
 
     Scope* scope = Scope::create(cx, kind, nullptr, nullptr, reinterpret_cast<uintptr_t>(copy));
-    if (!scope)
+    if (!scope) {
         js_free(copy);
+        return nullptr;
+    }
+
     copy->addRef();
     return &scope->as<GlobalScope>();
 }
@@ -632,8 +648,11 @@ EvalScope::create(ExclusiveContext* cx, ScopeKind scopeKind, BindingData* data,
 
     Scope* scope = Scope::create(cx, scopeKind, enclosing, envShape,
                                  reinterpret_cast<uintptr_t>(copy));
-    if (!scope)
+    if (!scope) {
         js_free(copy);
+        return nullptr;
+    }
+
     copy->addRef();
     return &scope->as<EvalScope>();
 }
