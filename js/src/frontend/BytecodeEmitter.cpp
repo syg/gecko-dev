@@ -7983,6 +7983,8 @@ BytecodeEmitter::emitFunctionFormalParametersAndBody(ParseNode *pn)
             MOZ_ASSERT(hasDefaults);
             if (!emitArgOp(JSOP_GETARG, argSlot))
                 return false;
+            if (!emit1(JSOP_DUP))
+                return false;
             if (!emit1(JSOP_UNDEFINED))
                 return false;
             if (!emit1(JSOP_STRICTEQ))
@@ -7992,6 +7994,8 @@ BytecodeEmitter::emitFunctionFormalParametersAndBody(ParseNode *pn)
                 return false;
             JumpList jump;
             if (!emitJump(JSOP_IFEQ, &jump))
+                return false;
+            if (!emit1(JSOP_POP))
                 return false;
             if (!emitTree(initializer))
                 return false;
@@ -8025,7 +8029,7 @@ BytecodeEmitter::emitFunctionFormalParametersAndBody(ParseNode *pn)
             auto emitRhs = [argSlot, initializer, isRest](BytecodeEmitter* bce,
                                                           const NameLocation&, bool)
             {
-                // If we had an initializer the rest parameter, the value is
+                // If we had an initializer or a rest parameter, the value is
                 // already on the stack.
                 if (!initializer && !isRest)
                     return bce->emitArgOp(JSOP_GETARG, argSlot);

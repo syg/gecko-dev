@@ -981,7 +981,6 @@ static void
 PopEnvironment(JSContext* cx, EnvironmentIter& ei)
 {
     switch (ei.scope().kind()) {
-      case ScopeKind::ParameterDefaults:
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
       case ScopeKind::DeclEnv:
@@ -994,6 +993,7 @@ PopEnvironment(JSContext* cx, EnvironmentIter& ei)
         ei.initialFrame().popWith(cx);
         break;
       case ScopeKind::Function:
+      case ScopeKind::ParameterDefaults:
       case ScopeKind::Eval:
       case ScopeKind::StrictEval:
       case ScopeKind::Global:

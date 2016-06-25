@@ -1017,10 +1017,21 @@ class JSScript : public js::gc::TenuredCell
     }
 
     bool hasDefaults() const {
+        // If the body scope is the outermost scope, there can't be a defaults
+        // scope.
+        if (bodyScopeIndex_ == 0)
+            return false;
+
+        // Only functions have parameters.
         js::Scope* scope = bodyScope();
         if (!scope->is<js::FunctionScope>())
             return false;
-        return scope->enclosing()->kind() == js::ScopeKind::ParameterDefaults;
+
+        // A function may have a ParameterDefaults enclosing scope that is in
+        // an enclosing function. Makes sure the enclosing ParameterDefaults
+        // is for the current function.
+        return scope->enclosing() == getScope(bodyScopeIndex_ - 1) &&
+               scope->enclosing()->kind() == js::ScopeKind::ParameterDefaults;
     }
 
     bool hasAnyAliasedBindings() const {

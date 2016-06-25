@@ -54,8 +54,8 @@ f1(()=>42, 42, ()=>43, 43, ()=>44, 44);
 function f2(a, aIs,
             // call before body
             b=(function() { assertEq(a(), aIs); })(),
-            // call inside body
-            c=function() { assertEq(a(), 52); }) {
+            // a inside body not accessible from defaults
+            c=function() { assertEq(a(), 42); }) {
   function a() {
     return 52;
   }
@@ -74,8 +74,8 @@ function f3(a, aIs,
             // call before body
             // close here
             b=(function() { assertEq(a(), aIs); })(),
-            // call inside body
-            c=function() { assertEq(a(), 52); }) {
+            // a inside body not accessible from defaults
+            c=function() { assertEq(a(), 42); }) {
   function a() {
     return 52;
   }
