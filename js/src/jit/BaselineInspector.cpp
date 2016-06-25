@@ -660,6 +660,10 @@ BaselineInspector::templateDeclEnvObject()
     JSObject* res = &templateCallObject()->enclosingEnvironment();
     MOZ_ASSERT(res);
 
+    if (script->hasDefaults() && script->defaultsScope()->hasEnvironment())
+        res = res->enclosingEnvironment();
+    MOZ_ASSERT(res);
+
     return &res->as<LexicalEnvironmentObject>();
 }
 

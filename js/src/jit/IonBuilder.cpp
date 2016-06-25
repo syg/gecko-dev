@@ -2152,6 +2152,16 @@ IonBuilder::inspectOpcode(JSOp op)
       case JSOP_CHECKOBJCOERCIBLE:
         return jsop_checkobjcoercible();
 
+      case JSOP_PUSHCALLOBJ:
+        // Parameter defaults require delaying pushing the call object until
+        // after parameter defaults are finished evaluating. Ion doesn't
+        // compile scripts with defaults yet and creates the call object up
+        // front. Assert that now.
+        MOZ_ASSERT(!script()->functionNonDelazifying()->needsDefaultsEnvironment());
+        MOZ_ASSERT(current->environmentChain()->op() == MDefinition::Op_NewCallObject ||
+                   current->environmentChain()->op() == MDefinition::Op_NewRunOnceCallObject);
+        break;
+
       case JSOP_DEBUGCHECKSELFHOSTED:
       {
 #ifdef DEBUG
