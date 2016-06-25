@@ -1012,6 +1012,21 @@ js::UnwindEnvironment(JSContext* cx, EnvironmentIter& ei, jsbytecode* pc)
         return;
 
     RootedScope scope(cx, ei.initialFrame().script()->innermostScope(pc));
+
+#ifdef DEBUG
+    // A frame's environment chain cannot be unwound to anything enclosing the
+    // body scope of a script.  This includes the parameter defaults
+    // environment and the decl env object. These environments, once pushed
+    // onto the environment chain, are expected to be there for the duration
+    // of the frame.
+    //
+    // Attempting to unwind to the parameter defaults code in a script is a
+    // bug; that section of code has no try-catch blocks.
+    JSScript* script = ei.initialFrame().script();
+    for (uint32_t i = 0; i < script->bodyScopeIndex(); i++)
+        MOZ_ASSERT(scope != script->getScope(i));
+#endif
+
     for (; ei.maybeScope() != scope; ei++)
         PopEnvironment(cx, ei);
 }

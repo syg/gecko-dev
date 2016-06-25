@@ -2159,8 +2159,9 @@ IonBuilder::inspectOpcode(JSOp op)
         // creates the call object up front. Assert that now.
         MOZ_ASSERT(!script()->functionNonDelazifying()->needsDefaultsEnvironment());
         MOZ_ASSERT(script()->code() == pc);
-        MOZ_ASSERT(current->environmentChain()->op() == MDefinition::Op_NewCallObject ||
-                   current->environmentChain()->op() == MDefinition::Op_NewRunOnceCallObject);
+        MOZ_ASSERT_IF(!info().isAnalysis(),
+                      current->environmentChain()->op() == MDefinition::Op_NewCallObject ||
+                      current->environmentChain()->op() == MDefinition::Op_NewRunOnceCallObject);
         break;
 
       case JSOP_DEBUGCHECKSELFHOSTED:
