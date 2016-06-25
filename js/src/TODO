@@ -2,7 +2,6 @@ Parser:
   - remove uses of op on ParseNode
 
 BCE:
-  - make param defaults environment pushing less awkward by delaying callobj construction 
 
 VM:
   - use scope notes to find param defaults scope when direct evaling
