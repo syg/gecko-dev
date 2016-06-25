@@ -889,7 +889,10 @@ inline bool
 JSObject::is<js::EnvironmentObject>() const
 {
     return is<js::VarEnvironmentObject>() ||
-           is<js::LexicalEnvironmentObject>();
+           is<js::LexicalEnvironmentObject>() ||
+           is<js::WithEnvironmentObject>() ||
+           is<js::NonSyntacticVariablesObject>() ||
+           is<js::RuntimeLexicalErrorObject>();
 }
 
 template<>

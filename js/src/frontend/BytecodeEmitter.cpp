@@ -1057,7 +1057,10 @@ BytecodeEmitter::EmitterScope::enterWith(BytecodeEmitter* bce)
     if (!internScope(bce, createScope))
         return false;
 
-    return bce->emitInternedScopeOp(index(), JSOP_ENTERWITH);
+    if (!bce->emitInternedScopeOp(index(), JSOP_ENTERWITH))
+        return false;
+
+    return appendScopeNote(bce);
 }
 
 bool
