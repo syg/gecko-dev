@@ -1254,6 +1254,10 @@ IonBuilder::initEnvironmentChain(MDefinition* callee)
             MOZ_ASSERT(!fun->needsDefaultsEnvironment());
 
             if (fun->needsCallObject()) {
+                // See comment in BytecodeAnalysis.h
+                if (analysis().hasLambdaInDefaultsWithCallObject())
+                    return abort("Has lambdas in parameter default expressions");
+
                 env = createCallObject(callee, env);
                 if (!env)
                     return false;
@@ -2162,6 +2166,7 @@ IonBuilder::inspectOpcode(JSOp op)
         MOZ_ASSERT_IF(!info().isAnalysis(),
                       current->environmentChain()->op() == MDefinition::Op_NewCallObject ||
                       current->environmentChain()->op() == MDefinition::Op_NewRunOnceCallObject);
+
         break;
 
       case JSOP_DEBUGCHECKSELFHOSTED:

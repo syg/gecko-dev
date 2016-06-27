@@ -8043,6 +8043,19 @@ BytecodeEmitter::emitFunctionFormalParametersAndBody(ParseNode *pn)
         }
     }
 
+    if (defaultsEmitterScope) {
+        // Manually record a note saying we're done processing
+        // parameters. Scope notes were designed for intra-function scopes,
+        // and the defaults scope is weird in that it encloses the function
+        // scope.
+        //
+        // This note helps JSScript::lookupScope find the right scope for pc
+        // values before the body of the function, which is used for direct
+        // eval (direct evals in parameter defaults always get their own var
+        // environment) and disassembly.
+        scopeNoteList.recordEnd(defaultsEmitterScope->noteIndex(), offset(), inPrologue());
+    }
+
     if (!emitFunctionBody(funBody))
         return false;
 
@@ -8111,12 +8124,9 @@ BytecodeEmitter::emitFunctionBody(ParseNode* funBody)
 
             if (!emitInitializeName(name, emitRhs))
                 return false;
+            if (!emit1(JSOP_POP))
+                return false;
         }
-
-        // Manually mark that we're done processing parameters. This is so any
-        // direct eval that happens while processing the parameter list always get
-        // their own var scopes regardless of strictness.
-        scopeNoteList.recordEnd(defaultsScope->noteIndex(), offset(), inPrologue());
     } else {
         if (!emitInitializeFunctionSpecialNames())
             return false;

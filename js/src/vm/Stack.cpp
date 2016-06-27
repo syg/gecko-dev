@@ -107,9 +107,9 @@ InterpreterFrame::createRestParameter(JSContext* cx)
 }
 
 static inline void
-AssertScopeMatchesEnvironment(Scope* scope, JSObject* env)
+AssertScopeMatchesEnvironment(Scope* scope, JSObject* originalEnv)
 {
-    JSObject* originalEnv = env;
+    JSObject* env = originalEnv;
     for (ScopeIter si(scope); si; si++) {
         if (si.kind() == ScopeKind::NonSyntactic) {
             while (env->is<WithEnvironmentObject>() ||

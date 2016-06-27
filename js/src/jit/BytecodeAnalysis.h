@@ -42,6 +42,11 @@ class BytecodeAnalysis
     bool hasTryFinally_;
     bool hasSetArg_;
 
+    // Ion cannot compile lexical environments currently and as such cannot
+    // correctly compile lambdas in parameter default expressions. See bug
+    // 1273858.
+    bool hasLambdaInDefaultsWithCallObject_;
+
   public:
     explicit BytecodeAnalysis(TempAllocator& alloc, JSScript* script);
 
@@ -68,6 +73,10 @@ class BytecodeAnalysis
 
     bool hasSetArg() const {
         return hasSetArg_;
+    }
+
+    bool hasLambdaInDefaultsWithCallObject() const {
+        return hasLambdaInDefaultsWithCallObject_;
     }
 };
 

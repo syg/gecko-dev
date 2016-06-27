@@ -573,7 +573,7 @@ class PerThreadData : public PerThreadDataFriendFields
 
     // Pools used for recycling name maps and sets when parsing and emitting
     // bytecode. Purged on GC when there are no active script compilations.
-    frontend::NameMapPools frontendMapPool;
+    frontend::NameMapPool frontendMapPool;
 
     explicit PerThreadData(JSRuntime* runtime);
     ~PerThreadData();

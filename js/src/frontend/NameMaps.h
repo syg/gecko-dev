@@ -166,13 +166,13 @@ class InlineTablePool
     }
 };
 
-class NameMapPools
+class NameMapPool
 {
     InlineTablePool<AtomIndexMap> pool_;
     uint32_t activeCompilations_;
 
   public:
-    NameMapPools()
+    NameMapPool()
       : activeCompilations_(0)
     { }
 

@@ -59,7 +59,7 @@ js::EnvironmentCoordinateToEnvironmentShape(JSScript* script, jsbytecode* pc)
     return si.environmentShape();
 }
 
-static const uint32_t SCOPE_COORDINATE_NAME_THRESHOLD = 20;
+static const uint32_t ENV_COORDINATE_NAME_THRESHOLD = 20;
 
 void
 EnvironmentCoordinateNameCache::purge()
@@ -74,7 +74,7 @@ js::EnvironmentCoordinateName(EnvironmentCoordinateNameCache& cache, JSScript* s
                               jsbytecode* pc)
 {
     Shape* shape = EnvironmentCoordinateToEnvironmentShape(script, pc);
-    if (shape != cache.shape && shape->slot() >= SCOPE_COORDINATE_NAME_THRESHOLD) {
+    if (shape != cache.shape && shape->slot() >= ENV_COORDINATE_NAME_THRESHOLD) {
         cache.purge();
         if (cache.map.init(shape->slot())) {
             cache.shape = shape;
@@ -766,7 +766,7 @@ LexicalEnvironmentObject::createTemplateObject(JSContext* cx, Handle<LexicalScop
     if (!env)
         return nullptr;
 
-    env->initScope(scope);
+    env->initScopeUnchecked(scope);
     return env;
 }
 

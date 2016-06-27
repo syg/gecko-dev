@@ -377,9 +377,13 @@ class LexicalEnvironmentObject : public EnvironmentObject
         initReservedSlot(THIS_VALUE_OR_SCOPE_SLOT, GetThisValue(obj));
     }
 
+    void initScopeUnchecked(LexicalScope* scope) {
+        initReservedSlot(THIS_VALUE_OR_SCOPE_SLOT, PrivateGCThingValue(scope));
+    }
+
     void initScope(LexicalScope* scope) {
         MOZ_ASSERT(!isGlobal() && isSyntactic());
-        initReservedSlot(THIS_VALUE_OR_SCOPE_SLOT, PrivateGCThingValue(scope));
+        initScopeUnchecked(scope);
     }
 
   public:
