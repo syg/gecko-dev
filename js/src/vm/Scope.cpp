@@ -420,7 +420,7 @@ LexicalScope::XDR(XDRState<XDR_DECODE>* xdr, ScopeKind kind, HandleScope enclosi
 
 /* static */ FunctionScope*
 FunctionScope::create(ExclusiveContext* cx, BindingData* bindings, uint32_t firstFrameSlot,
-                      HandleFunction fun, HandleScope enclosing)
+                      bool isExtensible, HandleFunction fun, HandleScope enclosing)
 {
     MOZ_ASSERT_IF(firstFrameSlot != 0, firstFrameSlot == computeNextFrameSlot(enclosing));
     MOZ_ASSERT(fun->isTenured());
@@ -446,6 +446,14 @@ FunctionScope::create(ExclusiveContext* cx, BindingData* bindings, uint32_t firs
 
     if (!data->bindings)
         return nullptr;
+
+    // Extensible scopes (i.e., due to direct eval) always need an
+    // environment.
+    if (isExtensible && !envShape) {
+        envShape = getEmptyEnvironmentShape(cx);
+        if (!envShape)
+            return nullptr;
+    }
 
     Scope* scope = Scope::create(cx, ScopeKind::Function, enclosing, envShape,
                                  reinterpret_cast<uintptr_t>(data));
@@ -514,6 +522,11 @@ FunctionScope::XDR(XDRState<mode>* xdr, HandleFunction fun, HandleScope enclosin
     if (!XDRSizedBindingData<FunctionScope>(xdr, scope.as<FunctionScope>(), &data))
         return false;
 
+    uint8_t isExtensible;
+    if (mode == XDR_ENCODE)
+        isExtensible = fun->nonLazyScript()->funHasExtensibleScope();
+    if (!xdr->codeUint8(&isExtensible))
+        return false;
     if (!xdr->codeUint16(&data->nonPositionalFormalStart))
         return false;
     if (!xdr->codeUint16(&data->varStart))
@@ -522,7 +535,7 @@ FunctionScope::XDR(XDRState<mode>* xdr, HandleFunction fun, HandleScope enclosin
         return false;
 
     if (mode == XDR_DECODE) {
-        scope.set(create(cx, data, computeNextFrameSlot(enclosing), fun, enclosing));
+        scope.set(create(cx, data, computeNextFrameSlot(enclosing), isExtensible, fun, enclosing));
         if (!scope)
             return false;
         js_free(data);
@@ -799,6 +812,30 @@ BindingIter::init(EvalScope::BindingData& data, bool strict)
         init(0, 0, data.length, data.length,
              CannotHaveSlots, UINT32_MAX, UINT32_MAX,
              data.names, data.length);
+    }
+}
+
+void
+js::DumpBindings(JSContext* cx, Scope* scope) {
+    for (BindingIter bi(scope); bi; bi++) {
+        JSAutoByteString bytes;
+        if (!AtomToPrintableString(cx, bi.name(), &bytes))
+            return;
+        fprintf(stderr, "%s %s ", BindingKindString(bi.kind()), bytes.ptr());
+        switch (bi.location().kind()) {
+          case BindingLocation::Kind::Global:
+            fprintf(stderr, "global\n");
+            break;
+          case BindingLocation::Kind::Argument:
+            fprintf(stderr, "arg slot %u\n", bi.location().slot());
+            break;
+          case BindingLocation::Kind::Frame:
+            fprintf(stderr, "frame slot %u\n", bi.location().slot());
+            break;
+          case BindingLocation::Kind::Environment:
+            fprintf(stderr, "env slot %u\n", bi.location().slot());
+            break;
+        }
     }
 }
 

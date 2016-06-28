@@ -393,7 +393,7 @@ class FunctionScope : public Scope
     }
 
     static FunctionScope* create(ExclusiveContext* cx, BindingData* data, uint32_t firstFrameSlot,
-                                 HandleFunction fun, HandleScope enclosing);
+                                 bool isExtensible, HandleFunction fun, HandleScope enclosing);
 
     template <XDRMode mode>
     static bool XDR(XDRState<mode>* xdr, HandleFunction fun, HandleScope enclosing,
@@ -907,6 +907,8 @@ class BindingIter
 
     void trace(JSTracer* trc);
 };
+
+void DumpBindings(JSContext* cx, Scope* scope);
 
 //
 // A refinement of BindingIter that only iterates over closed over argument

@@ -1900,19 +1900,20 @@ Parser<FullParseHandler>::declareFunctionArgumentsObject()
         }
     }
 
-    // Compute if we need an arguments object.
+    // ES 9.2.12.19 and 9.2.12.20 say formal parameters, lexical bindings,
+    // and body-level functions named 'arguments' shadow the arguments
+    // object.
     //
-    if (DeclaredNamePtr p = pc->varScope().lookupDeclaredName(argumentsName)) {
-        // ES 9.2.12.19 and 9.2.12.20 say formal parameters, lexical bindings,
-        // and body-level functions named 'arguments' shadow the arguments
-        // object.
-        //
-        // If we have parameter defaults, we checked if there's a parameter
-        // named 'arguments' above. So, anything but 'var' bindings here
-        // shadows.
-        if (p->value()->kind() != DeclarationKind::Var)
-            return true;
+    // So even if there wasn't a free use of 'arguments' but there is a var
+    // binding of 'arguments', we still might need the arguments object.
+    if (!funbox->usesArguments) {
+        DeclaredNamePtr p = pc->varScope().lookupDeclaredName(argumentsName);
+        if (p && p->value()->kind() == DeclarationKind::Var)
+            funbox->usesArguments = true;
+    }
 
+    // Compute if we need an arguments object.
+    if (funbox->usesArguments) {
         // There is an 'arguments' binding. Is the arguments object definitely
         // needed?
         //

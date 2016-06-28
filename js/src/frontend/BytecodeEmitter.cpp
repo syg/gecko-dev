@@ -868,13 +868,16 @@ BytecodeEmitter::EmitterScope::enterFunctionBody(BytecodeEmitter* bce, FunctionB
     // direct eval, any names beyond the function scope must be accessed
     // dynamically as we don't know if the name will become a 'var' binding
     // due to direct eval.
-    if (funbox->hasExtensibleScope())
+    if (funbox->hasExtensibleScope()) {
+        hasEnvironment_ = true;
         fallbackFreeNameLocation_ = Some(NameLocation::Dynamic());
+    }
 
     // Create and intern the VM scope.
     auto createScope = [funbox, firstFrameSlot](ExclusiveContext* cx, HandleScope enclosing) {
         RootedFunction fun(cx, funbox->function());
-        return FunctionScope::create(cx, funbox->funScopeBindings, firstFrameSlot, fun, enclosing);
+        return FunctionScope::create(cx, funbox->funScopeBindings, firstFrameSlot,
+                                     funbox->hasExtensibleScope(), fun, enclosing);
     };
     if (!internBodyScope(bce, createScope))
         return false;
@@ -7997,8 +8000,8 @@ BytecodeEmitter::emitFunctionFormalParametersAndBody(ParseNode *pn)
     }
 
     // No defaults. Enter the function body scope and emit everything.
-    EmitterScope varEmitterScope(this);
-    if (!varEmitterScope.enterFunctionBody(this, funbox))
+    EmitterScope emitterScope(this);
+    if (!emitterScope.enterFunctionBody(this, funbox))
         return false;
 
     if (!emitInitializeFunctionSpecialNames())
@@ -8010,7 +8013,7 @@ BytecodeEmitter::emitFunctionFormalParametersAndBody(ParseNode *pn)
     if (!emitFunctionBody(funBody))
         return false;
 
-    return true;
+    return emitterScope.leave(this);
 }
 
 bool
