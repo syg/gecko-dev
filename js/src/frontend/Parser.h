@@ -179,6 +179,12 @@ class ParseContext : public Nestable<ParseContext>
             return used().has(name);
         }
 
+        bool hasUsedNameFromInnerFunction(JSAtom* name) {
+            if (UsedNameSet::Ptr p = used().lookup(name))
+                return p->value() == UsedNameInfo::FromInnerFunction;
+            return false;
+        }
+
         // Move all declared parameter names to the parameter default
         // expression scope.
         static MOZ_MUST_USE bool moveFormalParameterDeclaredNamesForDefaults(ParseContext* pc);

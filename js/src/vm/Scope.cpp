@@ -420,10 +420,16 @@ LexicalScope::XDR(XDRState<XDR_DECODE>* xdr, ScopeKind kind, HandleScope enclosi
 
 /* static */ FunctionScope*
 FunctionScope::create(ExclusiveContext* cx, BindingData* bindings, uint32_t firstFrameSlot,
-                      bool isExtensible, HandleFunction fun, HandleScope enclosing)
+                      bool hasDefaults, bool isExtensible, HandleFunction fun,
+                      HandleScope enclosing)
 {
     MOZ_ASSERT_IF(firstFrameSlot != 0, firstFrameSlot == computeNextFrameSlot(enclosing));
     MOZ_ASSERT(fun->isTenured());
+
+    // Note that enclosing->kind() == ScopeKind::ParameterDefaults does not
+    // imply that this function scope has a parameter defaults scope. The
+    // parameter defaults scope could be in an enclosing function.
+    MOZ_ASSERT_IF(hasDefaults, enclosing->kind() == ScopeKind::ParameterDefaults);
 
     Data* data = NewEmptyScopeData<Data>(cx, sizeof(Data));
     if (!data)
@@ -435,7 +441,7 @@ FunctionScope::create(ExclusiveContext* cx, BindingData* bindings, uint32_t firs
     // from Scope::copy. Copy it now that we're creating a permanent VM scope.
     RootedShape envShape(cx);
     if (bindings) {
-        BindingIter bi(*bindings, firstFrameSlot);
+        BindingIter bi(*bindings, firstFrameSlot, hasDefaults);
         data->bindings = CopyBindingData(cx, bi, bindings, sizeOfBindingData(bindings->length),
                                          &CallObject::class_,
                                          BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE,
@@ -522,9 +528,14 @@ FunctionScope::XDR(XDRState<mode>* xdr, HandleFunction fun, HandleScope enclosin
     if (!XDRSizedBindingData<FunctionScope>(xdr, scope.as<FunctionScope>(), &data))
         return false;
 
+    uint8_t hasDefaults;
     uint8_t isExtensible;
-    if (mode == XDR_ENCODE)
+    if (mode == XDR_ENCODE) {
+        hasDefaults = fun->nonLazyScript()->hasDefaults();
         isExtensible = fun->nonLazyScript()->funHasExtensibleScope();
+    }
+    if (!xdr->codeUint8(&hasDefaults))
+        return false;
     if (!xdr->codeUint8(&isExtensible))
         return false;
     if (!xdr->codeUint16(&data->nonPositionalFormalStart))
@@ -535,7 +546,8 @@ FunctionScope::XDR(XDRState<mode>* xdr, HandleFunction fun, HandleScope enclosin
         return false;
 
     if (mode == XDR_DECODE) {
-        scope.set(create(cx, data, computeNextFrameSlot(enclosing), isExtensible, fun, enclosing));
+        scope.set(create(cx, data, computeNextFrameSlot(enclosing), hasDefaults, isExtensible,
+                         fun, enclosing));
         if (!scope)
             return false;
         js_free(data);
@@ -769,6 +781,43 @@ ScopeIter::hasSyntacticEnvironment() const
     MOZ_CRASH("Bad ScopeKind");
 }
 
+BindingIter::BindingIter(Scope* scope)
+{
+    switch (scope->kind()) {
+      case ScopeKind::ParameterDefaults:
+      case ScopeKind::Lexical:
+      case ScopeKind::Catch:
+        init(scope->as<LexicalScope>().bindingData(),
+             scope->as<LexicalScope>().computeFirstFrameSlot());
+        break;
+      case ScopeKind::DeclEnv:
+        init(scope->as<LexicalScope>().bindingData(), LOCALNO_LIMIT);
+        break;
+      case ScopeKind::With:
+        MOZ_CRASH("With scopes do not have bindings");
+        break;
+      case ScopeKind::Function: {
+        uint8_t ignoreFlags = IgnoreDestructuredFormalParameters;
+        if (scope->as<FunctionScope>().canonicalFunction()->nonLazyScript()->hasDefaults())
+            ignoreFlags |= IgnorePositionalFormalParameters;
+        init(scope->as<FunctionScope>().bindingData(),
+             scope->as<FunctionScope>().computeFirstFrameSlot(),
+             ignoreFlags);
+        break;
+      }
+      case ScopeKind::Eval:
+      case ScopeKind::StrictEval:
+        init(scope->as<EvalScope>().bindingData(), scope->kind() == ScopeKind::StrictEval);
+        break;
+      case ScopeKind::Global:
+      case ScopeKind::NonSyntactic:
+        init(scope->as<GlobalScope>().bindingData());
+        break;
+      case ScopeKind::Module:
+        MOZ_CRASH("NYI");
+    }
+}
+
 BindingIter::BindingIter(JSScript* script)
   : BindingIter(script->bodyScope())
 { }
@@ -783,10 +832,10 @@ BindingIter::init(LexicalScope::BindingData& data, uint32_t firstFrameSlot)
 }
 
 void
-BindingIter::init(FunctionScope::BindingData& data, uint32_t firstFrameSlot)
+BindingIter::init(FunctionScope::BindingData& data, uint32_t firstFrameSlot, uint8_t ignoreFlags)
 {
     init(data.nonPositionalFormalStart, data.varStart, data.length, 0,
-         CanHaveArgumentSlots | CanHaveFrameSlots | CanHaveEnvironmentSlots,
+         CanHaveArgumentSlots | CanHaveFrameSlots | CanHaveEnvironmentSlots | ignoreFlags,
          firstFrameSlot, JSSLOT_FREE(&CallObject::class_),
          data.names, data.length);
 }
@@ -815,6 +864,15 @@ BindingIter::init(EvalScope::BindingData& data, bool strict)
     }
 }
 
+PositionalFormalParameterIter::PositionalFormalParameterIter(JSScript* script)
+  : BindingIter(script)
+{
+    // Reinit with 0 ignoreFlags, i.e., iterate over all positional
+    // parameters.
+    if (script->bodyScope()->is<FunctionScope>())
+        init(script->bodyScope()->as<FunctionScope>().bindingData(), 0, /* ignoreFlags = */ 0);
+}
+
 void
 js::DumpBindings(JSContext* cx, Scope* scope) {
     for (BindingIter bi(scope); bi; bi++) {
@@ -827,7 +885,7 @@ js::DumpBindings(JSContext* cx, Scope* scope) {
             fprintf(stderr, "global\n");
             break;
           case BindingLocation::Kind::Argument:
-            fprintf(stderr, "arg slot %u\n", bi.location().slot());
+            fprintf(stderr, "arg slot %u\n", bi.location().argumentSlot());
             break;
           case BindingLocation::Kind::Frame:
             fprintf(stderr, "frame slot %u\n", bi.location().slot());
@@ -835,6 +893,19 @@ js::DumpBindings(JSContext* cx, Scope* scope) {
           case BindingLocation::Kind::Environment:
             fprintf(stderr, "env slot %u\n", bi.location().slot());
             break;
+        }
+    }
+
+    if (scope->is<FunctionScope>()) {
+        JSScript* script =  scope->as<FunctionScope>().canonicalFunction()->nonLazyScript();
+        if (script->hasDefaults()) {
+            for (PositionalFormalParameterIter fi(script); fi; fi++) {
+                JSAutoByteString bytes;
+                if (!AtomToPrintableString(cx, fi.name(), &bytes))
+                    return;
+                fprintf(stderr, "%s %s (in defaults scope)\n",
+                        BindingKindString(fi.kind()), bytes.ptr());
+            }
         }
     }
 }

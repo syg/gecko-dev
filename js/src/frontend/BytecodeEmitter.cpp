@@ -648,7 +648,7 @@ BytecodeEmitter::EmitterScope::searchAndCache(BytecodeEmitter* bce, JSAtom* name
 {
     Maybe<NameLocation> loc;
     uint8_t hops = hasEnvironment_ ? 1 : 0;
-    DebugOnly<bool> inCurrentScript = true;
+    DebugOnly<bool> inCurrentScript = enclosingInFrame();
 
     // Start searching in the current compilation.
     for (EmitterScope* es = enclosing(&bce); es; es = es->enclosing(&bce)) {
@@ -833,7 +833,7 @@ BytecodeEmitter::EmitterScope::enterFunctionBody(BytecodeEmitter* bce, FunctionB
     uint32_t firstFrameSlot = frameSlotStart();
     if (FunctionScope::BindingData* bindings = funbox->funScopeBindings) {
         NameLocationMap& cache = nameCache();
-        BindingIter bi(*bindings, firstFrameSlot);
+        BindingIter bi(*bindings, firstFrameSlot, funbox->hasDefaults());
         for (; bi; bi++) {
             if (!checkSlotLimits(bce, bi))
                 return false;
@@ -877,7 +877,8 @@ BytecodeEmitter::EmitterScope::enterFunctionBody(BytecodeEmitter* bce, FunctionB
     auto createScope = [funbox, firstFrameSlot](ExclusiveContext* cx, HandleScope enclosing) {
         RootedFunction fun(cx, funbox->function());
         return FunctionScope::create(cx, funbox->funScopeBindings, firstFrameSlot,
-                                     funbox->hasExtensibleScope(), fun, enclosing);
+                                     funbox->hasDefaults(), funbox->hasExtensibleScope(),
+                                     fun, enclosing);
     };
     if (!internBodyScope(bce, createScope))
         return false;

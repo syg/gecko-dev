@@ -1316,12 +1316,13 @@ ExpressionDecompiler::getArg(unsigned slot)
     MOZ_ASSERT(script->functionNonDelazifying());
     MOZ_ASSERT(slot < script->numArgs());
 
-    for (BindingIter bi(script); bi; bi++) {
-        if (bi.argumentSlot() == slot)
-            return bi.name();
+    for (PositionalFormalParameterIter fi(script); fi; fi++) {
+        if (fi.argumentSlot() == slot)
+            return fi.name();
     }
 
-    MOZ_CRASH("No binding");
+    // If there's no binding name, it's a destructured argument.
+    return Atomize(cx, "destructured argument", strlen("destructured argument"));
 }
 
 JSAtom*
@@ -1329,16 +1330,14 @@ ExpressionDecompiler::getLocal(uint32_t local, jsbytecode* pc)
 {
     MOZ_ASSERT(local < script->nfixed());
 
-    // If it's a var, look for it in the body scope.
-    if (local < script->nfixedvars()) {
-        for (BindingIter bi(script); bi; bi++) {
-            BindingLocation loc = bi.location();
-            if (loc.kind() == BindingLocation::Kind::Frame && loc.slot() == local)
-                return bi.name();
-        }
+    // Look for it in the body scope first.
+    for (BindingIter bi(script->bodyScope()); bi; bi++) {
+        BindingLocation loc = bi.location();
+        if (loc.kind() == BindingLocation::Kind::Frame && loc.slot() == local)
+            return bi.name();
     }
 
-    // Otherwise look for it in an inner lexical scope.
+    // If not found, look for it in a lexical scope.
     for (ScopeIter si(script->lookupScope(pc)); si; si++) {
         if (!si.scope()->is<LexicalScope>())
             continue;

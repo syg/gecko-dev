@@ -2467,7 +2467,7 @@ JSScript::initFunctionPrototype(ExclusiveContext* cx, Handle<JSScript*> script,
     if (!partiallyInit(cx, script, 1, 0, 0, 0, 0, 0, 0))
         return false;
 
-    Scope* functionProtoScope = FunctionScope::create(cx, nullptr, 0, false, functionProto,
+    Scope* functionProtoScope = FunctionScope::create(cx, nullptr, 0, false, false, functionProto,
                                                       nullptr);
     if (!functionProtoScope)
         return false;
@@ -2498,6 +2498,12 @@ InitAtomMap(frontend::AtomIndexMap* indices, GCPtrAtom* atoms)
 JSScript::initFromFunctionBox(ExclusiveContext* cx, HandleScript script,
                               frontend::FunctionBox* funbox)
 {
+    JSFunction* fun = funbox->function();
+    if (fun->isInterpretedLazy())
+        fun->setUnlazifiedScript(script);
+    else
+        fun->setScript(script);
+
     script->funHasExtensibleScope_ = funbox->hasExtensibleScope();
     script->needsHomeObject_       = funbox->needsHomeObject();
     script->isDerivedClassConstructor_ = funbox->isDerivedClassConstructor();
@@ -2522,12 +2528,6 @@ JSScript::initFromFunctionBox(ExclusiveContext* cx, HandleScript script,
     script->funHasAnyAliasedFormal_ = !!fi;
 
     script->setHasInnerFunctions(funbox->hasInnerFunctions());
-
-    JSFunction* fun = funbox->function();
-    if (fun->isInterpretedLazy())
-        fun->setUnlazifiedScript(script);
-    else
-        fun->setScript(script);
 }
 
 /* static */ void
@@ -3802,9 +3802,9 @@ JSScript::formalIsAliased(unsigned argSlot)
     if (hasDefaults())
         return false;
 
-    for (BindingIter bi(this); bi; bi++) {
-        if (bi.argumentSlot() == argSlot)
-            return bi.closedOver();
+    for (PositionalFormalParameterIter fi(this); fi; fi++) {
+        if (fi.argumentSlot() == argSlot)
+            return fi.closedOver();
     }
     MOZ_CRASH("Argument slot not found");
 }

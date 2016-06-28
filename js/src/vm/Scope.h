@@ -269,6 +269,7 @@ class Scope : public js::gc::TenuredCell
 //
 // All kinds of LexicalScopes correspond to LexicalEnvironmentObjects on the
 // environment chain.
+//
 class LexicalScope : public Scope
 {
     friend class Scope;
@@ -349,10 +350,12 @@ Scope::is<LexicalScope>() const
 // parameter names.
 //
 // Corresponds to CallObject on environment chain.
+//
 class FunctionScope : public Scope
 {
     friend class GCMarker;
     friend class BindingIter;
+    friend class PositionalFormalParameterIter;
     friend class Scope;
     static const ScopeKind classScopeKind_ = ScopeKind::Function;
 
@@ -393,7 +396,8 @@ class FunctionScope : public Scope
     }
 
     static FunctionScope* create(ExclusiveContext* cx, BindingData* data, uint32_t firstFrameSlot,
-                                 bool isExtensible, HandleFunction fun, HandleScope enclosing);
+                                 bool hasDefaults, bool isExtensible, HandleFunction fun,
+                                 HandleScope enclosing);
 
     template <XDRMode mode>
     static bool XDR(XDRState<mode>* xdr, HandleFunction fun, HandleScope enclosing,
@@ -692,7 +696,11 @@ class BindingIter
         CannotHaveSlots = 0,
         CanHaveArgumentSlots = 1 << 0,
         CanHaveFrameSlots = 1 << 1,
-        CanHaveEnvironmentSlots = 1 << 2
+        CanHaveEnvironmentSlots = 1 << 2,
+
+        // See comment in settle below.
+        IgnorePositionalFormalParameters = 1 << 3,
+        IgnoreDestructuredFormalParameters = 1 << 4
     };
 
     uint8_t canHaveSlots_;
@@ -723,9 +731,17 @@ class BindingIter
     }
 
     void init(LexicalScope::BindingData& data, uint32_t firstFrameSlot);
-    void init(FunctionScope::BindingData& data, uint32_t firstFrameSlot);
+    void init(FunctionScope::BindingData& data, uint32_t firstFrameSlot, uint8_t ignoreFlags);
     void init(GlobalScope::BindingData& data);
     void init(EvalScope::BindingData& data, bool strict);
+
+    bool ignorePositionalFormalParameters() const {
+        return canHaveSlots_ & IgnorePositionalFormalParameters;
+    }
+
+    bool ignoreDestructuredFormalParameters() const {
+        return canHaveSlots_ & IgnoreDestructuredFormalParameters;
+    }
 
     void increment() {
         MOZ_ASSERT(!done());
@@ -746,63 +762,50 @@ class BindingIter
     }
 
     void settle() {
-        // Null names are only present as positional placeholders for formal
-        // parameters with destructuring or default expressions.
+        // Special settling behavior is only needed for formal parameters.
         if (nonPositionalFormalStart_ == 0)
             return;
-        while (!done() && !name())
-            increment();
+
+        // If a FunctionScope has parameters with default expressions, the
+        // parameters act like lexical bindings in the parameter defaults
+        // scope, which encloses the function scope. That is, they don't
+        // participate in the frame/environment layout of the FunctionScope.
+        //
+        // However, for error reporting and decompiling argument names, we
+        // still need to keep around the binding names. When iterating
+        // bindings for the purpose of computing frame/environment layout,
+        // ignore formal parameter names in FunctionScopes with parameters
+        // that have default expressions.
+        if (ignorePositionalFormalParameters()) {
+            while (index_ < nonPositionalFormalStart_)
+                increment();
+        } else if (ignoreDestructuredFormalParameters()) {
+            while (!done() && !name())
+                increment();
+        }
     }
 
   public:
-    explicit BindingIter(Scope* scope) {
-        switch (scope->kind()) {
-          case ScopeKind::ParameterDefaults:
-          case ScopeKind::Lexical:
-          case ScopeKind::Catch:
-            init(scope->as<LexicalScope>().bindingData(),
-                 scope->as<LexicalScope>().computeFirstFrameSlot());
-            break;
-          case ScopeKind::DeclEnv:
-            init(scope->as<LexicalScope>().bindingData(), LOCALNO_LIMIT);
-            break;
-          case ScopeKind::With:
-            MOZ_CRASH("With scopes do not have bindings");
-            break;
-          case ScopeKind::Function:
-            init(scope->as<FunctionScope>().bindingData(),
-                 scope->as<FunctionScope>().computeFirstFrameSlot());
-            break;
-          case ScopeKind::Eval:
-          case ScopeKind::StrictEval:
-            init(scope->as<EvalScope>().bindingData(), scope->kind() == ScopeKind::StrictEval);
-            break;
-          case ScopeKind::Global:
-          case ScopeKind::NonSyntactic:
-            init(scope->as<GlobalScope>().bindingData());
-            break;
-          case ScopeKind::Module:
-            MOZ_CRASH("NYI");
-        }
-    }
+    explicit BindingIter(Scope* scope);
+    explicit BindingIter(JSScript* script);
 
     BindingIter(LexicalScope::BindingData& data, uint32_t firstFrameSlot) {
         init(data, firstFrameSlot);
     }
 
-    explicit BindingIter(FunctionScope::BindingData& data, uint32_t firstFrameSlot) {
-        init(data, firstFrameSlot);
+    BindingIter(FunctionScope::BindingData& data, uint32_t firstFrameSlot, bool hasDefaults) {
+        init(data, firstFrameSlot,
+             IgnoreDestructuredFormalParameters |
+             (hasDefaults ? IgnorePositionalFormalParameters : 0));
     }
 
     explicit BindingIter(GlobalScope::BindingData& data) {
         init(data);
     }
 
-    explicit BindingIter(EvalScope::BindingData& data, bool strict) {
+    BindingIter(EvalScope::BindingData& data, bool strict) {
         init(data, strict);
     }
-
-    explicit BindingIter(JSScript* script);
 
     explicit BindingIter(const BindingIter& bi)
       : nonPositionalFormalStart_(bi.nonPositionalFormalStart_),
@@ -942,6 +945,33 @@ class ClosedOverArgumentSlotIter : public BindingIter
     void operator++(int) {
         BindingIter::operator++(1);
         settle();
+    }
+};
+
+//
+// A refinement BindingIter that only iterates over formal parameters of a
+// function. Do not use this to ask for binding locations due to complications
+// with the parameter defaults scope. It is used for name iteration only.
+//
+class PositionalFormalParameterIter : public BindingIter
+{
+  public:
+    explicit PositionalFormalParameterIter(JSScript* script);
+
+    bool isDestructured() const {
+        return !name();
+    }
+
+    BindingLocation location() const {
+        MOZ_CRASH("Do not use PositionalFormalParameterIter to compute frame/environment layout");
+    }
+
+    uint32_t nextFrameSlot() const {
+        MOZ_CRASH("Do not use PositionalFormalParameterIter to compute frame/environment layout");
+    }
+
+    uint32_t nextEnvironmentSlot() const {
+        MOZ_CRASH("Do not use PositionalFormalParameterIter to compute frame/environment layout");
     }
 };
 

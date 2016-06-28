@@ -1349,67 +1349,42 @@ Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope, bool 
 
     // Positional parameter names must be added in order of appearance as they are
     // referenced using argument slots.
+    //
+    // These are added to the FunctionScope even when there is a defaults
+    // scope and parameter names are not in the FunctionScope proper. These
+    // are used for decompiling argument names.
     for (size_t i = 0; i < pc->positionalFormalParameterNames.length(); i++) {
         JSAtom* name = pc->positionalFormalParameterNames[i];
-
-        // If there are default expressions, no formal parameters may be
-        // considered positional (i.e. accessed via argument slots), as
-        // defaults initialization have TDZ and after initialization the
-        // values of the arguments are in frame slots.
-        if (hasDefaults)
-            name = nullptr;
 
         BindingName bindName;
         if (name) {
             DeclaredNamePtr p = scope.lookupDeclaredName(name);
-            MOZ_ASSERT(p->value()->kind() == DeclarationKind::PositionalFormalParameter ||
-                       DeclarationKindIsVar(p->value()->kind()));
-            bindName = BindingName(name, closeOverAllBindings || p->value()->closedOver());
+            MOZ_ASSERT_IF(!hasDefaults,
+                          p->value()->kind() == DeclarationKind::PositionalFormalParameter ||
+                          DeclarationKindIsVar(p->value()->kind()));
+            bindName = BindingName(name, closeOverAllBindings || (p && p->value()->closedOver()));
         }
 
         if (!positionalFormals.append(bindName))
             return Nothing();
     }
 
-    if (hasDefaults) {
-        // If there are default expressions, we don't have any formal
-        // parameters in the function scope anymore.
-        ParseContext::Scope& defaultsScope = *scope.enclosing();
-        for (BindingIter bi = scope.bindings(pc); bi; bi++) {
-            if (bi.kind() != BindingKind::Var)
-                continue;
-
-            // As an optimization, if a var redeclares a formal parameter
-            // in the defaults scope, only keep the binding if either
-            // binding is closed over. If it is not closed over, it will
-            // live on the frame and the two bindings will be
-            // indistinguishable, so do not waste a frame slot.
-            DeclaredNamePtr defaultsPtr = defaultsScope.lookupDeclaredName(bi.name());
-            BindingName binding(bi.name(), closeOverAllBindings || bi.closedOver());
-            if (!binding.closedOver() && defaultsPtr && !defaultsPtr->value()->closedOver())
-                continue;
-
+    for (BindingIter bi = scope.bindings(pc); bi; bi++) {
+        BindingName binding(bi.name(), closeOverAllBindings || bi.closedOver());
+        switch (bi.kind()) {
+          case BindingKind::FormalParameter:
+            // Positional parameter names are already handled above.
+            if (bi.declarationKind() == DeclarationKind::FormalParameter) {
+                if (!formals.append(binding))
+                    return Nothing();
+            }
+            break;
+          case BindingKind::Var:
             if (!vars.append(binding))
                 return Nothing();
-        }
-    } else {
-        for (BindingIter bi = scope.bindings(pc); bi; bi++) {
-            BindingName binding(bi.name(), closeOverAllBindings || bi.closedOver());
-            switch (bi.kind()) {
-              case BindingKind::FormalParameter:
-                // Positional parameter names are already handled above.
-                if (bi.declarationKind() == DeclarationKind::FormalParameter) {
-                    if (!formals.append(binding))
-                        return Nothing();
-                }
-                break;
-              case BindingKind::Var:
-                if (!vars.append(binding))
-                    return Nothing();
-                break;
-              default:
-                break;
-            }
+            break;
+          default:
+            break;
         }
     }
 
@@ -1649,27 +1624,28 @@ Parser<ParseHandler>::declareFunctionThis()
     // one. For simplicity, since the defaults scope is a lexical scope (it
     // has TDZ), declare '.this' as a let if it needs to go on the defaults
     // scope.
-    ParseContext::Scope* thisScope;
+    ParseContext::Scope* targetScope;
     DeclarationKind thisDeclKind;
     if (funbox->hasDefaults()) {
-        thisScope = &pc->defaultsScope();
+        targetScope = &pc->defaultsScope();
         thisDeclKind = DeclarationKind::Let;
     } else {
-        thisScope = &pc->varScope();
+        targetScope = &pc->varScope();
         thisDeclKind = DeclarationKind::Var;
     }
 
     // Declare '.this' if there is a free use of '.this', or if direct eval is
     // used, or in derived class constructors (JSOP_CHECKRETURN relies on it),
     // or if there's a debugger statement.
-    if (thisScope->hasUsedName(dotThis) ||
+    if (pc->varScope().hasUsedName(dotThis) ||
+        (funbox->hasDefaults() && pc->defaultsScope().hasUsedName(dotThis)) ||
         funbox->hasDirectEval() ||
         funbox->isDerivedClassConstructor() ||
         funbox->hasDebuggerStatement())
     {
-        AddDeclaredNamePtr p = thisScope->lookupDeclaredNameForAdd(dotThis);
+        AddDeclaredNamePtr p = targetScope->lookupDeclaredNameForAdd(dotThis);
         MOZ_ASSERT(!p);
-        if (!thisScope->addDeclaredName(pc, p, dotThis, thisDeclKind))
+        if (!targetScope->addDeclaredName(pc, p, dotThis, thisDeclKind))
             return false;
         funbox->setHasThisBinding();
     }
@@ -1876,25 +1852,29 @@ Parser<FullParseHandler>::declareFunctionArgumentsObject()
     // one. For simplicity, since the defaults scope is a lexical scope (it
     // has TDZ), declare 'arguments' as a let if it needs to go on the
     // defaults scope.
-    ParseContext::Scope* argumentsScope;
+    ParseContext::Scope* targetScope;
     DeclarationKind argumentsDeclKind;
     if (funbox->hasDefaults()) {
-        argumentsScope = &pc->defaultsScope();
+        targetScope = &pc->defaultsScope();
         argumentsDeclKind = DeclarationKind::Let;
     } else {
-        argumentsScope = &pc->varScope();
+        targetScope = &pc->varScope();
         argumentsDeclKind = DeclarationKind::Var;
     }
 
-    // If there any free uses of 'arguments' in the function body, or if names
-    // may be dynamically looked up, declare it as a 'var' binding.
-    if (argumentsScope->hasUsedName(argumentsName) || pc->sc()->bindingsAccessedDynamically()) {
-        AddDeclaredNamePtr p = argumentsScope->lookupDeclaredNameForAdd(argumentsName);
+    // If there any free uses of 'arguments' in the function body or parameter
+    // default expressions, or if names may be dynamically looked up, declare
+    // it as a 'var' binding.
+    if (pc->varScope().hasUsedName(argumentsName) ||
+        (funbox->hasDefaults() && pc->defaultsScope().hasUsedName(argumentsName)) ||
+        pc->sc()->bindingsAccessedDynamically())
+    {
+        AddDeclaredNamePtr p = targetScope->lookupDeclaredNameForAdd(argumentsName);
         if (!p) {
-            if (!argumentsScope->addDeclaredName(pc, p, argumentsName, argumentsDeclKind))
+            if (!targetScope->addDeclaredName(pc, p, argumentsName, argumentsDeclKind))
                 return false;
             funbox->usesArguments = true;
-        } else if (argumentsScope == &pc->defaultsScope()) {
+        } else if (targetScope == &pc->defaultsScope()) {
             // Formal parameters shadow the arguments object.
             return true;
         }
@@ -2010,6 +1990,16 @@ Parser<ParseHandler>::functionBody(InHandling inHandling, YieldHandling yieldHan
             return null();
     }
 
+    // Declare the 'arguments' and 'this' bindings if necessary before
+    // finishing up the scope so these special bindings get marked as closed
+    // over if necessary. Arrow functions don't have these bindings.
+    if (kind != Arrow) {
+        if (!declareFunctionArgumentsObject())
+            return null();
+        if (!declareFunctionThis())
+            return null();
+    }
+
     // Note that finishLexicalScope is not used here as to:
     //
     //   1. Make the function's body-level lexical scope bindings (i.e., get
@@ -2018,20 +2008,7 @@ Parser<ParseHandler>::functionBody(InHandling inHandling, YieldHandling yieldHan
     //      the 'var' bindings later.
     //
     //   2. Optimize away useless propagation if there is no defaults scope.
-    pn = makeFunctionBodyLexicalScope(pn);
-    if (!pn)
-        return null();
-
-    // After propagating all free names, declare the 'arguments' and 'this'
-    // bindings if necessary. Arrow functions don't have these bindings.
-    if (kind != Arrow) {
-        if (!declareFunctionArgumentsObject())
-            return null();
-        if (!declareFunctionThis())
-            return null();
-    }
-
-    return pn;
+    return makeFunctionBodyLexicalScope(pn);
 }
 
 template <typename ParseHandler>
