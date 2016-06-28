@@ -1131,6 +1131,8 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
                                      PossibleError* possibleError=nullptr);
     bool matchInOrOf(bool* isForInp, bool* isForOfp);
 
+    ParseContext::Scope& targetScopeForFunctionSpecialName(DeclarationKind* declKind);
+    bool hasUsedFunctionSpecialName(HandlePropertyName name);
     bool declareFunctionArgumentsObject();
     bool declareFunctionThis();
     Node newInternalDotName(HandlePropertyName name);

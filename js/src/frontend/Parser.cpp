@@ -232,6 +232,7 @@ SharedContext::computeAllowSyntax(Scope* scope)
             JSFunction* fun = si.scope()->as<FunctionScope>().canonicalFunction();
             if (fun->isArrow())
                 continue;
+            allowNewTarget_ = true;
             allowSuperProperty_ = fun->allowSuperProperty();
             allowSuperCall_ = fun->isDerivedClassConstructor();
             return;
@@ -428,9 +429,6 @@ FunctionBox::FunctionBox(ExclusiveContext* cx, LifoAlloc& alloc, ObjectBox* trac
     // baked into JIT code, so they must be allocated tenured. They are held by
     // the JSScript so cannot be collected during a minor GC anyway.
     MOZ_ASSERT(fun->isTenured());
-
-    // All functions allow new.target.
-    allowNewTarget_ = true;
 }
 
 void
@@ -464,7 +462,8 @@ FunctionBox::initWithEnclosingContext(SharedContext* enclosing, FunctionSyntaxKi
 
     // Arrow functions and generator expression lambdas don't have
     // their own `this` binding.
-    if (!fun->isArrow() && !isGenexpLambda) {
+    if (!fun->isArrow()) {
+        allowNewTarget_ = true;
         allowSuperProperty_ = fun->allowSuperProperty();
 
         if (kind == DerivedClassConstructor) {
@@ -473,8 +472,10 @@ FunctionBox::initWithEnclosingContext(SharedContext* enclosing, FunctionSyntaxKi
             needsThisTDZChecks_ = true;
         }
 
-        thisBinding_ = ThisBinding::Function;
+        if (!isGenexpLambda)
+            thisBinding_ = ThisBinding::Function;
     } else {
+        allowNewTarget_ = enclosing->allowNewTarget();
         allowSuperProperty_ = enclosing->allowSuperProperty();
         allowSuperCall_ = enclosing->allowSuperCall();
         thisBinding_ = enclosing->thisBinding();
@@ -487,6 +488,7 @@ void
 FunctionBox::initWithEnclosingScope(Scope* enclosingScope)
 {
     if (!function()->isArrow()) {
+        allowNewTarget_ = true;
         allowSuperProperty_ = function()->allowSuperProperty();
 
         if (isDerivedClassConstructor()) {
@@ -1616,6 +1618,34 @@ Parser<FullParseHandler>::globalBody()
 }
 
 template <typename ParseHandler>
+ParseContext::Scope&
+Parser<ParseHandler>::targetScopeForFunctionSpecialName(DeclarationKind* declKind)
+{
+    // The special names 'arguments' and '.this' are accessible from the
+    // defaults scope if there is one. For simplicity, since the defaults
+    // scope is a lexical scope (it has TDZ), declare the name as a let if it
+    // needs to go on the defaults scope.
+    if (pc->functionBox()->hasDefaults()) {
+        *declKind = DeclarationKind::Let;
+        return pc->defaultsScope();
+    }
+    *declKind = DeclarationKind::Var;
+    return pc->varScope();
+}
+
+template <typename ParseHandler>
+bool
+Parser<ParseHandler>::hasUsedFunctionSpecialName(HandlePropertyName name)
+{
+    MOZ_ASSERT(name == context->names().arguments || name == context->names().dotThis);
+
+    FunctionBox* funbox = pc->functionBox();
+    return pc->varScope().hasUsedName(name) ||
+           pc->defaultsScope().hasUsedName(name) ||
+           funbox->bindingsAccessedDynamically();
+}
+
+template <typename ParseHandler>
 bool
 Parser<ParseHandler>::declareFunctionThis()
 {
@@ -1624,35 +1654,16 @@ Parser<ParseHandler>::declareFunctionThis()
     if (pc->useAsmOrInsideUseAsm())
         return true;
 
+    // Derived class constructors emit JSOP_CHECKRETURN, which requires
+    // '.this' to be bound.
     FunctionBox* funbox = pc->functionBox();
     HandlePropertyName dotThis = context->names().dotThis;
-
-    // The this binding is accessible from the defaults scope if there is
-    // one. For simplicity, since the defaults scope is a lexical scope (it
-    // has TDZ), declare '.this' as a let if it needs to go on the defaults
-    // scope.
-    ParseContext::Scope* targetScope;
-    DeclarationKind thisDeclKind;
-    if (funbox->hasDefaults()) {
-        targetScope = &pc->defaultsScope();
-        thisDeclKind = DeclarationKind::Let;
-    } else {
-        targetScope = &pc->varScope();
-        thisDeclKind = DeclarationKind::Var;
-    }
-
-    // Declare '.this' if there is a free use of '.this', or if direct eval is
-    // used, or in derived class constructors (JSOP_CHECKRETURN relies on it),
-    // or if there's a debugger statement.
-    if (pc->varScope().hasUsedName(dotThis) ||
-        (funbox->hasDefaults() && pc->defaultsScope().hasUsedName(dotThis)) ||
-        funbox->hasDirectEval() ||
-        funbox->isDerivedClassConstructor() ||
-        funbox->hasDebuggerStatement())
-    {
-        AddDeclaredNamePtr p = targetScope->lookupDeclaredNameForAdd(dotThis);
+    if (hasUsedFunctionSpecialName(dotThis) || funbox->isDerivedClassConstructor()) {
+        DeclarationKind declKind;
+        ParseContext::Scope& targetScope = targetScopeForFunctionSpecialName(&declKind);
+        AddDeclaredNamePtr p = targetScope.lookupDeclaredNameForAdd(dotThis);
         MOZ_ASSERT(!p);
-        if (!targetScope->addDeclaredName(pc, p, dotThis, thisDeclKind))
+        if (!targetScope.addDeclaredName(pc, p, dotThis, declKind))
             return false;
         funbox->setHasThisBinding();
     }
@@ -1854,34 +1865,15 @@ Parser<FullParseHandler>::declareFunctionArgumentsObject()
 
     // Time to implement the odd semantics of 'arguments'.
     HandlePropertyName argumentsName = context->names().arguments;
-
-    // The arguments object is accessible from the defaults scope if there is
-    // one. For simplicity, since the defaults scope is a lexical scope (it
-    // has TDZ), declare 'arguments' as a let if it needs to go on the
-    // defaults scope.
-    ParseContext::Scope* targetScope;
-    DeclarationKind argumentsDeclKind;
-    if (funbox->hasDefaults()) {
-        targetScope = &pc->defaultsScope();
-        argumentsDeclKind = DeclarationKind::Let;
-    } else {
-        targetScope = &pc->varScope();
-        argumentsDeclKind = DeclarationKind::Var;
-    }
-
-    // If there any free uses of 'arguments' in the function body or parameter
-    // default expressions, or if names may be dynamically looked up, declare
-    // it as a 'var' binding.
-    if (pc->varScope().hasUsedName(argumentsName) ||
-        (funbox->hasDefaults() && pc->defaultsScope().hasUsedName(argumentsName)) ||
-        pc->sc()->bindingsAccessedDynamically())
-    {
-        AddDeclaredNamePtr p = targetScope->lookupDeclaredNameForAdd(argumentsName);
+    if (hasUsedFunctionSpecialName(argumentsName)) {
+        DeclarationKind declKind;
+        ParseContext::Scope& targetScope = targetScopeForFunctionSpecialName(&declKind);
+        AddDeclaredNamePtr p = targetScope.lookupDeclaredNameForAdd(argumentsName);
         if (!p) {
-            if (!targetScope->addDeclaredName(pc, p, argumentsName, argumentsDeclKind))
+            if (!targetScope.addDeclaredName(pc, p, argumentsName, declKind))
                 return false;
             funbox->usesArguments = true;
-        } else if (targetScope == &pc->defaultsScope()) {
+        } else if (&targetScope == &pc->defaultsScope()) {
             // Formal parameters shadow the arguments object.
             return true;
         }
