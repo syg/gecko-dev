@@ -1001,11 +1001,8 @@ BytecodeEmitter::EmitterScope::enterEval(BytecodeEmitter* bce, EvalSharedContext
     // have their own lexical scope, but non-strict scopes may introduce 'var'
     // bindings to the nearest var scope.
     if (EvalScope::BindingData* bindings = evalsc->bindings) {
-        for (BindingIter bi(*bindings, evalsc->strict()); bi; bi++) {
-            NameLocation loc = NameLocation::fromBinding(bi.kind(), bi.location());
-            if (!putNameInCache(bce, bi.name(), loc))
-                return false;
-        }
+        // TODO: We may optimize strict eval bindings in the future to be on
+        // the frame. For now, handle everything dynamically.
 
         if (!evalsc->strict()) {
             bce->switchToPrologue();
@@ -7932,28 +7929,98 @@ BytecodeEmitter::emitFunctionFormalParametersAndBody(ParseNode *pn)
     ParseNode* funBody = pn->last();
     FunctionBox* funbox = sc->asFunctionBox();
 
-    bool hasDestructuringArgs = funbox->hasDestructuringArgs;
-    bool hasDefaults = funbox->hasDefaults();
-    bool hasRest = funbox->function()->hasRest();
+    TDZCheckCache tdzCache(this);
 
-    // No work needs be done for a simple parameter list.
-    if (!hasDestructuringArgs && !hasDefaults && !hasRest)
-        return emitFunctionBody(funBody);
-
-    // Parameter defaults have their own scope.
-    Maybe<TDZCheckCache> defaultsTDZCache;
-    Maybe<EmitterScope> defaultsEmitterScope;
-    if (funbox->defaultsScopeBindings) {
-        defaultsTDZCache.emplace(this);
-        defaultsEmitterScope.emplace(this);
-        if (!defaultsEmitterScope->enterParameterDefaults(this, funbox))
+    if (funbox->hasDefaults()) {
+        // Parameter defaults have their own scope.
+        EmitterScope defaultsEmitterScope(this);
+        if (!defaultsEmitterScope.enterParameterDefaults(this, funbox))
             return false;
 
         // Special bindings like arguments and this are available even in the
         // defaults scope.
         if (!emitInitializeFunctionSpecialNames())
             return false;
+
+        if (!emitFunctionFormalParameters(pn))
+            return false;
+
+        // Manually record a note saying we're done processing
+        // parameters. Scope notes were designed for intra-function scopes,
+        // and the defaults scope is weird in that it encloses the function
+        // scope.
+        //
+        // This note helps JSScript::lookupScope find the right scope for pc
+        // values before the body of the function, which is used for direct
+        // eval (direct evals in parameter defaults always get their own var
+        // environment) and disassembly.
+        scopeNoteList.recordEnd(defaultsEmitterScope.noteIndex(), offset(), inPrologue());
+
+        {
+            EmitterScope varEmitterScope(this);
+            if (!varEmitterScope.enterFunctionBody(this, funbox))
+                return false;
+
+            // After emitting default expressions for all parameters, copy over
+            // any formal parameters which have been redeclared as vars. For
+            // example, in the following, the var y in the body scope is 42:
+            //
+            //   function f(x, y = 42) { var y; }
+            //
+            for (BindingIter bi(*funbox->defaultsScopeBindings, 0); bi; bi++) {
+                JSAtom* name = bi.name();
+
+                // There may not be a var binding of the same name.
+                Maybe<NameLocation> varLoc = locationOfNameBoundInScope(name, &varEmitterScope);
+                if (!varLoc || varLoc->bindingKind() != BindingKind::Var)
+                    continue;
+
+                NameLocation paramLoc = *locationOfNameBoundInScope(name, &defaultsEmitterScope);
+                auto emitRhs = [name, paramLoc](BytecodeEmitter* bce, const NameLocation&, bool) {
+                    return bce->emitGetNameAtLocation(name, paramLoc);
+                };
+
+                if (!emitInitializeName(name, emitRhs))
+                    return false;
+                if (!emit1(JSOP_POP))
+                    return false;
+            }
+
+            if (!emitFunctionBody(funBody))
+                return false;
+
+            if (!varEmitterScope.leave(this))
+                return false;
+        }
+
+        return defaultsEmitterScope.leave(this);
     }
+
+    // No defaults. Enter the function body scope and emit everything.
+    EmitterScope varEmitterScope(this);
+    if (!varEmitterScope.enterFunctionBody(this, funbox))
+        return false;
+
+    if (!emitInitializeFunctionSpecialNames())
+        return false;
+
+    if (!emitFunctionFormalParameters(pn))
+        return false;
+
+    if (!emitFunctionBody(funBody))
+        return false;
+
+    return true;
+}
+
+bool
+BytecodeEmitter::emitFunctionFormalParameters(ParseNode* pn)
+{
+    ParseNode* funBody = pn->last();
+    FunctionBox* funbox = sc->asFunctionBox();
+
+    bool hasDefaults = funbox->hasDefaults();
+    bool hasRest = funbox->function()->hasRest();
 
     uint16_t argSlot = 0;
     for (ParseNode* arg = pn->pn_head; arg != funBody; arg = arg->pn_next, argSlot++) {
@@ -7976,6 +8043,9 @@ BytecodeEmitter::emitFunctionFormalParametersAndBody(ParseNode *pn)
         MOZ_ASSERT_IF(isRest, !initializer);
 
         bool isDestructuring = !bindingElement->isKind(PNK_NAME);
+
+        // First push the RHS if there is a default expression or if it is
+        // rest.
 
         if (initializer) {
             // If we have an initializer, emit the initializer and assign it
@@ -8005,16 +8075,9 @@ BytecodeEmitter::emitFunctionFormalParametersAndBody(ParseNode *pn)
             if (!emit1(JSOP_REST))
                 return false;
             checkTypeSet(JSOP_REST);
-
-            // If there are defaults or if the rest parameter is destructured,
-            // leave the value on the stack as we'll need it below.
-            if (!hasDefaults && !isDestructuring) {
-                if (!emitArgOp(JSOP_SETARG, argSlot))
-                    return false;
-                if (!emit1(JSOP_POP))
-                    return false;
-            }
         }
+
+        // Initialize the parameter name.
 
         if (isDestructuring) {
             // If we had an initializer or the rest parameter, the value is
@@ -8040,29 +8103,17 @@ BytecodeEmitter::emitFunctionFormalParametersAndBody(ParseNode *pn)
                 return false;
             if (!emit1(JSOP_POP))
                 return false;
+        } else if (isRest) {
+            // The rest value is already on top of the stack.
+            auto nop = [](BytecodeEmitter*, const NameLocation&, bool) {
+                return true;
+            };
+
+            if (!emitInitializeName(bindingElement, nop))
+                return false;
+            if (!emit1(JSOP_POP))
+                return false;
         }
-    }
-
-    if (defaultsEmitterScope) {
-        // Manually record a note saying we're done processing
-        // parameters. Scope notes were designed for intra-function scopes,
-        // and the defaults scope is weird in that it encloses the function
-        // scope.
-        //
-        // This note helps JSScript::lookupScope find the right scope for pc
-        // values before the body of the function, which is used for direct
-        // eval (direct evals in parameter defaults always get their own var
-        // environment) and disassembly.
-        scopeNoteList.recordEnd(defaultsEmitterScope->noteIndex(), offset(), inPrologue());
-    }
-
-    if (!emitFunctionBody(funBody))
-        return false;
-
-    if (defaultsEmitterScope) {
-        if (!defaultsEmitterScope->leave(this))
-            return false;
-        defaultsEmitterScope.reset();
     }
 
     return true;
@@ -8094,43 +8145,6 @@ bool
 BytecodeEmitter::emitFunctionBody(ParseNode* funBody)
 {
     FunctionBox* funbox = sc->asFunctionBox();
-
-    TDZCheckCache tdzCache(this);
-    EmitterScope varEmitterScope(this);
-    if (!varEmitterScope.enterFunctionBody(this, funbox))
-        return false;
-
-    // After emitting default expressions for all parameters, copy over any
-    // formal parameters which have been redeclared as vars. For example, in
-    // the following, the var y in the body scope is 42:
-    //
-    //   function f(x, y = 42) { var y; }
-    //
-    if (funbox->hasDefaults()) {
-        EmitterScope* defaultsScope = varEmitterScope.enclosingInFrame();
-        for (BindingIter bi(*sc->asFunctionBox()->defaultsScopeBindings, 0); bi; bi++) {
-            JSAtom* name = bi.name();
-
-            // There may not be a var binding of the same name.
-            Maybe<NameLocation> varLoc = locationOfNameBoundInScope(name, &varEmitterScope);
-            if (!varLoc || varLoc->bindingKind() != BindingKind::Var)
-                continue;
-
-            NameLocation defaultsLoc = *locationOfNameBoundInScope(name, defaultsScope);
-
-            auto emitRhs = [name, defaultsLoc](BytecodeEmitter* bce, const NameLocation&, bool) {
-                return bce->emitGetNameAtLocation(name, defaultsLoc);
-            };
-
-            if (!emitInitializeName(name, emitRhs))
-                return false;
-            if (!emit1(JSOP_POP))
-                return false;
-        }
-    } else {
-        if (!emitInitializeFunctionSpecialNames())
-            return false;
-    }
 
     if (!emitTree(funBody))
         return false;

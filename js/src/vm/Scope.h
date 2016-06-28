@@ -331,7 +331,7 @@ class LexicalScope : public Scope
 
     // Returns an empty shape for extensible global and non-syntactic lexical
     // scopes.
-    static Shape* getEmptyExtensibleEnvironmentShape(JSContext* cx);
+    static Shape* getEmptyExtensibleEnvironmentShape(ExclusiveContext* cx);
 };
 
 template <>
@@ -464,7 +464,7 @@ class FunctionScope : public Scope
 
     size_t sizeOfData(mozilla::MallocSizeOf mallocSizeOf) const;
 
-    static Shape* getEmptyEnvironmentShape(JSContext* cx);
+    static Shape* getEmptyEnvironmentShape(ExclusiveContext* cx);
 };
 
 //
@@ -646,6 +646,8 @@ class EvalScope : public Scope
     }
 
     size_t sizeOfData(mozilla::MallocSizeOf mallocSizeOf) const;
+
+    static Shape* getEmptyEnvironmentShape(ExclusiveContext* cx);
 };
 
 template <>

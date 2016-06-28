@@ -267,7 +267,7 @@ class CallObject : public VarEnvironmentObject
                                          HandleObject enclosing);
 
     static CallObject* createForFunction(JSContext* cx, AbstractFramePtr frame);
-    static CallObject* createForStrictEval(JSContext* cx, AbstractFramePtr frame);
+    static CallObject* createForEval(JSContext* cx, AbstractFramePtr frame);
     static CallObject* createHollowForDebug(JSContext* cx, HandleFunction callee);
 
     /* True if this is for a strict mode eval frame. */

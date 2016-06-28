@@ -290,7 +290,7 @@ ContainsHoistedDeclaration(ExclusiveContext* cx, ParseNode* node, bool* result)
       }
 
       case PNK_LEXICALSCOPE: {
-        MOZ_ASSERT(node->isArity(PN_NAME));
+        MOZ_ASSERT(node->isArity(PN_SCOPE));
         ParseNode* expr = node->pn_expr;
 
         if (expr->isKind(PNK_FOR))

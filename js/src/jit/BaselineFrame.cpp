@@ -106,11 +106,9 @@ BaselineFrame::copyRawFrameSlots(MutableHandle<GCVector<Value>> vec) const
 }
 
 bool
-BaselineFrame::initStrictEvalEnvironmentObjects(JSContext* cx)
+BaselineFrame::initEvalEnvironmentObjects(JSContext* cx)
 {
-    MOZ_ASSERT(isStrictEvalFrame());
-
-    CallObject* callobj = CallObject::createForStrictEval(cx, this);
+    CallObject* callobj = CallObject::createForEval(cx, this);
     if (!callobj)
         return false;
 

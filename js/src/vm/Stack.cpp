@@ -190,8 +190,8 @@ InterpreterFrame::prologue(JSContext* cx)
     MOZ_ASSERT(cx->interpreterRegs().pc == script->code());
 
     if (isEvalFrame()) {
-        if (script->strict()) {
-            CallObject* callobj = CallObject::createForStrictEval(cx, this);
+        if (script->strict() || script->enclosingScope()->kind() == ScopeKind::ParameterDefaults) {
+            CallObject* callobj = CallObject::createForEval(cx, this);
             if (!callobj)
                 return false;
             pushOnEnvironmentChain(*callobj);

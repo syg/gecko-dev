@@ -44,7 +44,7 @@ IsEvalCacheCandidate(JSScript* script)
     // and/or call scope by reusing the previous eval's script.
     return script->isDirectEvalInFunction() &&
            !script->hasSingletons() &&
-           script->objects()->length == 0;
+           !script->hasObjects();
 }
 
 /* static */ HashNumber

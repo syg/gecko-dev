@@ -844,12 +844,13 @@ InitGlobalOrEvalEnvironmentObjects(JSContext* cx, BaselineFrame* frame)
     RootedObject varObj(cx, BindVar(cx, envChain));
 
     if (script->isForEval()) {
-        // Strict eval needs its own call object.
+        // Strict eval and eval in parameter default expressions needs their
+        // own call objects.
         //
         // Non-strict eval may introduce 'var' bindings that conflict with
         // lexical bindings in an enclosing lexical scope.
-        if (script->strict()) {
-            if (!frame->initStrictEvalEnvironmentObjects(cx))
+        if (script->strict() || script->enclosingScope()->kind() == ScopeKind::ParameterDefaults) {
+            if (!frame->initEvalEnvironmentObjects(cx))
                 return false;
         } else {
             if (!CheckEvalDeclarationConflicts(cx, script, envChain, varObj))

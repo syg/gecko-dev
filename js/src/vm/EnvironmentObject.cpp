@@ -175,9 +175,7 @@ CallObject*
 CallObject::createTemplateObject(JSContext* cx, HandleScript script, HandleObject enclosing,
                                  gc::InitialHeap heap)
 {
-    RootedScope scope(cx, script->callObjScope());
-    MOZ_ASSERT(scope);
-    RootedShape shape(cx, scope->environmentShape());
+    RootedShape shape(cx, script->callObjScope()->environmentShape());
     MOZ_ASSERT(shape->getObjectClass() == &class_);
 
     RootedObjectGroup group(cx, ObjectGroup::defaultNewGroup(cx, &class_, TaggedProto(nullptr)));
@@ -261,9 +259,13 @@ CallObject::createForFunction(JSContext* cx, AbstractFramePtr frame)
 }
 
 CallObject*
-CallObject::createForStrictEval(JSContext* cx, AbstractFramePtr frame)
+CallObject::createForEval(JSContext* cx, AbstractFramePtr frame)
 {
-    MOZ_ASSERT(frame.isStrictEvalFrame());
+    // Strict eval and evals in parameter default expressions always get their
+    // own var environments.
+    MOZ_ASSERT(frame.isEvalFrame());
+    MOZ_ASSERT_IF(!frame.isStrictEvalFrame(),
+                  frame.script()->enclosingScope()->kind() == ScopeKind::ParameterDefaults);
     MOZ_ASSERT_IF(frame.isInterpreterFrame(), cx->interpreterFrame() == frame.asInterpreterFrame());
     MOZ_ASSERT_IF(frame.isInterpreterFrame(), cx->interpreterRegs().pc == frame.script()->code());
 
@@ -3024,10 +3026,7 @@ CheckVarNameConflictsInEnv(JSContext* cx, HandleScript script, HandleObject obj)
         return true;
     }
 
-    if (env->is<LexicalEnvironmentObject>() &&
-        env->as<LexicalEnvironmentObject>().isSyntactic() &&
-        env->as<LexicalEnvironmentObject>().scope().kind() == ScopeKind::Catch)
-    {
+    if (env->isSyntactic() && !env->isGlobal() && env->scope().kind() == ScopeKind::Catch) {
         // Annex B.3.5 says 'var' declarations with the same name as catch
         // parameters are allowed.
         return true;

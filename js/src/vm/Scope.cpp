@@ -375,7 +375,7 @@ LexicalScope::create(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
 }
 
 /* static */ Shape*
-LexicalScope::getEmptyExtensibleEnvironmentShape(JSContext* cx)
+LexicalScope::getEmptyExtensibleEnvironmentShape(ExclusiveContext* cx)
 {
     const Class* cls = &LexicalEnvironmentObject::class_;
     return EmptyEnvironmentShape(cx, cls, JSSLOT_FREE(cls), BaseShape::DELEGATE);
@@ -496,7 +496,7 @@ FunctionScope::script() const
 }
 
 /* static */ Shape*
-FunctionScope::getEmptyEnvironmentShape(JSContext* cx)
+FunctionScope::getEmptyEnvironmentShape(ExclusiveContext* cx)
 {
     const Class* cls = &CallObject::class_;
     return EmptyEnvironmentShape(cx, cls, JSSLOT_FREE(cls),
@@ -643,6 +643,13 @@ EvalScope::create(ExclusiveContext* cx, ScopeKind scopeKind, BindingData* data,
         copy = NewEmptyScopeData<BindingData>(cx, sizeOfBindingData(1));
     }
 
+    // Direct eval in parameter defaults always get their own var environment.
+    if (enclosing->kind() == ScopeKind::ParameterDefaults && !envShape) {
+        envShape = EvalScope::getEmptyEnvironmentShape(cx);
+        if (!envShape)
+            return nullptr;
+    }
+
     if (!copy)
         return nullptr;
 
@@ -676,6 +683,14 @@ EvalScope::nearestVarScopeForDirectEval(Scope* scope)
         }
     }
     return nullptr;
+}
+
+/* static */ Shape*
+EvalScope::getEmptyEnvironmentShape(ExclusiveContext* cx)
+{
+    const Class* cls = &CallObject::class_;
+    return EmptyEnvironmentShape(cx, cls, JSSLOT_FREE(cls),
+                                 BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE);
 }
 
 template <XDRMode mode>
@@ -725,6 +740,7 @@ ScopeIter::hasSyntacticEnvironment() const
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
       case ScopeKind::DeclEnv:
+      case ScopeKind::Eval:
       case ScopeKind::StrictEval:
         return !!environmentShape();
 
@@ -733,7 +749,6 @@ ScopeIter::hasSyntacticEnvironment() const
       case ScopeKind::Module:
         return true;
 
-      case ScopeKind::Eval:
       case ScopeKind::NonSyntactic:
         return false;
     }
