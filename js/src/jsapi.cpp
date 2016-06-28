@@ -4253,7 +4253,7 @@ CompileFunction(JSContext* cx, const ReadOnlyCompileOptions& optionsArg,
     // Make sure the static scope chain matches up when we have a
     // non-syntactic scope.
     MOZ_ASSERT_IF(!IsGlobalLexicalEnvironment(enclosingEnv),
-                  enclosingScope->hasEnclosing(ScopeKind::NonSyntactic));
+                  enclosingScope->hasOnChain(ScopeKind::NonSyntactic));
 
     if (!frontend::CompileFunctionBody(cx, fun, optionsArg, formals, srcBuf, enclosingScope))
         return false;

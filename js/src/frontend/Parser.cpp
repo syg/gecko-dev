@@ -1362,7 +1362,14 @@ Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope, bool 
             MOZ_ASSERT_IF(!hasDefaults,
                           p->value()->kind() == DeclarationKind::PositionalFormalParameter ||
                           DeclarationKindIsVar(p->value()->kind()));
-            bindName = BindingName(name, closeOverAllBindings || (p && p->value()->closedOver()));
+
+            // Do not consider any positional formal parameters closed over if
+            // there are parameter defaults. It is the binding in the defaults
+            // scope that is closed over instead.
+            bool closedOver = closeOverAllBindings || (p && p->value()->closedOver());
+            if (hasDefaults)
+                closedOver = false;
+            bindName = BindingName(name, closedOver);
         }
 
         if (!positionalFormals.append(bindName))

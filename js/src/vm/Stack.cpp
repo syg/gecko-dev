@@ -45,7 +45,7 @@ InterpreterFrame::initExecuteFrame(JSContext* cx, HandleScript script,
     if (script->isDirectEvalInFunction()) {
         if (evalInFramePrev) {
             if (newTarget.isNull() &&
-                evalInFramePrev.script()->bodyScope()->hasEnclosing(ScopeKind::Function))
+                evalInFramePrev.script()->bodyScope()->hasOnChain(ScopeKind::Function))
             {
                 newTarget = evalInFramePrev.newTarget();
             }
@@ -53,7 +53,7 @@ InterpreterFrame::initExecuteFrame(JSContext* cx, HandleScript script,
             FrameIter iter(cx);
             MOZ_ASSERT(!iter.isWasm());
             if (newTarget.isNull() &&
-                iter.script()->bodyScope()->hasEnclosing(ScopeKind::Function))
+                iter.script()->bodyScope()->hasOnChain(ScopeKind::Function))
             {
                 newTarget = iter.newTarget();
             }

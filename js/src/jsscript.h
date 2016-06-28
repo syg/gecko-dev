@@ -1388,7 +1388,7 @@ class JSScript : public js::gc::TenuredCell
     bool isDirectEvalInFunction() const {
         if (!isForEval())
             return false;
-        return bodyScope()->hasEnclosing(js::ScopeKind::Function);
+        return bodyScope()->hasOnChain(js::ScopeKind::Function);
     }
 
     /*

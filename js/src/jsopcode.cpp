@@ -1317,12 +1317,16 @@ ExpressionDecompiler::getArg(unsigned slot)
     MOZ_ASSERT(slot < script->numArgs());
 
     for (PositionalFormalParameterIter fi(script); fi; fi++) {
-        if (fi.argumentSlot() == slot)
-            return fi.name();
+        if (fi.argumentSlot() == slot) {
+            if (!fi.isDestructured())
+                return fi.name();
+
+            // Destructured arguments have no single binding name.
+            return Atomize(cx, "destructured argument", strlen("destructured argument"));
+        }
     }
 
-    // If there's no binding name, it's a destructured argument.
-    return Atomize(cx, "destructured argument", strlen("destructured argument"));
+    MOZ_CRASH("No binding");
 }
 
 JSAtom*

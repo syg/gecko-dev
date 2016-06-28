@@ -7317,9 +7317,12 @@ DebuggerArguments_getArg(JSContext* cx, unsigned argc, Value* vp)
                 return false;
         }
         if (unsigned(i) < frame.numFormalArgs()) {
-            for (ClosedOverArgumentSlotIter fi(script); fi; fi++) {
+            for (PositionalFormalParameterIter fi(script); fi; fi++) {
                 if (fi.argumentSlot() == unsigned(i)) {
-                    arg = frame.callObj().aliasedBinding(fi);
+                    if (fi.closedOver())
+                        arg = frame.callObj().aliasedBinding(fi);
+                    else
+                        arg = frame.unaliasedActual(i, DONT_CHECK_ALIASING);
                     break;
                 }
             }
@@ -7563,8 +7566,11 @@ EvaluateInEnv(JSContext* cx, Handle<Env*> env, AbstractFramePtr frame,
         scopeKind = ScopeKind::NonSyntactic;
 
     if (frame) {
-        RootedScope emptyGlobalScope(cx, &cx->global()->emptyGlobalScope());
-        script = frontend::CompileEvalScript(cx, &cx->tempLifoAlloc(), env, emptyGlobalScope,
+        MOZ_ASSERT(scopeKind == ScopeKind::NonSyntactic);
+        RootedScope scope(cx, GlobalScope::createEmpty(cx, ScopeKind::NonSyntactic));
+        if (!scope)
+            return false;
+        script = frontend::CompileEvalScript(cx, &cx->tempLifoAlloc(), env, scope,
                                              options, srcBuf);
         if (script)
             script->setActiveEval();

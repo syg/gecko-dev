@@ -2524,7 +2524,9 @@ JSScript::initFromFunctionBox(ExclusiveContext* cx, HandleScript script,
     script->isGeneratorExp_ = funbox->inGenexpLambda;
     script->setGeneratorKind(funbox->generatorKind());
 
-    ClosedOverArgumentSlotIter fi(script);
+    PositionalFormalParameterIter fi(script);
+    while (fi && !fi.closedOver())
+        fi++;
     script->funHasAnyAliasedFormal_ = !!fi;
 
     script->setHasInnerFunctions(funbox->hasInnerFunctions());
@@ -2618,7 +2620,7 @@ JSScript::fullyInitFromEmitter(ExclusiveContext* cx, HandleScript script, Byteco
     script->nfixed_ = bce->maxFixedSlots;
     script->nslots_ = nslots;
     script->bodyScopeIndex_ = bce->bodyScopeIndex;
-    script->hasNonSyntacticScope_ = bce->outermostScope()->hasEnclosing(ScopeKind::NonSyntactic);
+    script->hasNonSyntacticScope_ = bce->outermostScope()->hasOnChain(ScopeKind::NonSyntactic);
 
     if (bce->sc->isFunctionBox())
         initFromFunctionBox(cx, script, bce->sc->asFunctionBox());
@@ -3169,7 +3171,7 @@ js::detail::CopyScript(JSContext* cx, HandleScript src, HandleScript dst,
     dst->cloneHasArray(src);
     dst->strict_ = src->strict();
     dst->explicitUseStrict_ = src->explicitUseStrict();
-    dst->hasNonSyntacticScope_ = scopes[0]->hasEnclosing(ScopeKind::NonSyntactic);
+    dst->hasNonSyntacticScope_ = scopes[0]->hasOnChain(ScopeKind::NonSyntactic);
     dst->bindingsAccessedDynamically_ = src->bindingsAccessedDynamically();
     dst->funHasExtensibleScope_ = src->funHasExtensibleScope();
     dst->funHasAnyAliasedFormal_ = src->funHasAnyAliasedFormal();

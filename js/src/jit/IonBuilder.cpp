@@ -6259,7 +6259,10 @@ IonBuilder::createCallObject(MDefinition* callee, MDefinition* env)
 
     // Initialize argument slots.
     MSlots* slots = nullptr;
-    for (ClosedOverArgumentSlotIter fi(script()); fi; fi++) {
+    for (PositionalFormalParameterIter fi(script()); fi; fi++) {
+        if (!fi.closedOver())
+            continue;
+
         unsigned slot = fi.location().slot();
         unsigned formal = fi.argumentSlot();
         MDefinition* param = current->getSlot(info().argSlotUnchecked(formal));

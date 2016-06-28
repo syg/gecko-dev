@@ -668,8 +668,11 @@ EvalScope::create(ExclusiveContext* cx, ScopeKind scopeKind, BindingData* data,
         copy = NewEmptyScopeData<BindingData>(cx, sizeOfBindingData(1));
     }
 
-    // Direct eval in parameter defaults always get their own var environment.
-    if (enclosing->kind() == ScopeKind::ParameterDefaults && !envShape) {
+    // Strict eval and direct eval in parameter defaults always get their own
+    // var environment even if there are no bindings.
+    if (!envShape && (scopeKind == ScopeKind::StrictEval ||
+                      enclosing->kind() == ScopeKind::ParameterDefaults))
+    {
         envShape = EvalScope::getEmptyEnvironmentShape(cx);
         if (!envShape)
             return nullptr;
@@ -865,12 +868,14 @@ BindingIter::init(EvalScope::BindingData& data, bool strict)
 }
 
 PositionalFormalParameterIter::PositionalFormalParameterIter(JSScript* script)
-  : BindingIter(script)
+  : BindingIter(script),
+    hasDefaults_(script->hasDefaults())
 {
     // Reinit with 0 ignoreFlags, i.e., iterate over all positional
     // parameters.
     if (script->bodyScope()->is<FunctionScope>())
         init(script->bodyScope()->as<FunctionScope>().bindingData(), 0, /* ignoreFlags = */ 0);
+    settle();
 }
 
 void

@@ -226,16 +226,16 @@ class Scope : public js::gc::TenuredCell
     uint32_t environmentChainLength() const;
 
     template <typename T>
-    bool hasEnclosing() const {
-        for (Scope* it = enclosing(); it; it = it->enclosing()) {
+    bool hasOnChain() const {
+        for (const Scope* it = this; it; it = it->enclosing()) {
             if (it->is<T>())
                 return true;
         }
         return false;
     }
 
-    bool hasEnclosing(ScopeKind kind) const {
-        for (Scope* it = enclosing(); it; it = it->enclosing()) {
+    bool hasOnChain(ScopeKind kind) const {
+        for (const Scope* it = this; it; it = it->enclosing()) {
             if (it->kind() == kind)
                 return true;
         }
@@ -914,64 +914,35 @@ class BindingIter
 void DumpBindings(JSContext* cx, Scope* scope);
 
 //
-// A refinement of BindingIter that only iterates over closed over argument
-// slots, i.e., positional parameter names that are closed over.
+// A refinement BindingIter that only iterates over positional formal
+// parameters of a function.
 //
-// For example, this would iterate over {a, b} in the following function:
-//
-//   function f(a, [c], b, d) {
-//     return () => {
-//       a++;
-//       b++;
-//     };
-//   }
-//
-class ClosedOverArgumentSlotIter : public BindingIter
+class PositionalFormalParameterIter : public BindingIter
 {
+    bool hasDefaults_;
+
     void settle() {
-        while (!done() && hasArgumentSlot() && !closedOver())
-            BindingIter::operator++(1);
-        if (!done() && !hasArgumentSlot())
+        if (index_ >= nonPositionalFormalStart_)
             index_ = length_;
     }
 
   public:
-    explicit ClosedOverArgumentSlotIter(JSScript* script)
-      : BindingIter(script)
-    {
-        settle();
-    }
+    explicit PositionalFormalParameterIter(JSScript* script);
 
     void operator++(int) {
         BindingIter::operator++(1);
         settle();
     }
-};
-
-//
-// A refinement BindingIter that only iterates over formal parameters of a
-// function. Do not use this to ask for binding locations due to complications
-// with the parameter defaults scope. It is used for name iteration only.
-//
-class PositionalFormalParameterIter : public BindingIter
-{
-  public:
-    explicit PositionalFormalParameterIter(JSScript* script);
 
     bool isDestructured() const {
         return !name();
     }
 
     BindingLocation location() const {
-        MOZ_CRASH("Do not use PositionalFormalParameterIter to compute frame/environment layout");
-    }
-
-    uint32_t nextFrameSlot() const {
-        MOZ_CRASH("Do not use PositionalFormalParameterIter to compute frame/environment layout");
-    }
-
-    uint32_t nextEnvironmentSlot() const {
-        MOZ_CRASH("Do not use PositionalFormalParameterIter to compute frame/environment layout");
+        // The locations reported by this iter are wrong when the script has a
+        // defaults scope.
+        MOZ_ASSERT(!hasDefaults_);
+        return BindingIter::location();
     }
 };
 

@@ -2333,7 +2333,7 @@ js::CloneFunctionAndScript(JSContext* cx, HandleFunction fun, HandleObject enclo
     while (IsSyntacticEnvironment(terminatingEnv))
         terminatingEnv = terminatingEnv->enclosingEnvironment();
     MOZ_ASSERT_IF(!terminatingEnv->is<GlobalObject>(),
-                  newScope->hasEnclosing(ScopeKind::NonSyntactic));
+                  newScope->hasOnChain(ScopeKind::NonSyntactic));
 #endif
 
     if (clone->isInterpreted()) {

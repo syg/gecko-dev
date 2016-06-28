@@ -249,7 +249,9 @@ CallObject::createForFunction(JSContext* cx, AbstractFramePtr frame)
         // object manually. If there are defaults, bytecode is generated to do
         // the copying.
 
-        for (ClosedOverArgumentSlotIter fi(frame.script()); fi; fi++) {
+        for (PositionalFormalParameterIter fi(frame.script()); fi; fi++) {
+            if (!fi.closedOver())
+                continue;
             callobj->setAliasedBinding(cx, fi, frame.unaliasedFormal(fi.argumentSlot(),
                                                                      DONT_CHECK_ALIASING));
         }
