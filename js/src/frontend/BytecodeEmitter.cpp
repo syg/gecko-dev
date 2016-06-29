@@ -6135,6 +6135,8 @@ BytecodeEmitter::emitFunction(ParseNode* pn, bool needsProto)
             MOZ_ASSERT(lhsLoc && lhsLoc->bindingKind() == BindingKind::Var);
             if (!emitSetOrInitializeNameAtLocation(name, *lhsLoc, emitRhs, false))
                 return false;
+            if (!emit1(JSOP_POP))
+                return false;
         }
 
         MOZ_ASSERT_IF(fun->hasScript(), fun->nonLazyScript());

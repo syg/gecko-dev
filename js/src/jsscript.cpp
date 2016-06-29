@@ -3555,8 +3555,8 @@ JSScript::traceChildren(JSTracer* trc)
             TraceNullableEdge(trc, &atoms[i], "atom");
     }
 
-    ScopeArray* scopearray = scopes();
-    TraceRange(trc, scopearray->length, scopearray->vector, "scopes");
+    if (ScopeArray* scopearray = scopes())
+        TraceRange(trc, scopearray->length, scopearray->vector, "scopes");
 
     if (hasConsts()) {
         ConstArray* constarray = consts();
@@ -3598,7 +3598,7 @@ JSScript::calculateLiveFixed(jsbytecode* pc)
     size_t nlivefixed = nfixedvars();
 
     if (nfixed() != nlivefixed) {
-        Scope* scope = getScope(pc);
+        Scope* scope = lookupScope(pc);
         if (scope)
             scope = MaybeForwarded(scope);
 

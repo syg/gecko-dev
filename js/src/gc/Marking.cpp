@@ -1627,6 +1627,8 @@ GCMarker::processMarkStackTop(SliceBudget& budget)
             }
         } else if (v.isSymbol()) {
             traverseEdge(obj, v.toSymbol());
+        } else if (v.isPrivateGCThing()) {
+            traverseEdge(obj, v.toGCCellPtr());
         }
     }
     return;

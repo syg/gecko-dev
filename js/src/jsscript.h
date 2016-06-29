@@ -1586,7 +1586,7 @@ class JSScript : public js::gc::TenuredCell
         // index. To search through ScopeNotes to look for a Scope using pc,
         // use lookupScope.
         MOZ_ASSERT(containsPC(pc) && containsPC(pc + sizeof(uint32_t)));
-        MOZ_ASSERT(JSOp(*pc) == JSOP_PUSHLEXICALENV || JSOp(*pc) == JSOP_ENTERWITH,
+        MOZ_ASSERT(js::JOF_OPTYPE(JSOp(*pc)) == JOF_SCOPE,
                    "Did you mean to use lookupScope(pc)?");
         return getScope(GET_UINT32_INDEX(pc));
     }
