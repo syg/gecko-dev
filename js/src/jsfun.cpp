@@ -1941,14 +1941,10 @@ FunctionConstructor(JSContext* cx, unsigned argc, Value* vp, GeneratorKind gener
     RootedObject globalLexical(cx, &global->lexicalEnvironment());
     RootedFunction fun(cx, NewFunctionWithProto(cx, nullptr, 0,
                                                 JSFunction::INTERPRETED_LAMBDA, globalLexical,
-                                                nullptr, proto,
+                                                anonymousAtom, proto,
                                                 AllocKind::FUNCTION, TenuredObject));
     if (!fun)
         return false;
-
-    // Set a guessed atom to prevent this function from appearing as a named
-    // lambda.
-    fun->setGuessedAtom(anonymousAtom);
 
     if (!JSFunction::setTypeForScriptedFunction(cx, fun))
         return false;
@@ -2079,13 +2075,14 @@ JSFunction::needsNamedLambdaEnvironment() const
 {
     MOZ_ASSERT(!isInterpretedLazy());
 
-    if (isNative())
-        return false;
-
     if (!isNamedLambda())
         return false;
 
-    return nonLazyScript()->namedLambdaScope()->hasEnvironment();
+    LexicalScope* scope = nonLazyScript()->maybeNamedLambdaScope();
+    if (!scope)
+        return false;
+
+    return scope->hasEnvironment();
 }
 
 JSFunction*

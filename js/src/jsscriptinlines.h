@@ -146,10 +146,19 @@ JSScript::global() const
 }
 
 inline js::LexicalScope*
-JSScript::namedLambdaScope() const
+JSScript::maybeNamedLambdaScope() const
 {
+    // Dynamically created Functions via the 'new Function' are considered named lambdas but they do not have the named lambda scope of textually-created named lambdas.
     MOZ_ASSERT(functionNonDelazifying()->isNamedLambda());
-    return &outermostScope()->as<js::LexicalScope>();
+    js::Scope* scope = outermostScope();
+    if (scope->kind() == js::ScopeKind::NamedLambda ||
+        scope->kind() == js::ScopeKind::StrictNamedLambda)
+    {
+        MOZ_ASSERT_IF(!strict(), scope->kind() == js::ScopeKind::NamedLambda);
+        MOZ_ASSERT_IF(strict(), scope->kind() == js::ScopeKind::StrictNamedLambda);
+        return &scope->as<js::LexicalScope>();
+    }
+    return nullptr;
 }
 
 inline JSPrincipals*

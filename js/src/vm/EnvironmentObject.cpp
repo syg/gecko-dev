@@ -942,12 +942,12 @@ const Class LexicalEnvironmentObject::class_ = {
 };
 
 /* static */ NamedLambdaObject*
-NamedLambdaObject::create(JSContext* cx, HandleFunction canonicalFun, HandleObject enclosing,
+NamedLambdaObject::create(JSContext* cx, HandleFunction callee, HandleObject enclosing,
                           gc::InitialHeap heap)
 {
-    MOZ_ASSERT(canonicalFun->isNamedLambda());
-    RootedScope scope(cx, canonicalFun->nonLazyScript()->namedLambdaScope());
-    MOZ_ASSERT(scope->environmentShape());
+    MOZ_ASSERT(callee->isNamedLambda());
+    RootedScope scope(cx, callee->nonLazyScript()->maybeNamedLambdaScope());
+    MOZ_ASSERT(scope && scope->environmentShape());
     MOZ_ASSERT(scope->environmentShape()->slot() == lambdaSlot());
     MOZ_ASSERT(!scope->environmentShape()->writable());
 
@@ -958,16 +958,20 @@ NamedLambdaObject::create(JSContext* cx, HandleFunction canonicalFun, HandleObje
     MOZ_ASSERT(bi.done());
 #endif
 
-    return static_cast<NamedLambdaObject*>(
+    LexicalEnvironmentObject* obj =
         LexicalEnvironmentObject::createTemplateObject(cx, scope.as<LexicalScope>(),
-                                                       enclosing, gc::TenuredHeap));
+                                                       enclosing, heap);
+    if (!obj)
+        return nullptr;
+
+    obj->initFixedSlot(lambdaSlot(), ObjectValue(*callee));
+    return static_cast<NamedLambdaObject*>(obj);
 }
 
 /* static */ NamedLambdaObject*
-NamedLambdaObject::createTemplateObject(JSContext* cx, HandleFunction canonicalFun,
-                                        gc::InitialHeap heap)
+NamedLambdaObject::createTemplateObject(JSContext* cx, HandleFunction callee, gc::InitialHeap heap)
 {
-    return create(cx, canonicalFun, nullptr, heap);
+    return create(cx, callee, nullptr, heap);
 }
 
 /* static */ NamedLambdaObject*

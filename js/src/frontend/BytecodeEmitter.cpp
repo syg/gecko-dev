@@ -2598,7 +2598,7 @@ BytecodeEmitter::emitGetNameAtLocation(JSAtom* name, const NameLocation& loc, bo
         break;
 
       case NameLocation::Kind::NamedLambdaCallee:
-        if (!emitAtomOp(name, JSOP_CALLEE))
+        if (!emit1(JSOP_CALLEE))
             return false;
         break;
 

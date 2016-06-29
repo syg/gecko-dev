@@ -445,11 +445,11 @@ class LexicalEnvironmentObject : public EnvironmentObject
 
 class NamedLambdaObject : public LexicalEnvironmentObject
 {
-    static NamedLambdaObject* create(JSContext* cx, HandleFunction canonicalFun,
+    static NamedLambdaObject* create(JSContext* cx, HandleFunction callee,
                                      HandleObject enclosing, gc::InitialHeap heap);
 
   public:
-    static NamedLambdaObject* createTemplateObject(JSContext* cx, HandleFunction canonicalFun,
+    static NamedLambdaObject* createTemplateObject(JSContext* cx, HandleFunction callee,
                                                    gc::InitialHeap heap);
 
     static NamedLambdaObject* create(JSContext* cx, AbstractFramePtr frame);
