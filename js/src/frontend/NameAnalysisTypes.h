@@ -262,6 +262,7 @@ class NameLocation
           case BindingLocation::Kind::NamedLambdaCallee:
             return NamedLambdaCallee();
         }
+        MOZ_CRASH("Bad BindingKind");
     }
 
     bool operator==(const NameLocation& other) const {

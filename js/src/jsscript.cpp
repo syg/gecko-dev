@@ -779,14 +779,13 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope, HandleScrip
                 }
 
                 funEnclosingScopeIndex = FindScopeIndex(script, *funEnclosingScope);
-                MOZ_ASSERT(funEnclosingScopeIndex < i);
             }
 
             if (!xdr->codeUint32(&funEnclosingScopeIndex))
                 return false;
 
             if (mode == XDR_DECODE) {
-                MOZ_ASSERT(funEnclosingScopeIndex < i);
+                MOZ_ASSERT(funEnclosingScopeIndex < script->scopes()->length);
                 funEnclosingScope = script->scopes()->vector[funEnclosingScopeIndex];
             }
 
