@@ -1048,6 +1048,7 @@ BytecodeEmitter::EmitterScope::enterWith(BytecodeEmitter* bce)
         return false;
 
     // 'with' make all accesses dynamic and unanalyzable.
+    hasEnvironment_ = true;
     fallbackFreeNameLocation_ = Some(NameLocation::Dynamic());
 
     auto createScope = [](ExclusiveContext* cx, HandleScope enclosing) {

@@ -807,7 +807,9 @@ BindingIter::BindingIter(Scope* scope)
         init(scope->as<LexicalScope>().bindingData(), LOCALNO_LIMIT, IsNamedLambda);
         break;
       case ScopeKind::With:
-        MOZ_CRASH("With scopes do not have bindings");
+        // With scopes do not have bindings.
+        index_ = length_ = 0;
+        MOZ_ASSERT(done());
         break;
       case ScopeKind::Function: {
         uint8_t ignoreFlags = IgnoreDestructuredFormalParameters;
