@@ -941,12 +941,12 @@ const Class LexicalEnvironmentObject::class_ = {
     JS_NULL_OBJECT_OPS
 };
 
-/* static */ DeclEnvObject*
-DeclEnvObject::create(JSContext* cx, HandleFunction canonicalFun, HandleObject enclosing,
-                      gc::InitialHeap heap)
+/* static */ NamedLambdaObject*
+NamedLambdaObject::create(JSContext* cx, HandleFunction canonicalFun, HandleObject enclosing,
+                          gc::InitialHeap heap)
 {
     MOZ_ASSERT(canonicalFun->isNamedLambda());
-    RootedScope scope(cx, canonicalFun->nonLazyScript()->declEnvScope());
+    RootedScope scope(cx, canonicalFun->nonLazyScript()->namedLambdaScope());
     MOZ_ASSERT(scope->environmentShape());
     MOZ_ASSERT(scope->environmentShape()->slot() == lambdaSlot());
     MOZ_ASSERT(!scope->environmentShape()->writable());
@@ -958,20 +958,20 @@ DeclEnvObject::create(JSContext* cx, HandleFunction canonicalFun, HandleObject e
     MOZ_ASSERT(bi.done());
 #endif
 
-    return static_cast<DeclEnvObject*>(
+    return static_cast<NamedLambdaObject*>(
         LexicalEnvironmentObject::createTemplateObject(cx, scope.as<LexicalScope>(),
                                                        enclosing, gc::TenuredHeap));
 }
 
-/* static */ DeclEnvObject*
-DeclEnvObject::createTemplateObject(JSContext* cx, HandleFunction canonicalFun,
-                                    gc::InitialHeap heap)
+/* static */ NamedLambdaObject*
+NamedLambdaObject::createTemplateObject(JSContext* cx, HandleFunction canonicalFun,
+                                        gc::InitialHeap heap)
 {
     return create(cx, canonicalFun, nullptr, heap);
 }
 
-/* static */ DeclEnvObject*
-DeclEnvObject::create(JSContext* cx, AbstractFramePtr frame)
+/* static */ NamedLambdaObject*
+NamedLambdaObject::create(JSContext* cx, AbstractFramePtr frame)
 {
     RootedFunction fun(cx, frame.callee());
     RootedObject enclosing(cx, frame.environmentChain());
@@ -979,7 +979,7 @@ DeclEnvObject::create(JSContext* cx, AbstractFramePtr frame)
 }
 
 /* static */ size_t
-DeclEnvObject::lambdaSlot()
+NamedLambdaObject::lambdaSlot()
 {
     // Decl env environments have exactly one name.
     return JSSLOT_FREE(&LexicalEnvironmentObject::class_);
@@ -1081,7 +1081,7 @@ const Class RuntimeLexicalErrorObject::class_ = {
 
 /*****************************************************************************/
 
-// Any name atom for a function which will be added as a DeclEnv object to the
+// Any name atom for a function which will be added as a NamedLambda object to the
 // scope chain above call objects for fun.
 static inline JSAtom*
 CallObjectLambdaName(JSFunction& fun)
@@ -3077,8 +3077,8 @@ js::InitExtraFunctionEnvironmentObjects(JSContext* cx, AbstractFramePtr frame)
     RootedFunction callee(cx, frame.callee());
 
     // Named lambdas may have an environment that holds itself for recursion.
-    if (callee->needsDeclEnvObject()) {
-        DeclEnvObject* declEnv = DeclEnvObject::create(cx, frame);
+    if (callee->needsNamedLambdaEnvironment()) {
+        NamedLambdaObject* declEnv = NamedLambdaObject::create(cx, frame);
         if (!declEnv)
             return false;
         frame.pushOnEnvironmentChain(*declEnv);

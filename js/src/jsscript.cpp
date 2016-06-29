@@ -698,7 +698,8 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope, HandleScrip
               case ScopeKind::ParameterDefaults:
               case ScopeKind::Lexical:
               case ScopeKind::Catch:
-              case ScopeKind::DeclEnv:
+              case ScopeKind::NamedLambda:
+              case ScopeKind::StrictNamedLambda:
                 if (!LexicalScope::XDR(xdr, scopeKind, enclosing, &scope))
                     return false;
                 break;

@@ -200,7 +200,7 @@ class CodeGenerator : public CodeGeneratorSpecific
     void visitNewTypedObject(LNewTypedObject* lir);
     void visitSimdBox(LSimdBox* lir);
     void visitSimdUnbox(LSimdUnbox* lir);
-    void visitNewDeclEnvObject(LNewDeclEnvObject* lir);
+    void visitNewNamedLambdaObject(LNewNamedLambdaObject* lir);
     void visitNewCallObject(LNewCallObject* lir);
     void visitNewSingletonCallObject(LNewSingletonCallObject* lir);
     void visitNewStringObject(LNewStringObject* lir);

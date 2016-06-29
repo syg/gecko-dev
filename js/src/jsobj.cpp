@@ -2242,11 +2242,17 @@ js::LookupNameUnqualified(JSContext* cx, HandlePropertyName name, HandleObject e
             env = RuntimeLexicalErrorObject::create(cx, env, JSMSG_UNINITIALIZED_LEXICAL);
             if (!env)
                 return false;
-        } else if (env->is<EnvironmentObject>() && !shape->writable()) {
-            MOZ_ASSERT(name != cx->names().dotThis);
-            env = RuntimeLexicalErrorObject::create(cx, env, JSMSG_BAD_CONST_ASSIGN);
-            if (!env)
-                return false;
+        } else if (env->is<LexicalEnvironmentObject>() && !shape->writable()) {
+            // Assigning to a named lambda callee name is a no-op in sloppy mode.
+            Rooted<LexicalEnvironmentObject*> lexicalEnv(cx, &env->as<LexicalEnvironmentObject>());
+            if (lexicalEnv->isExtensible() ||
+                lexicalEnv->scope().kind() != ScopeKind::NamedLambda)
+            {
+                MOZ_ASSERT(name != cx->names().dotThis);
+                env = RuntimeLexicalErrorObject::create(cx, env, JSMSG_BAD_CONST_ASSIGN);
+                if (!env)
+                    return false;
+            }
         }
     }
 

@@ -2075,7 +2075,7 @@ JSFunction::needsDefaultsEnvironment() const
 }
 
 bool
-JSFunction::needsDeclEnvObject() const
+JSFunction::needsNamedLambdaEnvironment() const
 {
     MOZ_ASSERT(!isInterpretedLazy());
 
@@ -2085,7 +2085,7 @@ JSFunction::needsDeclEnvObject() const
     if (!isNamedLambda())
         return false;
 
-    return nonLazyScript()->declEnvScope()->hasEnvironment();
+    return nonLazyScript()->namedLambdaScope()->hasEnvironment();
 }
 
 JSFunction*

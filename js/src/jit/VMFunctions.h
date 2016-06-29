@@ -16,7 +16,7 @@
 
 namespace js {
 
-class DeclEnvObject;
+class NamedLambdaObject;
 class WithScope;
 class InlineTypedObject;
 class GeneratorObject;
@@ -279,7 +279,7 @@ template <> struct TypeToDataType<JSObject*> { static const DataType result = Ty
 template <> struct TypeToDataType<NativeObject*> { static const DataType result = Type_Object; };
 template <> struct TypeToDataType<PlainObject*> { static const DataType result = Type_Object; };
 template <> struct TypeToDataType<InlineTypedObject*> { static const DataType result = Type_Object; };
-template <> struct TypeToDataType<DeclEnvObject*> { static const DataType result = Type_Object; };
+template <> struct TypeToDataType<NamedLambdaObject*> { static const DataType result = Type_Object; };
 template <> struct TypeToDataType<ArrayObject*> { static const DataType result = Type_Object; };
 template <> struct TypeToDataType<JSString*> { static const DataType result = Type_Object; };
 template <> struct TypeToDataType<JSFlatString*> { static const DataType result = Type_Object; };

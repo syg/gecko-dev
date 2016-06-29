@@ -232,7 +232,7 @@ class NameLocation
     }
 
     static NameLocation NamedLambdaCallee() {
-        return NameLocation(Kind::NamedLambdaCallee, BindingKind::Const);
+        return NameLocation(Kind::NamedLambdaCallee, BindingKind::NamedLambdaCallee);
     }
 
     static NameLocation ArgumentSlot(uint16_t slot) {
@@ -259,8 +259,8 @@ class NameLocation
             return FrameSlot(bindKind, bl.slot());
           case BindingLocation::Kind::Environment:
             return EnvironmentCoordinate(bindKind, 0, bl.slot());
-          default:
-            MOZ_CRASH("Bad BindingLocation kind");
+          case BindingLocation::Kind::NamedLambdaCallee:
+            return NamedLambdaCallee();
         }
     }
 
@@ -319,7 +319,9 @@ class NameLocation
     }
 
     bool hasKnownSlot() const {
-        return kind_ != Kind::Dynamic && kind_ != Kind::Global && kind_ != Kind::Intrinsic;
+        return kind_ == Kind::ArgumentSlot ||
+               kind_ == Kind::FrameSlot ||
+               kind_ == Kind::EnvironmentCoordinate;
     }
 };
 

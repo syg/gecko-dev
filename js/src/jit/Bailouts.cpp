@@ -267,7 +267,7 @@ jit::EnsureHasEnvironmentObjects(JSContext* cx, AbstractFramePtr fp)
         MOZ_ASSERT(!fp.callee()->needsDefaultsEnvironment());
 
         if (!fp.hasCallObj()) {
-            if (fp.callee()->needsDeclEnvObject()) {
+            if (fp.callee()->needsNamedLambdaEnvironment()) {
                 if (!fp.initExtraFunctionEnvironmentObjects(cx))
                     return false;
             }

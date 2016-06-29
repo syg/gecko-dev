@@ -102,7 +102,7 @@ class MOZ_STACK_CLASS Nestable
 
     template <typename T, typename Predicate /* (T*) -> bool */>
     static T* findNearest(Concrete* it, Predicate predicate) {
-        while (it && !it->template is<T>() && !predicate(&it->template as<T>()))
+        while (it && (!it->template is<T>() || !predicate(&it->template as<T>())))
             it = it->enclosing();
         return it ? &it->template as<T>() : nullptr;
     }
@@ -476,7 +476,7 @@ class FunctionBox : public ObjectBox, public SharedContext
 
   public:
     // Names from the named lambda scope, if a named lambda.
-    LexicalScope::BindingData* declEnvBindings;
+    LexicalScope::BindingData* namedLambdaBindings;
 
     // Names from the scope for parameter default expressions, if any.
     LexicalScope::BindingData* defaultsScopeBindings;

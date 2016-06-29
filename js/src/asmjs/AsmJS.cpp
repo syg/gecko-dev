@@ -6694,8 +6694,11 @@ CheckSwitch(FunctionValidator& f, ParseNode* switchStmt)
     ParseNode* switchExpr = BinaryLeft(switchStmt);
     ParseNode* switchBody = BinaryRight(switchStmt);
 
-    if (!switchBody->isKind(PNK_STATEMENTLIST))
-        return f.fail(switchBody, "switch body may not contain 'let' declarations");
+    if (switchBody->isKind(PNK_LEXICALSCOPE)) {
+        if (!switchBody->isEmptyScope())
+            return f.fail(switchBody, "switch body may not contain 'let' declarations");
+        switchBody = switchBody->scopeBody();
+    }
 
     ParseNode* stmt = ListHead(switchBody);
     if (!stmt)
@@ -6870,6 +6873,17 @@ CheckStatementList(FunctionValidator& f, ParseNode* stmtList, const NameVector* 
 }
 
 static bool
+CheckLexicalScope(FunctionValidator& f, ParseNode* lexicalScope)
+{
+    MOZ_ASSERT(lexicalScope->isKind(PNK_LEXICALSCOPE));
+
+    if (!lexicalScope->isEmptyScope())
+        return f.fail(lexicalScope, "cannot have 'let' or 'const' declarations");
+
+    return CheckStatement(f, lexicalScope->scopeBody());
+}
+
+static bool
 CheckBreakOrContinue(FunctionValidator& f, bool isBreak, ParseNode* stmt)
 {
     if (PropertyName* maybeLabel = LoopControlMaybeLabel(stmt))
@@ -6894,7 +6908,7 @@ CheckStatement(FunctionValidator& f, ParseNode* stmt)
       case PNK_STATEMENTLIST: return CheckStatementList(f, stmt);
       case PNK_BREAK:         return CheckBreakOrContinue(f, true, stmt);
       case PNK_CONTINUE:      return CheckBreakOrContinue(f, false, stmt);
-      case PNK_LEXICALSCOPE:  return CheckStatement(f, stmt->scopeBody());
+      case PNK_LEXICALSCOPE:  return CheckLexicalScope(f, stmt->scopeBody());
       default:;
     }
 

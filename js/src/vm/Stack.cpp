@@ -131,7 +131,8 @@ AssertScopeMatchesEnvironment(Scope* scope, JSObject* originalEnv)
               case ScopeKind::ParameterDefaults:
               case ScopeKind::Lexical:
               case ScopeKind::Catch:
-              case ScopeKind::DeclEnv:
+              case ScopeKind::NamedLambda:
+              case ScopeKind::StrictNamedLambda:
                 MOZ_ASSERT(&env->as<LexicalEnvironmentObject>().scope() == si.scope());
                 env = &env->as<LexicalEnvironmentObject>().enclosingEnvironment();
                 break;

@@ -983,7 +983,6 @@ PopEnvironment(JSContext* cx, EnvironmentIter& ei)
     switch (ei.scope().kind()) {
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
-      case ScopeKind::DeclEnv:
         if (cx->compartment()->isDebuggee())
             DebugEnvironments::onPopLexical(cx, ei);
         if (ei.scope().as<LexicalScope>().hasEnvironment())
@@ -994,6 +993,8 @@ PopEnvironment(JSContext* cx, EnvironmentIter& ei)
         break;
       case ScopeKind::Function:
       case ScopeKind::ParameterDefaults:
+      case ScopeKind::NamedLambda:
+      case ScopeKind::StrictNamedLambda:
       case ScopeKind::Eval:
       case ScopeKind::StrictEval:
       case ScopeKind::Global:
@@ -1320,7 +1321,7 @@ JS_STATIC_ASSERT(JSOP_IFNE == JSOP_IFEQ + 1);
  *
  * 1. The nominal |this|, obj, is a global object.
  *
- * 2. The nominal |this|, obj, has one of LexicalEnv, Call, or DeclEnv class (this
+ * 2. The nominal |this|, obj, has one of LexicalEnvironment or Call class (this
  *    is what IsCacheableNonGlobalEnvironment tests). Such objects-as-envs must be
  *    censored with undefined.
  *

@@ -146,10 +146,10 @@ class JSFunction : public js::NativeObject
     }
 
     bool needsDefaultsEnvironment() const;
-    bool needsDeclEnvObject() const;
+    bool needsNamedLambdaEnvironment() const;
 
     bool needsExtraEnvironmentObjects() const {
-        return needsDefaultsEnvironment() || needsDeclEnvObject();
+        return needsDefaultsEnvironment() || needsNamedLambdaEnvironment();
     }
 
     bool needsSomeEnvironmentObject() const {

@@ -5742,13 +5742,13 @@ CodeGenerator::visitSimdUnbox(LSimdUnbox* lir)
     bailoutFrom(&bail, lir->snapshot());
 }
 
-typedef js::DeclEnvObject* (*NewDeclEnvObjectFn)(JSContext*, HandleFunction, gc::InitialHeap);
-static const VMFunction NewDeclEnvObjectInfo =
-    FunctionInfo<NewDeclEnvObjectFn>(DeclEnvObject::createTemplateObject,
-                                     "DeclEnvObject::createTemplateObject");
+typedef js::NamedLambdaObject* (*NewNamedLambdaObjectFn)(JSContext*, HandleFunction, gc::InitialHeap);
+static const VMFunction NewNamedLambdaObjectInfo =
+    FunctionInfo<NewNamedLambdaObjectFn>(NamedLambdaObject::createTemplateObject,
+                                         "NamedLambdaObject::createTemplateObject");
 
 void
-CodeGenerator::visitNewDeclEnvObject(LNewDeclEnvObject* lir)
+CodeGenerator::visitNewNamedLambdaObject(LNewNamedLambdaObject* lir)
 {
     Register objReg = ToRegister(lir->output());
     Register tempReg = ToRegister(lir->temp());
@@ -5756,7 +5756,7 @@ CodeGenerator::visitNewDeclEnvObject(LNewDeclEnvObject* lir)
     const CompileInfo& info = lir->mir()->block()->info();
 
     // If we have a template object, we can inline call object creation.
-    OutOfLineCode* ool = oolCallVM(NewDeclEnvObjectInfo, lir,
+    OutOfLineCode* ool = oolCallVM(NewNamedLambdaObjectInfo, lir,
                                    ArgList(ImmGCPtr(info.funMaybeLazy()), Imm32(gc::DefaultHeap)),
                                    StoreRegisterTo(objReg));
 

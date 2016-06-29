@@ -1228,7 +1228,8 @@ Scope::traceChildren(JSTracer* trc)
       case ScopeKind::ParameterDefaults:
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
-      case ScopeKind::DeclEnv:
+      case ScopeKind::NamedLambda:
+      case ScopeKind::StrictNamedLambda:
         TraceBindingData(trc, reinterpret_cast<LexicalScope::BindingData*>(data_));
         break;
       case ScopeKind::Global:
@@ -1266,7 +1267,8 @@ js::GCMarker::eagerlyMarkChildren(Scope* scope)
       case ScopeKind::ParameterDefaults:
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
-      case ScopeKind::DeclEnv: {
+      case ScopeKind::NamedLambda:
+      case ScopeKind::StrictNamedLambda: {
         LexicalScope::BindingData* data =
             reinterpret_cast<LexicalScope::BindingData*>(scope->data_);
         names = data->names;

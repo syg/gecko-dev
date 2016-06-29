@@ -391,7 +391,7 @@ class IonBuilder
     MDefinition* createThisScriptedSingleton(JSFunction* target, MDefinition* callee);
     MDefinition* createThisScriptedBaseline(MDefinition* callee);
     MDefinition* createThis(JSFunction* target, MDefinition* callee, MDefinition* newTarget);
-    MInstruction* createDeclEnvObject(MDefinition* callee, MDefinition* envObj);
+    MInstruction* createNamedLambdaObject(MDefinition* callee, MDefinition* envObj);
     MInstruction* createCallObject(MDefinition* callee, MDefinition* envObj);
 
     MDefinition* walkEnvironmentChain(unsigned hops);

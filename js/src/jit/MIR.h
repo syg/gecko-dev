@@ -12221,11 +12221,11 @@ class MPostWriteElementBarrier : public MTernaryInstruction
     ALLOW_CLONE(MPostWriteElementBarrier)
 };
 
-class MNewDeclEnvObject : public MNullaryInstruction
+class MNewNamedLambdaObject : public MNullaryInstruction
 {
     CompilerGCPointer<LexicalEnvironmentObject*> templateObj_;
 
-    explicit MNewDeclEnvObject(LexicalEnvironmentObject* templateObj)
+    explicit MNewNamedLambdaObject(LexicalEnvironmentObject* templateObj)
       : MNullaryInstruction(),
         templateObj_(templateObj)
     {
@@ -12233,7 +12233,7 @@ class MNewDeclEnvObject : public MNullaryInstruction
     }
 
   public:
-    INSTRUCTION_HEADER(NewDeclEnvObject)
+    INSTRUCTION_HEADER(NewNamedLambdaObject)
     TRIVIAL_NEW_WRAPPERS
 
     LexicalEnvironmentObject* templateObj() {

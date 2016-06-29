@@ -457,7 +457,7 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
 
     MOZ_MUST_USE bool enterLexical(BytecodeEmitter* bce, ScopeKind kind,
                                    LexicalScope::BindingData* bindings);
-    MOZ_MUST_USE bool enterDeclEnv(BytecodeEmitter* bce, FunctionBox* funbox);
+    MOZ_MUST_USE bool enterNamedLambda(BytecodeEmitter* bce, FunctionBox* funbox);
     MOZ_MUST_USE bool enterParameterDefaults(BytecodeEmitter* bce, FunctionBox* funbox);
     MOZ_MUST_USE bool enterFunctionBody(BytecodeEmitter* bce, FunctionBox* funbox);
     MOZ_MUST_USE bool enterGlobal(BytecodeEmitter* bce, GlobalSharedContext* globalsc);
@@ -601,7 +601,8 @@ BytecodeEmitter::EmitterScope::searchInEnclosingScope(JSAtom* name, Scope* scope
           case ScopeKind::Function:
           case ScopeKind::ParameterDefaults:
           case ScopeKind::Lexical:
-          case ScopeKind::DeclEnv:
+          case ScopeKind::NamedLambda:
+          case ScopeKind::StrictNamedLambda:
           case ScopeKind::Catch:
           case ScopeKind::StrictEval:
             if (hasEnv) {
@@ -719,6 +720,7 @@ bool
 BytecodeEmitter::EmitterScope::enterLexical(BytecodeEmitter* bce, ScopeKind kind,
                                             LexicalScope::BindingData* bindings)
 {
+    MOZ_ASSERT(kind != ScopeKind::NamedLambda && kind != ScopeKind::StrictNamedLambda);
     MOZ_ASSERT(this == bce->innermostEmitterScope);
 
     if (!ensureCache(bce))
@@ -726,7 +728,7 @@ BytecodeEmitter::EmitterScope::enterLexical(BytecodeEmitter* bce, ScopeKind kind
 
     // Resolve bindings.
     uint32_t firstFrameSlot = frameSlotStart();
-    BindingIter bi(*bindings, firstFrameSlot);
+    BindingIter bi(*bindings, firstFrameSlot, /* isNamedLambda = */ false);
     for (; bi; bi++) {
         if (!checkSlotLimits(bce, bi))
             return false;
@@ -775,34 +777,35 @@ BytecodeEmitter::EmitterScope::enterLexical(BytecodeEmitter* bce, ScopeKind kind
 }
 
 bool
-BytecodeEmitter::EmitterScope::enterDeclEnv(BytecodeEmitter* bce, FunctionBox* funbox)
+BytecodeEmitter::EmitterScope::enterNamedLambda(BytecodeEmitter* bce, FunctionBox* funbox)
 {
     MOZ_ASSERT(this == bce->innermostEmitterScope);
-    MOZ_ASSERT(funbox->declEnvBindings);
+    MOZ_ASSERT(funbox->namedLambdaBindings);
 
     if (!ensureCache(bce))
         return false;
 
-    BindingIter bi(*funbox->declEnvBindings, LOCALNO_LIMIT);
+    BindingIter bi(*funbox->namedLambdaBindings, LOCALNO_LIMIT, /* isNamedLambda = */ true);
     MOZ_ASSERT(bi);
 
     // The lambda name, if not closed over, is accessed via JSOP_CALLEE and
     // not a frame slot. Do not update frame slot information.
-    NameLocation loc = NameLocation::NamedLambdaCallee();
-    if (bi.closedOver()) {
-        loc = NameLocation::fromBinding(BindingKind::Const, bi.location());
+    NameLocation loc = NameLocation::fromBinding(bi.kind(), bi.location());
+    if (loc.kind() == NameLocation::Kind::EnvironmentCoordinate)
         hasEnvironment_ = true;
-    }
 
     if (!putNameInCache(bce, bi.name(), loc))
         return false;
 
     // There is exactly one binding in the decl env scope.
+    MOZ_ASSERT(bi.kind() == BindingKind::NamedLambdaCallee);
     bi++;
     MOZ_ASSERT(!bi);
 
     auto createScope = [funbox](ExclusiveContext* cx, HandleScope enclosing) {
-        return LexicalScope::create(cx, ScopeKind::DeclEnv, funbox->declEnvBindings,
+        ScopeKind scopeKind =
+            funbox->strict() ? ScopeKind::StrictNamedLambda : ScopeKind::NamedLambda;
+        return LexicalScope::create(cx, scopeKind, funbox->namedLambdaBindings,
                                     LOCALNO_LIMIT, enclosing);
     };
     if (!internScope(bce, createScope))
@@ -1081,7 +1084,8 @@ BytecodeEmitter::EmitterScope::leave(BytecodeEmitter* bce, bool nonLocal)
 
       case ScopeKind::Function:
       case ScopeKind::ParameterDefaults:
-      case ScopeKind::DeclEnv:
+      case ScopeKind::NamedLambda:
+      case ScopeKind::StrictNamedLambda:
       case ScopeKind::Eval:
       case ScopeKind::StrictEval:
       case ScopeKind::Global:
@@ -2704,9 +2708,8 @@ BytecodeEmitter::emitSetOrInitializeNameAtLocation(JSAtom* name, const NameLocat
       case NameLocation::Kind::NamedLambdaCallee:
         if (!emitRhs(this, loc, emittedBindOp))
             return false;
-        MOZ_ASSERT(loc.isConst());
-        // Unlike regular consts, assigning to the named lambda does not throw
-        // in sloppy mode.
+        // Assigning to the named lambda is a no-op in sloppy mode but
+        // does in strict mode.
         if (sc->strict() && !emit1(JSOP_THROWSETCALLEE))
             return false;
         break;
@@ -2768,8 +2771,16 @@ BytecodeEmitter::emitSetOrInitializeNameAtLocation(JSAtom* name, const NameLocat
         }
         if (!emitRhs(this, loc, emittedBindOp))
             return false;
-        if (!emitEnvCoordOp(op, loc.environmentCoordinate()))
-            return false;
+        if (loc.bindingKind() == BindingKind::NamedLambdaCallee) {
+            // Assigning to the named lambda is a no-op in sloppy mode and throws
+            // in strict mode.
+            op = JSOP_THROWSETALIASEDCONST;
+            if (sc->strict() && !emitEnvCoordOp(op, loc.environmentCoordinate()))
+                return false;
+        } else {
+            if (!emitEnvCoordOp(op, loc.environmentCoordinate()))
+                return false;
+        }
         if (op == JSOP_INITALIASEDLEXICAL &&
             !innermostTDZCheckCache->noteEmittedTDZCheck(name))
         {
@@ -3685,10 +3696,10 @@ BytecodeEmitter::emitFunctionScript(ParseNode* body)
     // needs to enclose the defaults scope needs to enclose the function
     // scope.
 
-    Maybe<EmitterScope> declEnvEmitterScope;
-    if (funbox->declEnvBindings) {
-        declEnvEmitterScope.emplace(this);
-        if (!declEnvEmitterScope->enterDeclEnv(this, funbox))
+    Maybe<EmitterScope> namedLambdaEmitterScope;
+    if (funbox->namedLambdaBindings) {
+        namedLambdaEmitterScope.emplace(this);
+        if (!namedLambdaEmitterScope->enterNamedLambda(this, funbox))
             return false;
     }
 
@@ -3723,10 +3734,10 @@ BytecodeEmitter::emitFunctionScript(ParseNode* body)
     if (!emit1(JSOP_RETRVAL))
         return false;
 
-    if (declEnvEmitterScope) {
-        if (!declEnvEmitterScope->leave(this))
+    if (namedLambdaEmitterScope) {
+        if (!namedLambdaEmitterScope->leave(this))
             return false;
-        declEnvEmitterScope.reset();
+        namedLambdaEmitterScope.reset();
     }
 
     if (!JSScript::fullyInitFromEmitter(cx, script, this))
@@ -7971,7 +7982,7 @@ BytecodeEmitter::emitFunctionFormalParametersAndBody(ParseNode *pn)
             //
             //   function f(x, y = 42) { var y; }
             //
-            for (BindingIter bi(*funbox->defaultsScopeBindings, 0); bi; bi++) {
+            for (BindingIter bi(*funbox->defaultsScopeBindings, 0, false); bi; bi++) {
                 JSAtom* name = bi.name();
 
                 // There may not be a var binding of the same name.

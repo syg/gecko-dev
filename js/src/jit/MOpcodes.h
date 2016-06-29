@@ -131,7 +131,7 @@ namespace jit {
     _(NewArrayDynamicLength)                                                \
     _(NewObject)                                                            \
     _(NewTypedObject)                                                       \
-    _(NewDeclEnvObject)                                                     \
+    _(NewNamedLambdaObject)                                                 \
     _(NewCallObject)                                                        \
     _(NewRunOnceCallObject)                                                 \
     _(NewStringObject)                                                      \

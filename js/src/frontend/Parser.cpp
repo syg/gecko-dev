@@ -291,11 +291,11 @@ ParseContext::init()
         // needing a dynamic DeclEnv object.
         JSFunction* fun = functionBox()->function();
         if (fun->isNamedLambda()) {
-            if (!declEnvScope_->init(this))
+            if (!namedLambdaScope_->init(this))
                 return false;
-            AddDeclaredNamePtr p = declEnvScope_->lookupDeclaredNameForAdd(fun->name());
+            AddDeclaredNamePtr p = namedLambdaScope_->lookupDeclaredNameForAdd(fun->name());
             MOZ_ASSERT(!p);
-            if (!declEnvScope_->addDeclaredName(this, p, fun->name(), DeclarationKind::Const))
+            if (!namedLambdaScope_->addDeclaredName(this, p, fun->name(), DeclarationKind::Const))
                 return false;
         }
 
@@ -329,7 +329,7 @@ ParseContext::finishExtraFunctionScopes()
     }
 
     if (funbox->function()->isNamedLambda()) {
-        if (!declEnvScope().propagateFreeNamesAndMarkClosedOverBindings(this))
+        if (!namedLambdaScope().propagateFreeNamesAndMarkClosedOverBindings(this))
             return false;
     }
 
@@ -390,8 +390,8 @@ ParseContext::~ParseContext()
     }
 #endif
 
-    if (declEnvScope_)
-        declEnvScope_->release(this);
+    if (namedLambdaScope_)
+        namedLambdaScope_->release(this);
     if (defaultsScope_)
         defaultsScope_->release(this);
     varScope_->release(this);
@@ -403,7 +403,7 @@ FunctionBox::FunctionBox(ExclusiveContext* cx, LifoAlloc& alloc, ObjectBox* trac
   : ObjectBox(fun, traceListHead),
     SharedContext(cx, Kind::ObjectBox, directives, extraWarnings),
     enclosingScope_(nullptr),
-    declEnvBindings(nullptr),
+    namedLambdaBindings(nullptr),
     defaultsScopeBindings(nullptr),
     funScopeBindings(nullptr),
     functionNode(nullptr),
@@ -1733,10 +1733,10 @@ Parser<FullParseHandler>::finishFunction()
     }
 
     if (funbox->function()->isNamedLambda()) {
-        Maybe<LexicalScope::BindingData*> bindings = newLexicalScopeData(pc->declEnvScope());
+        Maybe<LexicalScope::BindingData*> bindings = newLexicalScopeData(pc->namedLambdaScope());
         if (!bindings)
             return false;
-        funbox->declEnvBindings = *bindings;
+        funbox->namedLambdaBindings = *bindings;
     }
 
     return true;

@@ -146,7 +146,7 @@ JSScript::global() const
 }
 
 inline js::LexicalScope*
-JSScript::declEnvScope() const
+JSScript::namedLambdaScope() const
 {
     MOZ_ASSERT(functionNonDelazifying()->isNamedLambda());
     return &outermostScope()->as<js::LexicalScope>();

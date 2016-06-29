@@ -25,7 +25,11 @@ enum class BindingKind : uint8_t
     FormalParameter,
     Var,
     Let,
-    Const
+    Const,
+
+    // So you think named lambda callee names are consts? Nope! They don't
+    // throw when being assigned to in sloppy mode.
+    NamedLambdaCallee
 };
 
 static inline bool
@@ -40,7 +44,8 @@ enum class ScopeKind : uint8_t
     ParameterDefaults,
     Lexical,
     Catch,
-    DeclEnv,
+    NamedLambda,
+    StrictNamedLambda,
     With,
     Eval,
     StrictEval,
@@ -86,7 +91,8 @@ class BindingLocation
         Global,
         Argument,
         Frame,
-        Environment
+        Environment,
+        NamedLambdaCallee
     };
 
   private:
@@ -115,6 +121,10 @@ class BindingLocation
     static BindingLocation Environment(uint32_t slot) {
         MOZ_ASSERT(slot < ENVCOORD_SLOT_LIMIT);
         return BindingLocation(Kind::Environment, slot);
+    }
+
+    static BindingLocation NamedLambdaCallee() {
+        return BindingLocation(Kind::NamedLambdaCallee, UINT32_MAX);
     }
 
     bool operator==(const BindingLocation& other) const {
@@ -342,7 +352,8 @@ Scope::is<LexicalScope>() const
     return kind_ == ScopeKind::Lexical ||
            kind_ == ScopeKind::Catch ||
            kind_ == ScopeKind::ParameterDefaults ||
-           kind_ == ScopeKind::DeclEnv;
+           kind_ == ScopeKind::NamedLambda ||
+           kind_ == ScopeKind::StrictNamedLambda;
 }
 
 //
@@ -692,7 +703,7 @@ class BindingIter
 
     uint32_t index_;
 
-    enum CanHaveSlots : uint8_t {
+    enum Flags : uint8_t {
         CannotHaveSlots = 0,
         CanHaveArgumentSlots = 1 << 0,
         CanHaveFrameSlots = 1 << 1,
@@ -700,10 +711,15 @@ class BindingIter
 
         // See comment in settle below.
         IgnorePositionalFormalParameters = 1 << 3,
-        IgnoreDestructuredFormalParameters = 1 << 4
+        IgnoreDestructuredFormalParameters = 1 << 4,
+
+        // Truly I hate named lambdas.
+        IsNamedLambda = 1 << 5
     };
 
-    uint8_t canHaveSlots_;
+    static const uint8_t CanHaveSlotsMask = 0x7;
+
+    uint8_t flags_;
     uint16_t argumentSlot_;
     uint32_t frameSlot_;
     uint32_t environmentSlot_;
@@ -711,7 +727,7 @@ class BindingIter
     BindingName* names_;
 
     void init(uint16_t nonPositionalFormalStart, uint16_t varStart,
-              uint32_t letStart, uint32_t constStart, uint8_t canHaveSlots,
+              uint32_t letStart, uint32_t constStart, uint8_t flags,
               uint32_t firstFrameSlot, uint32_t firstEnvironmentSlot,
               BindingName* names, uint32_t length)
     {
@@ -721,7 +737,7 @@ class BindingIter
         constStart_ = constStart;
         length_ = length;
         index_ = 0;
-        canHaveSlots_ = canHaveSlots;
+        flags_ = flags;
         argumentSlot_ = 0;
         frameSlot_ = firstFrameSlot;
         environmentSlot_ = firstEnvironmentSlot;
@@ -730,22 +746,26 @@ class BindingIter
         settle();
     }
 
-    void init(LexicalScope::BindingData& data, uint32_t firstFrameSlot);
-    void init(FunctionScope::BindingData& data, uint32_t firstFrameSlot, uint8_t ignoreFlags);
+    void init(LexicalScope::BindingData& data, uint32_t firstFrameSlot, uint8_t flags);
+    void init(FunctionScope::BindingData& data, uint32_t firstFrameSlot, uint8_t flags);
     void init(GlobalScope::BindingData& data);
     void init(EvalScope::BindingData& data, bool strict);
 
     bool ignorePositionalFormalParameters() const {
-        return canHaveSlots_ & IgnorePositionalFormalParameters;
+        return flags_ & IgnorePositionalFormalParameters;
     }
 
     bool ignoreDestructuredFormalParameters() const {
-        return canHaveSlots_ & IgnoreDestructuredFormalParameters;
+        return flags_ & IgnoreDestructuredFormalParameters;
+    }
+
+    bool isNamedLambda() const {
+        return flags_ & IsNamedLambda;
     }
 
     void increment() {
         MOZ_ASSERT(!done());
-        if (canHaveSlots_) {
+        if (flags_ & CanHaveSlotsMask) {
             if (index_ < nonPositionalFormalStart_) {
                 MOZ_ASSERT(canHaveArgumentSlots());
                 argumentSlot_++;
@@ -754,8 +774,8 @@ class BindingIter
                 MOZ_ASSERT(canHaveEnvironmentSlots());
                 environmentSlot_++;
             } else if (index_ >= nonPositionalFormalStart_) {
-                MOZ_ASSERT(canHaveFrameSlots());
-                frameSlot_++;
+                if (canHaveFrameSlots())
+                    frameSlot_++;
             }
         }
         index_++;
@@ -789,8 +809,8 @@ class BindingIter
     explicit BindingIter(Scope* scope);
     explicit BindingIter(JSScript* script);
 
-    BindingIter(LexicalScope::BindingData& data, uint32_t firstFrameSlot) {
-        init(data, firstFrameSlot);
+    BindingIter(LexicalScope::BindingData& data, uint32_t firstFrameSlot, bool isNamedLambda) {
+        init(data, firstFrameSlot, isNamedLambda ? IsNamedLambda : 0);
     }
 
     BindingIter(FunctionScope::BindingData& data, uint32_t firstFrameSlot, bool hasDefaults) {
@@ -814,7 +834,7 @@ class BindingIter
         constStart_(bi.constStart_),
         length_(bi.length_),
         index_(bi.index_),
-        canHaveSlots_(bi.canHaveSlots_),
+        flags_(bi.flags_),
         argumentSlot_(bi.argumentSlot_),
         frameSlot_(bi.frameSlot_),
         environmentSlot_(bi.environmentSlot_),
@@ -840,15 +860,15 @@ class BindingIter
     }
 
     bool canHaveArgumentSlots() const {
-        return canHaveSlots_ & CanHaveArgumentSlots;
+        return flags_ & CanHaveArgumentSlots;
     }
 
     bool canHaveFrameSlots() const {
-        return canHaveSlots_ & CanHaveFrameSlots;
+        return flags_ & CanHaveFrameSlots;
     }
 
     bool canHaveEnvironmentSlots() const {
-        return canHaveSlots_ & CanHaveEnvironmentSlots;
+        return flags_ & CanHaveEnvironmentSlots;
     }
 
     JSAtom* name() const {
@@ -863,7 +883,7 @@ class BindingIter
 
     BindingLocation location() const {
         MOZ_ASSERT(!done());
-        if (!canHaveSlots_)
+        if (!(flags_ & CanHaveSlotsMask))
             return BindingLocation::Global();
         if (closedOver()) {
             MOZ_ASSERT(canHaveEnvironmentSlots());
@@ -873,8 +893,10 @@ class BindingIter
             MOZ_ASSERT(canHaveArgumentSlots());
             return BindingLocation::Argument(argumentSlot_);
         }
-        MOZ_ASSERT(canHaveFrameSlots());
-        return BindingLocation::Frame(frameSlot_);
+        if (canHaveFrameSlots())
+            return BindingLocation::Frame(frameSlot_);
+        MOZ_ASSERT(isNamedLambda());
+        return BindingLocation::NamedLambdaCallee();
     }
 
     BindingKind kind() const {
@@ -885,6 +907,8 @@ class BindingIter
             return BindingKind::Var;
         if (index_ < constStart_)
             return BindingKind::Let;
+        if (isNamedLambda())
+            return BindingKind::NamedLambdaCallee;
         return BindingKind::Const;
     }
 

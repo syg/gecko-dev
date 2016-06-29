@@ -1245,7 +1245,7 @@ IonBuilder::initEnvironmentChain(MDefinition* callee)
         // with template objects yet.
         if (fun->needsSomeEnvironmentObject() && !info().isAnalysis()) {
             if (fun->isNamedLambda()) {
-                env = createDeclEnvObject(callee, env);
+                env = createNamedLambdaObject(callee, env);
                 if (!env)
                     return false;
             }
@@ -6208,20 +6208,20 @@ IonBuilder::inlineCalls(CallInfo& callInfo, const ObjectVector& targets, BoolVec
 }
 
 MInstruction*
-IonBuilder::createDeclEnvObject(MDefinition* callee, MDefinition* env)
+IonBuilder::createNamedLambdaObject(MDefinition* callee, MDefinition* env)
 {
     // Get a template CallObject that we'll use to generate inline object
     // creation.
-    LexicalEnvironmentObject* templateObj = inspector->templateDeclEnvObject();
+    LexicalEnvironmentObject* templateObj = inspector->templateNamedLambdaObject();
 
     // One field is added to the function to handle its name.  This cannot be a
-    // dynamic slot because there is still plenty of room on the DeclEnv object.
+    // dynamic slot because there is still plenty of room on the NamedLambda object.
     MOZ_ASSERT(!templateObj->hasDynamicSlots());
 
     // Allocate the actual object. It is important that no intervening
     // instructions could potentially bailout, thus leaking the dynamic slots
     // pointer.
-    MInstruction* declEnvObj = MNewDeclEnvObject::New(alloc(), templateObj);
+    MInstruction* declEnvObj = MNewNamedLambdaObject::New(alloc(), templateObj);
     current->add(declEnvObj);
 
     // Initialize the object's reserved slots. No post barrier is needed here:
@@ -6229,9 +6229,9 @@ IonBuilder::createDeclEnvObject(MDefinition* callee, MDefinition* env)
     // tenured heap is used instead, a minor collection will have been performed
     // that moved env/callee to the tenured heap.
     current->add(MStoreFixedSlot::New(alloc(), declEnvObj,
-                                      DeclEnvObject::enclosingEnvironmentSlot(), env));
+                                      NamedLambdaObject::enclosingEnvironmentSlot(), env));
     current->add(MStoreFixedSlot::New(alloc(), declEnvObj,
-                                      DeclEnvObject::lambdaSlot(), callee));
+                                      NamedLambdaObject::lambdaSlot(), callee));
 
     return declEnvObj;
 }
@@ -6253,7 +6253,7 @@ IonBuilder::createCallObject(MDefinition* callee, MDefinition* env)
     current->add(callObj);
 
     // Initialize the object's reserved slots. No post barrier is needed here,
-    // for the same reason as in createDeclEnvObject.
+    // for the same reason as in createNamedLambdaObject.
     current->add(MStoreFixedSlot::New(alloc(), callObj, CallObject::enclosingEnvironmentSlot(), env));
     current->add(MStoreFixedSlot::New(alloc(), callObj, CallObject::calleeSlot(), callee));
 

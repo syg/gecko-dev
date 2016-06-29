@@ -255,9 +255,9 @@ LIRGenerator::visitNewTypedObject(MNewTypedObject* ins)
 }
 
 void
-LIRGenerator::visitNewDeclEnvObject(MNewDeclEnvObject* ins)
+LIRGenerator::visitNewNamedLambdaObject(MNewNamedLambdaObject* ins)
 {
-    LNewDeclEnvObject* lir = new(alloc()) LNewDeclEnvObject(temp());
+    LNewNamedLambdaObject* lir = new(alloc()) LNewNamedLambdaObject(temp());
     define(lir, ins);
     assignSafepoint(lir, ins);
 }

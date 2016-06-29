@@ -365,13 +365,13 @@ class ParseContext : public Nestable<ParseContext>
 
     // If isFunctionBox() and the function is a named lambda, the DeclEnv
     // scope for named lambdas.
-    mozilla::Maybe<Scope> declEnvScope_;
+    mozilla::Maybe<Scope> namedLambdaScope_;
 
     // If isFunctionBox(), the scope for parameter default expressions.
     mozilla::Maybe<Scope> defaultsScope_;
 
     // The body-level scope. This always exists, but since Scopes are LIFO, is
-    // wrapped in a Maybe to ensure the correct nesting order of declEnvScope,
+    // wrapped in a Maybe to ensure the correct nesting order of namedLambdaScope,
     // defaultsScope, and varScope.
     mozilla::Maybe<Scope> varScope_;
 
@@ -444,7 +444,7 @@ class ParseContext : public Nestable<ParseContext>
     {
         if (isFunctionBox()) {
             if (functionBox()->function()->isNamedLambda())
-                declEnvScope_.emplace(this);
+                namedLambdaScope_.emplace(this);
             defaultsScope_.emplace(this);
         }
         varScope_.emplace(this);
@@ -478,9 +478,9 @@ class ParseContext : public Nestable<ParseContext>
         return innermostScope_;
     }
 
-    Scope& declEnvScope() {
+    Scope& namedLambdaScope() {
         MOZ_ASSERT(functionBox()->function()->isNamedLambda());
-        return *declEnvScope_;
+        return *namedLambdaScope_;
     }
 
     Scope& defaultsScope() {
@@ -495,7 +495,7 @@ class ParseContext : public Nestable<ParseContext>
     Scope& outermostScope() {
         if (isFunctionBox()) {
             if (functionBox()->function()->isNamedLambda())
-                return declEnvScope();
+                return namedLambdaScope();
             if (functionBox()->hasDefaults())
                 return defaultsScope();
         }

@@ -137,8 +137,8 @@ BaselineCompiler::compile()
     if (script->functionNonDelazifying()) {
         RootedFunction fun(cx, script->functionNonDelazifying());
 
-        if (fun->needsDeclEnvObject()) {
-            templateEnv = DeclEnvObject::createTemplateObject(cx, fun, gc::TenuredHeap);
+        if (fun->needsNamedLambdaEnvironment()) {
+            templateEnv = NamedLambdaObject::createTemplateObject(cx, fun, gc::TenuredHeap);
             if (!templateEnv)
                 return Method_Error;
         }

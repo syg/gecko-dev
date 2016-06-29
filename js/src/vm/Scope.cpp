@@ -29,6 +29,8 @@ js::BindingKindString(BindingKind kind)
         return "let";
       case BindingKind::Const:
         return "const";
+      case BindingKind::NamedLambdaCallee:
+        return "named lambda callee";
     }
     MOZ_CRASH("Bad BindingKind");
 }
@@ -45,8 +47,10 @@ js::ScopeKindString(ScopeKind kind)
         return "lexical";
       case ScopeKind::Catch:
         return "catch";
-      case ScopeKind::DeclEnv:
-        return "decl env";
+      case ScopeKind::NamedLambda:
+        return "named lambda";
+      case ScopeKind::StrictNamedLambda:
+        return "strict named lambda";
       case ScopeKind::With:
         return "with";
       case ScopeKind::Eval:
@@ -81,8 +85,9 @@ NextEnvironmentShape(ExclusiveContext* cx, JSAtom* name, BindingKind bindKind, u
     if (!base)
         return nullptr;
 
-    unsigned attrs = JSPROP_PERMANENT | JSPROP_ENUMERATE |
-                     (bindKind == BindingKind::Const ? JSPROP_READONLY : 0);
+    unsigned attrs = JSPROP_PERMANENT | JSPROP_ENUMERATE;
+    if (bindKind == BindingKind::Const || bindKind == BindingKind::NamedLambdaCallee)
+        attrs |= JSPROP_READONLY;
     jsid id = NameToId(name->asPropertyName());
     Rooted<StackShape> child(cx, StackShape(base, id, slot, attrs, 0));
     return cx->compartment()->propertyTree.getChild(cx, shape, child);
@@ -139,7 +144,7 @@ CopyBindingData(ExclusiveContext* cx, BindingIter& bi, ScopeData* data, size_t d
     // slots needed and computes the maximum frame slot.
     while (bi)
         bi++;
-    data->nextFrameSlot = bi.nextFrameSlot();
+    data->nextFrameSlot = bi.canHaveFrameSlots() ? bi.nextFrameSlot() : LOCALNO_LIMIT;
 
     // Make a new environment shape if any environment slots were used.
     if (bi.nextEnvironmentSlot() == JSSLOT_FREE(cls)) {
@@ -348,15 +353,18 @@ LexicalScope::computeNextFrameSlot(Scope* start)
 LexicalScope::create(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
                      uint32_t firstFrameSlot, HandleScope enclosing)
 {
+    bool isNamedLambda = kind == ScopeKind::NamedLambda || kind == ScopeKind::StrictNamedLambda;
+
     MOZ_ASSERT(data, "LexicalScopes should not be created if there are no bindings.");
-    MOZ_ASSERT_IF(kind != ScopeKind::DeclEnv, firstFrameSlot == computeNextFrameSlot(enclosing));
-    MOZ_ASSERT_IF(kind == ScopeKind::DeclEnv, firstFrameSlot == LOCALNO_LIMIT);
+    MOZ_ASSERT_IF(!isNamedLambda && firstFrameSlot != 0,
+                  firstFrameSlot == computeNextFrameSlot(enclosing));
+    MOZ_ASSERT_IF(isNamedLambda, firstFrameSlot == LOCALNO_LIMIT);
 
     // The data that's passed in is from the frontend and is LifoAlloc'd or is
     // from Scope::copy. Copy it now that we're creating a permanent VM scope.
     RootedShape envShape(cx);
     BindingData* copy;
-    BindingIter bi(*data, firstFrameSlot);
+    BindingIter bi(*data, firstFrameSlot, isNamedLambda);
     copy = CopyBindingData(cx, bi, data, sizeOfBindingData(data->length),
                            &LexicalEnvironmentObject::class_,
                            BaseShape::NOT_EXTENSIBLE | BaseShape::DELEGATE,
@@ -767,7 +775,8 @@ ScopeIter::hasSyntacticEnvironment() const
       case ScopeKind::ParameterDefaults:
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
-      case ScopeKind::DeclEnv:
+      case ScopeKind::NamedLambda:
+      case ScopeKind::StrictNamedLambda:
       case ScopeKind::Eval:
       case ScopeKind::StrictEval:
         return !!environmentShape();
@@ -791,10 +800,11 @@ BindingIter::BindingIter(Scope* scope)
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
         init(scope->as<LexicalScope>().bindingData(),
-             scope->as<LexicalScope>().computeFirstFrameSlot());
+             scope->as<LexicalScope>().computeFirstFrameSlot(), 0);
         break;
-      case ScopeKind::DeclEnv:
-        init(scope->as<LexicalScope>().bindingData(), LOCALNO_LIMIT);
+      case ScopeKind::NamedLambda:
+      case ScopeKind::StrictNamedLambda:
+        init(scope->as<LexicalScope>().bindingData(), LOCALNO_LIMIT, IsNamedLambda);
         break;
       case ScopeKind::With:
         MOZ_CRASH("With scopes do not have bindings");
@@ -826,19 +836,28 @@ BindingIter::BindingIter(JSScript* script)
 { }
 
 void
-BindingIter::init(LexicalScope::BindingData& data, uint32_t firstFrameSlot)
+BindingIter::init(LexicalScope::BindingData& data, uint32_t firstFrameSlot, uint8_t flags)
 {
-    init(0, 0, 0, data.constStart,
-         CanHaveFrameSlots | CanHaveEnvironmentSlots,
-         firstFrameSlot, JSSLOT_FREE(&LexicalEnvironmentObject::class_),
-         data.names, data.length);
+    // Named lambda scopes can only have environment slots. If the callee
+    // isn't closed over, it is accessed via JSOP_CALLEE.
+    if (flags & IsNamedLambda) {
+        init(0, 0, 0, 0,
+             CanHaveEnvironmentSlots | flags,
+             firstFrameSlot, JSSLOT_FREE(&LexicalEnvironmentObject::class_),
+             data.names, data.length);
+    } else {
+        init(0, 0, 0, data.constStart,
+             CanHaveFrameSlots | CanHaveEnvironmentSlots | flags,
+             firstFrameSlot, JSSLOT_FREE(&LexicalEnvironmentObject::class_),
+             data.names, data.length);
+    }
 }
 
 void
-BindingIter::init(FunctionScope::BindingData& data, uint32_t firstFrameSlot, uint8_t ignoreFlags)
+BindingIter::init(FunctionScope::BindingData& data, uint32_t firstFrameSlot, uint8_t flags)
 {
     init(data.nonPositionalFormalStart, data.varStart, data.length, 0,
-         CanHaveArgumentSlots | CanHaveFrameSlots | CanHaveEnvironmentSlots | ignoreFlags,
+         CanHaveArgumentSlots | CanHaveFrameSlots | CanHaveEnvironmentSlots | flags,
          firstFrameSlot, JSSLOT_FREE(&CallObject::class_),
          data.names, data.length);
 }
@@ -871,10 +890,9 @@ PositionalFormalParameterIter::PositionalFormalParameterIter(JSScript* script)
   : BindingIter(script),
     hasDefaults_(script->hasDefaults())
 {
-    // Reinit with 0 ignoreFlags, i.e., iterate over all positional
-    // parameters.
+    // Reinit with flags = 0, i.e., iterate over all positional parameters.
     if (script->bodyScope()->is<FunctionScope>())
-        init(script->bodyScope()->as<FunctionScope>().bindingData(), 0, /* ignoreFlags = */ 0);
+        init(script->bodyScope()->as<FunctionScope>().bindingData(), 0, /* flags = */ 0);
     settle();
 }
 
@@ -897,6 +915,9 @@ js::DumpBindings(JSContext* cx, Scope* scope) {
             break;
           case BindingLocation::Kind::Environment:
             fprintf(stderr, "env slot %u\n", bi.location().slot());
+            break;
+          case BindingLocation::Kind::NamedLambdaCallee:
+            fprintf(stderr, "named lambda callee\n");
             break;
         }
     }

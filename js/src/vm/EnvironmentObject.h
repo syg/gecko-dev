@@ -443,16 +443,16 @@ class LexicalEnvironmentObject : public EnvironmentObject
     Value thisValue() const;
 };
 
-class DeclEnvObject : public LexicalEnvironmentObject
+class NamedLambdaObject : public LexicalEnvironmentObject
 {
-    static DeclEnvObject* create(JSContext* cx, HandleFunction canonicalFun,
-                                 HandleObject enclosing, gc::InitialHeap heap);
+    static NamedLambdaObject* create(JSContext* cx, HandleFunction canonicalFun,
+                                     HandleObject enclosing, gc::InitialHeap heap);
 
   public:
-    static DeclEnvObject* createTemplateObject(JSContext* cx, HandleFunction canonicalFun,
-                                               gc::InitialHeap heap);
+    static NamedLambdaObject* createTemplateObject(JSContext* cx, HandleFunction canonicalFun,
+                                                   gc::InitialHeap heap);
 
-    static DeclEnvObject* create(JSContext* cx, AbstractFramePtr frame);
+    static NamedLambdaObject* create(JSContext* cx, AbstractFramePtr frame);
 
     // For JITs.
     static size_t lambdaSlot();

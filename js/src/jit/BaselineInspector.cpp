@@ -652,7 +652,7 @@ BaselineInspector::getTemplateObjectForSimdCtor(jsbytecode* pc, SimdType simdTyp
 }
 
 LexicalEnvironmentObject*
-BaselineInspector::templateDeclEnvObject()
+BaselineInspector::templateNamedLambdaObject()
 {
     if (!hasBaselineScript())
         return nullptr;

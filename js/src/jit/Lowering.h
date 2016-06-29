@@ -76,7 +76,7 @@ class LIRGenerator : public LIRGeneratorSpecific
     void visitNewArrayDynamicLength(MNewArrayDynamicLength* ins);
     void visitNewObject(MNewObject* ins);
     void visitNewTypedObject(MNewTypedObject* ins);
-    void visitNewDeclEnvObject(MNewDeclEnvObject* ins);
+    void visitNewNamedLambdaObject(MNewNamedLambdaObject* ins);
     void visitNewCallObject(MNewCallObject* ins);
     void visitNewRunOnceCallObject(MNewRunOnceCallObject* ins);
     void visitNewStringObject(MNewStringObject* ins);

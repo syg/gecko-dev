@@ -833,6 +833,10 @@ ToDisassemblySource(JSContext* cx, HandleScope scope, JSAutoByteString* bytes)
           case BindingLocation::Kind::Argument:
             source = JS_sprintf_append(source, "arg slot %u", loc.slot());
             break;
+
+          case BindingLocation::Kind::NamedLambdaCallee:
+            source = JS_sprintf_append(source, "named lambda callee");
+            break;
         }
 
         if (!source) {
