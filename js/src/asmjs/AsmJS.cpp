@@ -6908,7 +6908,7 @@ CheckStatement(FunctionValidator& f, ParseNode* stmt)
       case PNK_STATEMENTLIST: return CheckStatementList(f, stmt);
       case PNK_BREAK:         return CheckBreakOrContinue(f, true, stmt);
       case PNK_CONTINUE:      return CheckBreakOrContinue(f, false, stmt);
-      case PNK_LEXICALSCOPE:  return CheckLexicalScope(f, stmt->scopeBody());
+      case PNK_LEXICALSCOPE:  return CheckLexicalScope(f, stmt);
       default:;
     }
 
