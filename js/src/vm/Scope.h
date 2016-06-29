@@ -51,7 +51,7 @@ enum class ScopeKind : uint8_t
     StrictEval,
     Global,
     NonSyntactic,
-    Module,
+    Module
 };
 
 const char* BindingKindString(BindingKind kind);
