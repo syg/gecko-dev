@@ -823,6 +823,12 @@ ModuleScope::getEmptyEnvironmentShape(ExclusiveContext* cx)
     return EmptyEnvironmentShape(cx, cls, JSSLOT_FREE(cls), ModuleScopeEnvShapeFlags);
 }
 
+JSScript*
+ModuleScope::script() const
+{
+    return module()->script();
+}
+
 ScopeIter::ScopeIter(JSScript* script)
   : scope_(script->bodyScope())
 { }

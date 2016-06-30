@@ -761,6 +761,8 @@ class ModuleScope : public Scope
         return data().module;
     }
 
+    JSScript* script() const;
+
     size_t sizeOfData(mozilla::MallocSizeOf mallocSizeOf) const;
 
     static Shape* getEmptyEnvironmentShape(ExclusiveContext* cx);

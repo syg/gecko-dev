@@ -237,7 +237,6 @@ class ModuleObject : public NativeObject
                               HandleArrayObject starExportEntries);
     static bool FreezeArrayProperties(JSContext* cx, HandleModuleObject self);
     static void AssertArrayPropertiesFrozen(JSContext* cx, HandleModuleObject self);
-    void fixScopesAfterCompartmentMerge(JSContext* cx);
 
     JSScript* script() const;
     Scope* enclosingScope() const;

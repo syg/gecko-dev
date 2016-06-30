@@ -754,23 +754,8 @@ ModuleObject::AssertArrayPropertiesFrozen(JSContext* cx, HandleModuleObject self
 inline static void
 AssertModuleScopesMatch(ModuleObject* module)
 {
-    /* TODOshu
-    MOZ_ASSERT(IsStaticGlobalLexicalScope(module->enclosingScope()));
-    MOZ_ASSERT(module->initialEnvironment().enclosingScope().as<ClonedBlockObject>().staticScope() ==
-               module->enclosingStaticScope());
-    */
-}
-
-void
-ModuleObject::fixScopesAfterCompartmentMerge(JSContext* cx)
-{
-    /* TODOshu
-    AssertModuleScopesMatch(this);
-    Rooted<ClonedBlockObject*> lexicalScope(cx, &script()->global().lexicalScope());
-    setReservedSlot(StaticScopeSlot, ObjectValue(lexicalScope->staticBlock()));
-    initialEnvironment().setEnclosingScope(lexicalScope);
-    AssertModuleScopesMatch(this);
-    */
+    MOZ_ASSERT(module->enclosingScope()->is<GlobalScope>());
+    MOZ_ASSERT(module == module->script()->bodyScope()->as<ModuleScope>().module());
 }
 
 bool
