@@ -370,16 +370,18 @@ ModuleEnvironmentObject::create(ExclusiveContext* cx, HandleModuleObject module)
     // causing assertions.
     env->initEnclosingEnvironment(&cx->global()->lexicalEnvironment());
 
-    // Initialize all lexical bindings as uninitialized. Imports get
-    // uninitialized because they have a special TDZ for cyclic imports.
-    uint32_t firstLexicalSlot = JSSLOT_FREE(&class_);
+    // Initialize all lexical bindings and imports as uninitialized. Imports
+    // get uninitialized because they have a special TDZ for cyclic imports.
+    uint32_t slotCount = env->slotSpan();
+    uint32_t firstLexicalSlot = slotCount;
     for (BindingIter bi(script); bi; bi++) {
-        if (bi.closedOver()) {
+        if (bi.closedOver() && (BindingKindIsLexical(bi.kind()) ||
+                                bi.kind() == BindingKind::Import))
+        {
             firstLexicalSlot = bi.nextEnvironmentSlot();
             break;
         }
     }
-    uint32_t slotCount = env->slotSpan();
     for (uint32_t slot = firstLexicalSlot; slot < slotCount; slot++)
         env->initSlot(slot, MagicValue(JS_UNINITIALIZED_LEXICAL));
 

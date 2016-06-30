@@ -4095,20 +4095,6 @@ Parser<SyntaxParseHandler>::lexicalDeclaration(YieldHandling, bool)
     return SyntaxParseHandler::NodeFailure;
 }
 
-template <typename ParseHandler>
-typename ParseHandler::Node
-Parser<ParseHandler>::newImportBindingNameForCurrentName()
-{
-    RootedPropertyName name(context, tokenStream.currentName());
-    Node bindingName = newName(name);
-    if (!bindingName)
-        return null();
-    handler.setPosition(bindingName, pos());
-    if (!noteDeclaredName(name, DeclarationKind::Import, bindingName))
-        return null();
-    return bindingName;
-}
-
 template <>
 bool
 Parser<FullParseHandler>::namedImportsOrNamespaceImport(TokenKind tt, Node importSpecSet)
@@ -4153,10 +4139,12 @@ Parser<FullParseHandler>::namedImportsOrNamespaceImport(TokenKind tt, Node impor
                 }
             }
 
-            Node bindingName = newImportBindingNameForCurrentName();
+            RootedPropertyName bindingAtom(context, tokenStream.currentName());
+            Node bindingName = newName(bindingAtom);
             if (!bindingName)
                 return false;
-            handler.setPosition(bindingName, pos());
+            if (!noteDeclaredName(bindingAtom, DeclarationKind::Import, bindingName))
+                return false;
 
             Node importSpec = handler.newBinary(PNK_IMPORT_SPEC, importName, bindingName);
             if (!importSpec)
@@ -4192,18 +4180,22 @@ Parser<FullParseHandler>::namedImportsOrNamespaceImport(TokenKind tt, Node impor
 
         Node importName = newName(context->names().star);
         if (!importName)
-            return null();
-
-        Node bindingName = newImportBindingNameForCurrentName();
-        if (!bindingName)
-            return null();
+            return false;
 
         // Namespace imports are are not indirect bindings but lexical
-        // definitions that hold a module namespace object. They are treated as
-        // const variables which are initialized during the
-        // ModuleDeclarationInstantiation step. Thus we don't set the PND_IMPORT
-        // flag on the definition.
-        handler.setPosition(bindingName, pos());
+        // definitions that hold a module namespace object. They are treated
+        // as const variables which are initialized during the
+        // ModuleDeclarationInstantiation step.
+        RootedPropertyName bindingAtom(context, tokenStream.currentName());
+        Node bindingName = newName(bindingAtom);
+        if (!bindingName)
+            return false;
+        if (!noteDeclaredName(bindingAtom, DeclarationKind::Const, bindingName))
+            return false;
+
+        // The namespace import name is currently required to live on the
+        // environment.
+        pc->varScope().lookupDeclaredName(bindingAtom)->value()->setClosedOver();
 
         Node importSpec = handler.newBinary(PNK_IMPORT_SPEC, importName, bindingName);
         if (!importSpec)
@@ -4253,10 +4245,12 @@ Parser<FullParseHandler>::importDeclaration()
             if (!importName)
                 return null();
 
-            Node bindingName = newName(tokenStream.currentName());
+            RootedPropertyName bindingAtom(context, tokenStream.currentName());
+            Node bindingName = newName(bindingAtom);
             if (!bindingName)
                 return null();
-            handler.setPosition(bindingName, pos());
+            if (!noteDeclaredName(bindingAtom, DeclarationKind::Import, bindingName))
+                return null();
 
             Node importSpec = handler.newBinary(PNK_IMPORT_SPEC, importName, bindingName);
             if (!importSpec)

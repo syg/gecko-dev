@@ -721,7 +721,8 @@ class ModuleScope : public Scope
     };
 
     static size_t sizeOfBindingData(uint32_t length) {
-        return GlobalScope::sizeOfBindingData(length);
+        MOZ_ASSERT(length > 0);
+        return sizeof(BindingData) + (length - 1) * sizeof(BindingName);
     }
 
     static ModuleScope* create(ExclusiveContext* cx, BindingData* bindings,

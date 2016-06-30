@@ -1097,7 +1097,6 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     Node destructuringDeclarationWithoutYield(DeclarationKind kind, YieldHandling yieldHandling,
                                               TokenKind tt, unsigned msg);
 
-    Node newImportBindingNameForCurrentName();
     bool namedImportsOrNamespaceImport(TokenKind tt, Node importSpecSet);
     bool checkExportedName(JSAtom* exportName);
     bool checkExportedNamesForDeclaration(Node node);

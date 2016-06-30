@@ -89,8 +89,16 @@ NextEnvironmentShape(ExclusiveContext* cx, JSAtom* name, BindingKind bindKind, u
         return nullptr;
 
     unsigned attrs = JSPROP_PERMANENT | JSPROP_ENUMERATE;
-    if (bindKind == BindingKind::Const || bindKind == BindingKind::NamedLambdaCallee)
+    switch (bindKind) {
+      case BindingKind::Const:
+      case BindingKind::Import:
+      case BindingKind::NamedLambdaCallee:
         attrs |= JSPROP_READONLY;
+        break;
+      default:
+        break;
+    }
+
     jsid id = NameToId(name->asPropertyName());
     Rooted<StackShape> child(cx, StackShape(base, id, slot, attrs, 0));
     return cx->compartment()->propertyTree.getChild(cx, shape, child);
