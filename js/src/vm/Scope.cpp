@@ -7,6 +7,7 @@
 #include "vm/Scope.h"
 
 #include "jsscript.h"
+#include "builtin/ModuleObject.h"
 #include "gc/Allocator.h"
 #include "vm/EnvironmentObject.h"
 #include "vm/Runtime.h"
@@ -29,6 +30,8 @@ js::BindingKindString(BindingKind kind)
         return "let";
       case BindingKind::Const:
         return "const";
+      case BindingKind::Import:
+        return "import";
       case BindingKind::NamedLambdaCallee:
         return "named lambda callee";
     }
@@ -425,6 +428,8 @@ template
 LexicalScope::XDR(XDRState<XDR_DECODE>* xdr, ScopeKind kind, HandleScope enclosing,
                   MutableHandleScope scope);
 
+static const uint32_t FunctionScopeEnvShapeFlags =
+    BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE;
 
 /* static */ FunctionScope*
 FunctionScope::create(ExclusiveContext* cx, BindingData* bindings, uint32_t firstFrameSlot,
@@ -452,8 +457,7 @@ FunctionScope::create(ExclusiveContext* cx, BindingData* bindings, uint32_t firs
         BindingIter bi(*bindings, firstFrameSlot, hasDefaults);
         data->bindings = CopyBindingData(cx, bi, bindings, sizeOfBindingData(bindings->length),
                                          &CallObject::class_,
-                                         BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE,
-                                         &envShape);
+                                         FunctionScopeEnvShapeFlags, &envShape);
     } else {
         data->bindings = NewEmptyScopeData<BindingData>(cx, sizeOfBindingData(1));
     }
@@ -521,8 +525,7 @@ FunctionScope::script() const
 FunctionScope::getEmptyEnvironmentShape(ExclusiveContext* cx)
 {
     const Class* cls = &CallObject::class_;
-    return EmptyEnvironmentShape(cx, cls, JSSLOT_FREE(cls),
-                                 BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE);
+    return EmptyEnvironmentShape(cx, cls, JSSLOT_FREE(cls), FunctionScopeEnvShapeFlags);
 }
 
 template <XDRMode mode>
@@ -654,6 +657,9 @@ WithScope::create(ExclusiveContext* cx, HandleScope enclosing)
     return static_cast<WithScope*>(scope);
 }
 
+static const uint32_t EvalScopeEnvShapeFlags =
+    BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE;
+
 /* static */ EvalScope*
 EvalScope::create(ExclusiveContext* cx, ScopeKind scopeKind, BindingData* data,
                   HandleScope enclosing)
@@ -667,14 +673,16 @@ EvalScope::create(ExclusiveContext* cx, ScopeKind scopeKind, BindingData* data,
             BindingIter bi(*data, true);
             copy = CopyBindingData(cx, bi, data, sizeOfBindingData(data->length),
                                    &CallObject::class_,
-                                   BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE,
-                                   &envShape);
+                                   EvalScopeEnvShapeFlags, &envShape);
         } else {
             copy = CopyBindingData(cx, data, sizeOfBindingData(data->length));
         }
     } else {
         copy = NewEmptyScopeData<BindingData>(cx, sizeOfBindingData(1));
     }
+
+    if (!copy)
+        return nullptr;
 
     // Strict eval and direct eval in parameter defaults always get their own
     // var environment even if there are no bindings.
@@ -685,9 +693,6 @@ EvalScope::create(ExclusiveContext* cx, ScopeKind scopeKind, BindingData* data,
         if (!envShape)
             return nullptr;
     }
-
-    if (!copy)
-        return nullptr;
 
     Scope* scope = Scope::create(cx, scopeKind, enclosing, envShape,
                                  reinterpret_cast<uintptr_t>(copy));
@@ -725,8 +730,7 @@ EvalScope::nearestVarScopeForDirectEval(Scope* scope)
 EvalScope::getEmptyEnvironmentShape(ExclusiveContext* cx)
 {
     const Class* cls = &CallObject::class_;
-    return EmptyEnvironmentShape(cx, cls, JSSLOT_FREE(cls),
-                                 BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE);
+    return EmptyEnvironmentShape(cx, cls, JSSLOT_FREE(cls), EvalScopeEnvShapeFlags);
 }
 
 template <XDRMode mode>
@@ -762,6 +766,62 @@ template
 /* static */ bool
 EvalScope::XDR(XDRState<XDR_DECODE>* xdr, ScopeKind kind, HandleScope enclosing,
                MutableHandleScope scope);
+
+static const uint32_t ModuleScopeEnvShapeFlags =
+    BaseShape::NOT_EXTENSIBLE | BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE;
+
+/* static */ ModuleScope*
+ModuleScope::create(ExclusiveContext* cx, BindingData* bindings, HandleModuleObject module,
+                    HandleScope enclosing)
+{
+    MOZ_ASSERT(enclosing->is<GlobalScope>());
+
+    Data* data = NewEmptyScopeData<Data>(cx, sizeof(Data));
+    if (!data)
+        return nullptr;
+
+    data->module.init(module);
+
+    // The data that's passed in is from the frontend and is LifoAlloc'd or is
+    // from Scope::copy. Copy it now that we're creating a permanent VM scope.
+    RootedShape envShape(cx);
+    if (bindings) {
+        BindingIter bi(*bindings);
+        data->bindings = CopyBindingData(cx, bi, bindings, sizeOfBindingData(bindings->length),
+                                         &ModuleEnvironmentObject::class_,
+                                         ModuleScopeEnvShapeFlags, &envShape);
+    } else {
+        data->bindings = NewEmptyScopeData<BindingData>(cx, sizeOfBindingData(1));
+    }
+
+    if (!data->bindings)
+        return nullptr;
+
+    // Modules always need an environment object for now.
+    if (!envShape) {
+        envShape = getEmptyEnvironmentShape(cx);
+        if (!envShape)
+            return nullptr;
+    }
+
+    Scope* scope = Scope::create(cx, ScopeKind::Module, enclosing, envShape,
+                                 reinterpret_cast<uintptr_t>(data));
+    if (!scope) {
+        js_free(data->bindings);
+        js_free(data);
+        return nullptr;
+    }
+
+    data->bindings->addRef();
+    return &scope->as<ModuleScope>();
+}
+
+/* static */ Shape*
+ModuleScope::getEmptyEnvironmentShape(ExclusiveContext* cx)
+{
+    const Class* cls = &ModuleEnvironmentObject::class_;
+    return EmptyEnvironmentShape(cx, cls, JSSLOT_FREE(cls), ModuleScopeEnvShapeFlags);
+}
 
 ScopeIter::ScopeIter(JSScript* script)
   : scope_(script->bodyScope())
@@ -829,7 +889,8 @@ BindingIter::BindingIter(Scope* scope)
         init(scope->as<GlobalScope>().bindingData());
         break;
       case ScopeKind::Module:
-        MOZ_CRASH("NYI");
+        init(scope->as<ModuleScope>().bindingData());
+        break;
     }
 }
 
@@ -843,12 +904,20 @@ BindingIter::init(LexicalScope::BindingData& data, uint32_t firstFrameSlot, uint
     // Named lambda scopes can only have environment slots. If the callee
     // isn't closed over, it is accessed via JSOP_CALLEE.
     if (flags & IsNamedLambda) {
-        init(0, 0, 0, 0,
+        // Named lambda binding is weird. Normal BindingKind ordering rules
+        // don't apply.
+        init(0, 0, 0, 0, 0,
              CanHaveEnvironmentSlots | flags,
              firstFrameSlot, JSSLOT_FREE(&LexicalEnvironmentObject::class_),
              data.names, data.length);
     } else {
-        init(0, 0, 0, data.constStart,
+        // positional formals - [0, 0)
+        //      other formals - [0, 0)
+        //            imports - [0, 0)
+        //               vars - [0, 0)
+        //               lets - [0, data.constStart)
+        //             consts - [data.constStart, data.length)
+        init(0, 0, 0, 0, data.constStart,
              CanHaveFrameSlots | CanHaveEnvironmentSlots | flags,
              firstFrameSlot, JSSLOT_FREE(&LexicalEnvironmentObject::class_),
              data.names, data.length);
@@ -858,7 +927,13 @@ BindingIter::init(LexicalScope::BindingData& data, uint32_t firstFrameSlot, uint
 void
 BindingIter::init(FunctionScope::BindingData& data, uint32_t firstFrameSlot, uint8_t flags)
 {
-    init(data.nonPositionalFormalStart, data.varStart, data.length, 0,
+    // positional formals - [0, data.nonPositionalFormalStart)
+    //      other formals - [data.nonPositionalParamStart, data.varStart)
+    //            imports - [data.varStart, data.varStart)
+    //               vars - [data.varStart, data.length)
+    //               lets - [data.length, data.length)
+    //             consts - [data.length, data.length)
+    init(data.nonPositionalFormalStart, data.varStart, data.varStart, data.length, data.length,
          CanHaveArgumentSlots | CanHaveFrameSlots | CanHaveEnvironmentSlots | flags,
          firstFrameSlot, JSSLOT_FREE(&CallObject::class_),
          data.names, data.length);
@@ -867,7 +942,13 @@ BindingIter::init(FunctionScope::BindingData& data, uint32_t firstFrameSlot, uin
 void
 BindingIter::init(GlobalScope::BindingData& data)
 {
-    init(0, 0, data.letStart, data.constStart,
+    // positional formals - [0, 0)
+    //      other formals - [0, 0)
+    //            imports - [0, 0)
+    //               vars - [0, data.letStart)
+    //               lets - [data.letStart, data.constStart)
+    //             consts - [data.constStart, data.length)
+    init(0, 0, 0, data.letStart, data.constStart,
          CannotHaveSlots,
          UINT32_MAX, UINT32_MAX,
          data.names, data.length);
@@ -876,16 +957,37 @@ BindingIter::init(GlobalScope::BindingData& data)
 void
 BindingIter::init(EvalScope::BindingData& data, bool strict)
 {
+    // positional formals - [0, 0)
+    //      other formals - [0, 0)
+    //            imports - [0, 0)
+    //               vars - [0, data.length)
+    //               lets - [data.length, data.length)
+    //             consts - [data.length, data.length)
     if (strict) {
-        init(0, 0, data.length, data.length,
+        init(0, 0, 0, data.length, data.length,
              CanHaveFrameSlots | CanHaveEnvironmentSlots,
              0, JSSLOT_FREE(&CallObject::class_),
              data.names, data.length);
     } else {
-        init(0, 0, data.length, data.length,
+        init(0, 0, 0, data.length, data.length,
              CannotHaveSlots, UINT32_MAX, UINT32_MAX,
              data.names, data.length);
     }
+}
+
+void
+BindingIter::init(ModuleScope::BindingData& data)
+{
+    // positional formals - [0, 0)
+    //      other formals - [0, 0)
+    //            imports - [0, data.varStart)
+    //               vars - [data.varStart, data.letStart)
+    //               lets - [data.letStart, data.constStart)
+    //             consts - [data.constStart, data.length)
+    init(0, 0, data.varStart, data.letStart, data.constStart,
+         CanHaveFrameSlots | CanHaveEnvironmentSlots,
+         0, JSSLOT_FREE(&ModuleEnvironmentObject::class_),
+         data.names, data.length);
 }
 
 PositionalFormalParameterIter::PositionalFormalParameterIter(JSScript* script)
@@ -920,6 +1022,9 @@ js::DumpBindings(JSContext* cx, Scope* scope) {
             break;
           case BindingLocation::Kind::NamedLambdaCallee:
             fprintf(stderr, "named lambda callee\n");
+            break;
+          case BindingLocation::Kind::Import:
+            fprintf(stderr, "import\n");
             break;
         }
     }
@@ -962,6 +1067,12 @@ EvalScope::sizeOfData(mozilla::MallocSizeOf mallocSizeOf) const
     return mallocSizeOf(&bindingData());
 }
 
+size_t
+ModuleScope::sizeOfData(mozilla::MallocSizeOf mallocSizeOf) const
+{
+    return mallocSizeOf(&bindingData());
+}
+
 JS::ubi::Node::Size
 JS::ubi::Concrete<Scope>::size(mozilla::MallocSizeOf mallocSizeOf) const
 {
@@ -975,6 +1086,8 @@ JS::ubi::Concrete<Scope>::size(mozilla::MallocSizeOf mallocSizeOf) const
         size += get().as<GlobalScope>().sizeOfData(mallocSizeOf);
     else if (get().is<EvalScope>())
         size += get().as<EvalScope>().sizeOfData(mallocSizeOf);
+    else if (get().is<ModuleScope>())
+        size += get().as<ModuleScope>().sizeOfData(mallocSizeOf);
 
     return size;
 }

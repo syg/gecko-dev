@@ -3674,7 +3674,8 @@ reflect_parse(JSContext* cx, uint32_t argc, Value* vp)
             return false;
 
         ModuleBuilder builder(cx, module);
-        pn = parser.standaloneModule(module, builder);
+        ModuleSharedContext modulesc(cx, module, &cx->global()->emptyGlobalScope(), builder);
+        pn = parser.moduleBody(&modulesc);
         if (!pn)
             return false;
 

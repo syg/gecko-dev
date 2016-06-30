@@ -293,6 +293,7 @@ enum class ThisBinding { Global, Function, Module };
 
 class GlobalSharedContext;
 class EvalSharedContext;
+class ModuleSharedContext;
 
 /*
  * The struct SharedContext is part of the current parser context (see
@@ -312,7 +313,8 @@ class SharedContext
     enum class Kind {
         ObjectBox,
         Global,
-        Eval
+        Eval,
+        Module
     };
 
     Kind kind_;
@@ -353,8 +355,8 @@ class SharedContext
     bool isObjectBox() { return toObjectBox(); }
     bool isFunctionBox() { return isObjectBox() && toObjectBox()->isFunctionBox(); }
     inline FunctionBox* asFunctionBox();
-    bool isModuleBox() { return isObjectBox() && toObjectBox()->isModuleBox(); }
-    inline ModuleBox* asModuleBox();
+    bool isModuleContext() { return kind_ == Kind::Module; }
+    inline ModuleSharedContext* asModuleContext();
     bool isGlobalContext() { return kind_ == Kind::Global; }
     inline GlobalSharedContext* asGlobalContext();
     bool isEvalContext() { return kind_ == Kind::Eval; }
@@ -592,17 +594,20 @@ class FunctionBox : public ObjectBox, public SharedContext
     void trace(JSTracer* trc) override;
 };
 
-class ModuleBox : public ObjectBox, public SharedContext
+class MOZ_STACK_CLASS ModuleSharedContext : public SharedContext
 {
+    RootedModuleObject module_;
+    RootedScope enclosingScope_;
+
   public:
+    ModuleScope::BindingData* bindings;
     ModuleBuilder& builder;
 
-    ModuleBox(ExclusiveContext* cx, ObjectBox* traceListHead, ModuleObject* module,
-              ModuleBuilder& builder);
+    ModuleSharedContext(ExclusiveContext* cx, ModuleObject* module, Scope* enclosingScope,
+                        ModuleBuilder& builder);
 
-    ObjectBox* toObjectBox() override { return this; }
-    ModuleObject* module() const { return &object->as<ModuleObject>(); }
-    Scope* compilationEnclosingScope() const override { return nullptr; }
+    HandleModuleObject module() const { return module_; }
+    Scope* compilationEnclosingScope() const override { return enclosingScope_; }
 };
 
 inline FunctionBox*
@@ -612,11 +617,11 @@ SharedContext::asFunctionBox()
     return static_cast<FunctionBox*>(this);
 }
 
-inline ModuleBox*
-SharedContext::asModuleBox()
+inline ModuleSharedContext*
+SharedContext::asModuleContext()
 {
-    MOZ_ASSERT(isModuleBox());
-    return static_cast<ModuleBox*>(this);
+    MOZ_ASSERT(isModuleContext());
+    return static_cast<ModuleSharedContext*>(this);
 }
 
 inline GlobalSharedContext*

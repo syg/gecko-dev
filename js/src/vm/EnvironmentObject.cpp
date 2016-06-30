@@ -345,7 +345,7 @@ const Class ModuleEnvironmentObject::class_ = {
 ModuleEnvironmentObject::create(ExclusiveContext* cx, HandleModuleObject module)
 {
     RootedScript script(cx, module->script());
-    RootedShape shape(cx, script->callObjShape());
+    RootedShape shape(cx, script->bodyScope()->as<ModuleScope>().environmentShape());
     MOZ_ASSERT(shape->getObjectClass() == &class_);
 
     RootedObjectGroup group(cx, ObjectGroup::defaultNewGroup(cx, &class_, TaggedProto(nullptr)));
@@ -360,28 +360,26 @@ ModuleEnvironmentObject::create(ExclusiveContext* cx, HandleModuleObject module)
     if (!obj)
         return nullptr;
 
-    RootedModuleEnvironmentObject scope(cx, &obj->as<ModuleEnvironmentObject>());
+    RootedModuleEnvironmentObject env(cx, &obj->as<ModuleEnvironmentObject>());
 
-    scope->initReservedSlot(MODULE_SLOT, ObjectValue(*module));
-    if (!JSObject::setSingleton(cx, scope))
+    env->initReservedSlot(MODULE_SLOT, ObjectValue(*module));
+    if (!JSObject::setSingleton(cx, env))
         return nullptr;
 
-    // Initialize this early so that we can manipulate the scope object without
+    // Initialize this early so that we can manipulate the env object without
     // causing assertions.
-    RootedObject globalLexical(cx, &cx->global()->lexicalEnvironment());
-    // TODOshu
-    //scope->setEnclosingScope(globalLexical);
+    env->initEnclosingEnvironment(&cx->global()->lexicalEnvironment());
 
     // It is not be possible to add or remove bindings from a module environment
     // after this point as module code is always strict.
 #ifdef DEBUG
-    for (Shape::Range<NoGC> r(scope->lastProperty()); !r.empty(); r.popFront())
+    for (Shape::Range<NoGC> r(env->lastProperty()); !r.empty(); r.popFront())
         MOZ_ASSERT(!r.front().configurable());
-    MOZ_ASSERT(scope->lastProperty()->getObjectFlags() & BaseShape::NOT_EXTENSIBLE);
-    MOZ_ASSERT(!scope->inDictionaryMode());
+    MOZ_ASSERT(env->lastProperty()->getObjectFlags() & BaseShape::NOT_EXTENSIBLE);
+    MOZ_ASSERT(!env->inDictionaryMode());
 #endif
 
-    return scope;
+    return env;
 }
 
 ModuleObject&

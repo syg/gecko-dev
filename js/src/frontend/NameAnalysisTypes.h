@@ -95,13 +95,15 @@ DeclarationKindToBindingKind(DeclarationKind kind)
         return BindingKind::Var;
 
       case DeclarationKind::Let:
-      case DeclarationKind::Import:
       case DeclarationKind::LexicalFunction:
       case DeclarationKind::CatchParameter:
         return BindingKind::Let;
 
       case DeclarationKind::Const:
         return BindingKind::Const;
+
+      case DeclarationKind::Import:
+        return BindingKind::Import;
     }
 
     MOZ_CRASH("Bad DeclarationKind");
@@ -171,6 +173,9 @@ class NameLocation
         // In a named lambda, the name is the callee itself.
         NamedLambdaCallee,
 
+        // An imported name in a module.
+        Import,
+
         // The name is a simple formal parameter name and can be retrieved
         // directly from the stack using slot_.
         ArgumentSlot,
@@ -235,6 +240,10 @@ class NameLocation
         return NameLocation(Kind::NamedLambdaCallee, BindingKind::NamedLambdaCallee);
     }
 
+    static NameLocation Import() {
+        return NameLocation(Kind::Import, BindingKind::Import);
+    }
+
     static NameLocation ArgumentSlot(uint16_t slot) {
         return NameLocation(Kind::ArgumentSlot, BindingKind::FormalParameter, 0, slot);
     }
@@ -259,6 +268,8 @@ class NameLocation
             return FrameSlot(bindKind, bl.slot());
           case BindingLocation::Kind::Environment:
             return EnvironmentCoordinate(bindKind, 0, bl.slot());
+          case BindingLocation::Kind::Import:
+            return Import();
           case BindingLocation::Kind::NamedLambdaCallee:
             return NamedLambdaCallee();
         }
@@ -313,10 +324,6 @@ class NameLocation
 
     bool isConst() const {
         return bindingKind() == BindingKind::Const;
-    }
-
-    bool isGlobal() const {
-        return kind_ == Kind::Global;
     }
 
     bool hasKnownSlot() const {

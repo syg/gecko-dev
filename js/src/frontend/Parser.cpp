@@ -705,47 +705,15 @@ Parser<ParseHandler>::newFunctionBox(Node fn, JSFunction* fun, Directives inheri
     return funbox;
 }
 
-ModuleBox::ModuleBox(ExclusiveContext* cx, ObjectBox* traceListHead, ModuleObject* module,
-                     ModuleBuilder& builder)
-  : ObjectBox(module, traceListHead),
-    SharedContext(cx, Kind::ObjectBox, Directives(true), false),
+ModuleSharedContext::ModuleSharedContext(ExclusiveContext* cx, ModuleObject* module,
+                                         Scope* enclosingScope, ModuleBuilder& builder)
+  : SharedContext(cx, Kind::Module, Directives(true), false),
+    module_(cx, module),
+    enclosingScope_(cx, enclosingScope),
+    bindings(nullptr),
     builder(builder)
 {
     thisBinding_ = ThisBinding::Module;
-}
-
-template <typename ParseHandler>
-ModuleBox*
-Parser<ParseHandler>::newModuleBox(Node pn, HandleModuleObject module, ModuleBuilder& builder)
-{
-    MOZ_ASSERT(module);
-
-    /*
-     * We use JSContext.tempLifoAlloc to allocate parsed objects and place them
-     * on a list in this Parser to ensure GC safety. Thus the tempLifoAlloc
-     * arenas containing the entries must be alive until we are done with
-     * scanning, parsing and code generation for the whole module.
-     */
-    ModuleBox* modbox =
-        alloc.new_<ModuleBox>(context, traceListHead, module, builder);
-    if (!modbox) {
-        ReportOutOfMemory(context);
-        return nullptr;
-    }
-
-    traceListHead = modbox;
-    if (pn)
-        handler.setModuleBox(pn, modbox);
-
-    return modbox;
-}
-
-template <>
-ModuleBox*
-Parser<SyntaxParseHandler>::newModuleBox(Node pn, HandleModuleObject module, ModuleBuilder& builder)
-{
-    MOZ_ALWAYS_FALSE(abortIfSyntaxParser());
-    return nullptr;
 }
 
 template <typename ParseHandler>
@@ -1119,77 +1087,6 @@ Parser<ParseHandler>::noteUsedName(HandlePropertyName name, UsedNameInfo info)
 }
 
 template <>
-ParseNode*
-Parser<FullParseHandler>::standaloneModule(HandleModuleObject module, ModuleBuilder& builder)
-{
-    MOZ_ASSERT(checkOptionsCalled);
-
-    Node mn = handler.newModule();
-    if (!mn)
-        return null();
-
-    ModuleBox* modulebox = newModuleBox(mn, module, builder);
-    if (!modulebox)
-        return null();
-    handler.setModuleBox(mn, modulebox);
-
-    ParseContext modulepc(this, modulebox, nullptr);
-    if (!modulepc.init())
-        return null();
-
-    ParseNode* pn = statements(YieldIsKeyword);
-    if (!pn)
-        return null();
-
-    MOZ_ASSERT(pn->isKind(PNK_STATEMENTLIST));
-    mn->pn_body = pn;
-
-    TokenKind tt;
-    if (!tokenStream.getToken(&tt, TokenStream::Operand))
-        return null();
-    if (tt != TOK_EOF) {
-        report(ParseError, false, null(), JSMSG_GARBAGE_AFTER_INPUT, "module", TokenKindToDesc(tt));
-        return null();
-    }
-
-    if (!builder.buildTables())
-        return null();
-
-    // Check exported local bindings exist and mark them as closed over.
-    for (auto entry : modulebox->builder.localExportEntries()) {
-        JSAtom* name = entry->localName();
-        MOZ_ASSERT(name);
-
-        DeclaredNamePtr p = modulepc.varScope().lookupDeclaredName(name);
-        if (!p) {
-            JSAutoByteString str;
-            if (!str.encodeLatin1(context, name))
-                return null();
-
-            JS_ReportErrorNumber(context->asJSContext(), GetErrorMessage, nullptr,
-                                 JSMSG_MISSING_EXPORT, str.ptr());
-            return null();
-        }
-
-        p->value()->setClosedOver();
-    }
-
-    if (!FoldConstants(context, &pn, this))
-        return null();
-
-    MOZ_ASSERT(mn->pn_modulebox == modulebox);
-    return mn;
-}
-
-template <>
-SyntaxParseHandler::Node
-Parser<SyntaxParseHandler>::standaloneModule(HandleModuleObject module, ModuleBuilder& builder)
-{
-    MOZ_ALWAYS_FALSE(abortIfSyntaxParser());
-    return SyntaxParseHandler::NodeFailure;
-}
-
-template <>
 bool
 Parser<FullParseHandler>::checkStatementsEOF()
 {
@@ -1277,6 +1174,71 @@ Parser<FullParseHandler>::newGlobalScopeData(ParseContext::Scope& scope,
         PodCopy(cursor, funs.begin(), funs.length());
         cursor += funs.length();
         *functionBindingEnd = cursor - start;
+
+        PodCopy(cursor, vars.begin(), vars.length());
+        cursor += vars.length();
+        bindings->letStart = cursor - start;
+
+        PodCopy(cursor, lets.begin(), lets.length());
+        cursor += lets.length();
+        bindings->constStart = cursor - start;
+
+        PodCopy(cursor, consts.begin(), consts.length());
+        bindings->length = numBindings;
+    }
+
+    return Some(bindings);
+}
+
+template <>
+Maybe<ModuleScope::BindingData*>
+Parser<FullParseHandler>::newModuleScopeData(ParseContext::Scope& scope)
+{
+    Vector<BindingName> imports(context);
+    Vector<BindingName> vars(context);
+    Vector<BindingName> lets(context);
+    Vector<BindingName> consts(context);
+
+    bool closeOverAllBindings = pc->sc()->closeOverAllBindings();
+    for (BindingIter bi = scope.bindings(pc); bi; bi++) {
+        BindingName binding(bi.name(), closeOverAllBindings || bi.closedOver());
+        switch (bi.kind()) {
+          case BindingKind::Import:
+            if (!imports.append(binding))
+                return Nothing();
+            break;
+          case BindingKind::Var:
+            if (!vars.append(binding))
+                return Nothing();
+            break;
+          case BindingKind::Let:
+            if (!lets.append(binding))
+                return Nothing();
+            break;
+          case BindingKind::Const:
+            if (!consts.append(binding))
+                return Nothing();
+            break;
+          default:
+            MOZ_CRASH("Bad module scope BindingKind");
+        }
+    }
+
+    ModuleScope::BindingData* bindings = nullptr;
+    uint32_t numBindings = vars.length() + imports.length() + lets.length() + consts.length();
+
+    if (numBindings > 0) {
+        bindings = NewEmptyBindingData<ModuleScope>(context, alloc, numBindings);
+        if (!bindings)
+            return Nothing();
+
+        // The ordering here is important. See comments in ModuleScope.
+        BindingName* start = bindings->names;
+        BindingName* cursor = start;
+
+        PodCopy(cursor, imports.begin(), imports.length());
+        cursor += imports.length();
+        bindings->varStart = cursor - start;
 
         PodCopy(cursor, vars.begin(), vars.length());
         cursor += vars.length();
@@ -1543,8 +1505,13 @@ IsArgumentsUsedInLegacyGenerator(ExclusiveContext* cx, Scope* scope)
 
 template <>
 ParseNode*
-Parser<FullParseHandler>::evalBody()
+Parser<FullParseHandler>::evalBody(EvalSharedContext* evalsc)
 {
+    ParseContext evalpc(this, evalsc, /* newDirectives = */ nullptr);
+    if (!evalpc.init())
+        return nullptr;
+
+    // All evals have an implicit non-extensible lexical scope.
     ParseContext::Scope scope(pc);
     if (!scope.init(pc))
         return nullptr;
@@ -1578,13 +1545,15 @@ Parser<FullParseHandler>::evalBody()
         }
     }
 
+    if (!FoldConstants(context, &body, this))
+        return nullptr;
+
     uint32_t functionBindingEnd = 0;
     Maybe<EvalScope::BindingData*> bindings =
         newEvalScopeData(pc->varScope(), &functionBindingEnd);
     if (!bindings)
         return nullptr;
 
-    EvalSharedContext* evalsc = pc->sc()->asEvalContext();
     evalsc->bindings = *bindings;
     evalsc->functionBindingEnd = functionBindingEnd;
 
@@ -1593,9 +1562,11 @@ Parser<FullParseHandler>::evalBody()
 
 template <>
 ParseNode*
-Parser<FullParseHandler>::globalBody()
+Parser<FullParseHandler>::globalBody(GlobalSharedContext* globalsc)
 {
-    MOZ_ASSERT(pc->atGlobalLevel());
+    ParseContext evalpc(this, globalsc, /* newDirectives = */ nullptr);
+    if (!evalpc.init())
+        return nullptr;
 
     ParseNode* body = statements(YieldIsName);
     if (!body)
@@ -1604,17 +1575,89 @@ Parser<FullParseHandler>::globalBody()
     if (!checkStatementsEOF())
         return nullptr;
 
+    if (!FoldConstants(context, &body, this))
+        return nullptr;
+
     uint32_t functionBindingEnd = 0;
     Maybe<GlobalScope::BindingData*> bindings = newGlobalScopeData(pc->varScope(),
                                                                    &functionBindingEnd);
     if (!bindings)
         return nullptr;
 
-    GlobalSharedContext* globalsc = pc->sc()->asGlobalContext();
     globalsc->bindings = *bindings;
     globalsc->functionBindingEnd = functionBindingEnd;
 
     return body;
+}
+
+template <>
+ParseNode*
+Parser<FullParseHandler>::moduleBody(ModuleSharedContext* modulesc)
+{
+    MOZ_ASSERT(checkOptionsCalled);
+
+    ParseContext modulepc(this, modulesc, nullptr);
+    if (!modulepc.init())
+        return null();
+
+    Node mn = handler.newModule();
+    if (!mn)
+        return null();
+
+    ParseNode* pn = statements(YieldIsKeyword);
+    if (!pn)
+        return null();
+
+    MOZ_ASSERT(pn->isKind(PNK_STATEMENTLIST));
+    mn->pn_body = pn;
+
+    TokenKind tt;
+    if (!tokenStream.getToken(&tt, TokenStream::Operand))
+        return null();
+    if (tt != TOK_EOF) {
+        report(ParseError, false, null(), JSMSG_GARBAGE_AFTER_INPUT, "module", TokenKindToDesc(tt));
+        return null();
+    }
+
+    if (!modulesc->builder.buildTables())
+        return null();
+
+    // Check exported local bindings exist and mark them as closed over.
+    for (auto entry : modulesc->builder.localExportEntries()) {
+        JSAtom* name = entry->localName();
+        MOZ_ASSERT(name);
+
+        DeclaredNamePtr p = modulepc.varScope().lookupDeclaredName(name);
+        if (!p) {
+            JSAutoByteString str;
+            if (!str.encodeLatin1(context, name))
+                return null();
+
+            JS_ReportErrorNumber(context->asJSContext(), GetErrorMessage, nullptr,
+                                 JSMSG_MISSING_EXPORT, str.ptr());
+            return null();
+        }
+
+        p->value()->setClosedOver();
+    }
+
+    if (!FoldConstants(context, &pn, this))
+        return null();
+
+    Maybe<ModuleScope::BindingData*> bindings = newModuleScopeData(modulepc.varScope());
+    if (!bindings)
+        return nullptr;
+
+    modulesc->bindings = *bindings;
+    return mn;
+}
+
+template <>
+SyntaxParseHandler::Node
+Parser<SyntaxParseHandler>::moduleBody(ModuleSharedContext* modulesc)
+{
+    MOZ_ALWAYS_FALSE(abortIfSyntaxParser());
+    return SyntaxParseHandler::NodeFailure;
 }
 
 template <typename ParseHandler>
@@ -4048,7 +4091,21 @@ Parser<SyntaxParseHandler>::lexicalDeclaration(YieldHandling, bool)
     return SyntaxParseHandler::NodeFailure;
 }
 
-template<>
+template <typename ParseHandler>
+typename ParseHandler::Node
+Parser<ParseHandler>::newImportBindingNameForCurrentName()
+{
+    RootedPropertyName name(context, tokenStream.currentName());
+    Node bindingName = newName(name);
+    if (!bindingName)
+        return null();
+    handler.setPosition(bindingName, pos());
+    if (!noteDeclaredName(name, DeclarationKind::Import, bindingName))
+        return null();
+    return bindingName;
+}
+
+template <>
 bool
 Parser<FullParseHandler>::namedImportsOrNamespaceImport(TokenKind tt, Node importSpecSet)
 {
@@ -4092,7 +4149,7 @@ Parser<FullParseHandler>::namedImportsOrNamespaceImport(TokenKind tt, Node impor
                 }
             }
 
-            Node bindingName = newName(tokenStream.currentName());
+            Node bindingName = newImportBindingNameForCurrentName();
             if (!bindingName)
                 return false;
             handler.setPosition(bindingName, pos());
@@ -4133,7 +4190,7 @@ Parser<FullParseHandler>::namedImportsOrNamespaceImport(TokenKind tt, Node impor
         if (!importName)
             return null();
 
-        Node bindingName = newName(tokenStream.currentName());
+        Node bindingName = newImportBindingNameForCurrentName();
         if (!bindingName)
             return null();
 
@@ -4253,7 +4310,7 @@ Parser<FullParseHandler>::importDeclaration()
 
     ParseNode* node =
         handler.newImportDeclaration(importSpecSet, moduleSpec, TokenPos(begin, pos().end));
-    if (!node || !pc->sc()->asModuleBox()->builder.processImport(node))
+    if (!node || !pc->sc()->asModuleContext()->builder.processImport(node))
         return null();
 
     return node;
@@ -4273,12 +4330,11 @@ Parser<FullParseHandler>::classDefinition(YieldHandling yieldHandling,
                                           ClassContext classContext,
                                           DefaultHandling defaultHandling);
 
-
 template<>
 bool
 Parser<FullParseHandler>::checkExportedName(JSAtom* exportName)
 {
-    if (!pc->sc()->asModuleBox()->builder.hasExportedName(exportName))
+    if (!pc->sc()->asModuleContext()->builder.hasExportedName(exportName))
         return true;
 
     JSAutoByteString str;
@@ -4424,7 +4480,7 @@ Parser<FullParseHandler>::exportDeclaration()
                 return null();
 
             ParseNode* node = handler.newExportFromDeclaration(begin, kid, moduleSpec);
-            if (!node || !pc->sc()->asModuleBox()->builder.processExportFrom(node))
+            if (!node || !pc->sc()->asModuleContext()->builder.processExportFrom(node))
                 return null();
 
             return node;
@@ -4470,7 +4526,7 @@ Parser<FullParseHandler>::exportDeclaration()
             return null();
 
         ParseNode* node = handler.newExportFromDeclaration(begin, kid, moduleSpec);
-        if (!node || !pc->sc()->asModuleBox()->builder.processExportFrom(node))
+        if (!node || !pc->sc()->asModuleContext()->builder.processExportFrom(node))
             return null();
 
         return node;
@@ -4540,8 +4596,9 @@ Parser<FullParseHandler>::exportDeclaration()
             break;
         }
 
-        ParseNode* node = handler.newExportDefaultDeclaration(kid, nameNode, TokenPos(begin, pos().end));
-        if (!node || !pc->sc()->asModuleBox()->builder.processExport(node))
+        ParseNode* node = handler.newExportDefaultDeclaration(kid, nameNode,
+                                                              TokenPos(begin, pos().end));
+        if (!node || !pc->sc()->asModuleContext()->builder.processExport(node))
             return null();
 
         return node;
@@ -4562,7 +4619,7 @@ Parser<FullParseHandler>::exportDeclaration()
     }
 
     ParseNode* node = handler.newExportDeclaration(kid, TokenPos(begin, pos().end));
-    if (!node || !pc->sc()->asModuleBox()->builder.processExport(node))
+    if (!node || !pc->sc()->asModuleContext()->builder.processExport(node))
         return null();
 
     return node;

@@ -18,7 +18,6 @@ namespace frontend {
 class ParseContext;
 class FullParseHandler;
 class FunctionBox;
-class ModuleBox;
 class ObjectBox;
 
 #define FOR_EACH_PARSE_NODE_KIND(F) \
@@ -413,8 +412,8 @@ IsDeleteKind(ParseNodeKind kind)
  *
  * PNK_SETTHIS      binary  pn_left: '.this' Name, pn_right: SuperCall
  *
- * PNK_LEXICALSCOPE name    pn_objbox: block object in ObjectBox holder
- *                          pn_expr: block body
+ * PNK_LEXICALSCOPE scope   pn_u.scope.bindings: scope bindings
+ *                          pn_u.scope.body: scope body
  * PNK_GENERATOR    nullary
  * PNK_YIELD,       binary  pn_left: expr or null; pn_right: generator object
  * PNK_YIELD_STAR
@@ -546,7 +545,6 @@ class ParseNode
                 JSAtom*      atom;      /* lexical name or label atom */
                 ObjectBox*   objbox;    /* regexp object */
                 FunctionBox* funbox;    /* function object */
-                ModuleBox*   modulebox; /* module object */
             };
             ParseNode*  expr;           /* module or function body, var
                                            initializer, argument default, or
@@ -566,7 +564,6 @@ class ParseNode
         } loopControl;
     } pn_u;
 
-#define pn_modulebox    pn_u.name.modulebox
 #define pn_objbox       pn_u.name.objbox
 #define pn_funbox       pn_u.name.funbox
 #define pn_body         pn_u.name.expr
@@ -1360,8 +1357,6 @@ class ObjectBox
     ObjectBox(JSObject* object, ObjectBox* traceLink);
     bool isFunctionBox() { return object->is<JSFunction>(); }
     FunctionBox* asFunctionBox();
-    bool isModuleBox();
-    ModuleBox* asModuleBox();
     virtual void trace(JSTracer* trc);
 
     static void TraceList(JSTracer* trc, ObjectBox* listHead);

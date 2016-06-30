@@ -533,7 +533,7 @@ class ParseContext : public Nestable<ParseContext>
 
     // True if we are at the topmost level of a module only.
     bool atModuleLevel() {
-        return atBodyLevel() && sc_->isModuleBox();
+        return atBodyLevel() && sc_->isModuleContext();
     }
 
     void setIsStandaloneFunctionBody() {
@@ -810,7 +810,6 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     ObjectBox* newObjectBox(JSObject* obj);
     FunctionBox* newFunctionBox(Node fn, JSFunction* fun, Directives directives,
                                 GeneratorKind generatorKind, bool tryAnnexB);
-    ModuleBox* newModuleBox(Node pn, HandleModuleObject module, ModuleBuilder& builder);
 
     /*
      * Create a new function object given a name (which is optional if this is
@@ -863,13 +862,13 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     // Eval scripts are distinguished from global scripts in that in ES6, per
     // 18.2.1.1 steps 9 and 10, all eval scripts are executed under a fresh
     // lexical scope.
-    Node evalBody();
+    Node evalBody(EvalSharedContext* evalsc);
 
     // Parse the body of a global script.
-    Node globalBody();
+    Node globalBody(GlobalSharedContext* globalsc);
 
     // Parse a module.
-    Node standaloneModule(Handle<ModuleObject*> module, ModuleBuilder& builder);
+    Node moduleBody(ModuleSharedContext* modulesc);
 
     // Parse a function, given only its body. Used for the Function and
     // Generator constructors.
@@ -1098,6 +1097,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     Node destructuringDeclarationWithoutYield(DeclarationKind kind, YieldHandling yieldHandling,
                                               TokenKind tt, unsigned msg);
 
+    Node newImportBindingNameForCurrentName();
     bool namedImportsOrNamespaceImport(TokenKind tt, Node importSpecSet);
     bool checkExportedName(JSAtom* exportName);
     bool checkExportedNamesForDeclaration(Node node);
@@ -1193,6 +1193,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
 
     mozilla::Maybe<GlobalScope::BindingData*> newGlobalScopeData(ParseContext::Scope& scope,
                                                                  uint32_t* functionBindingEnd);
+    mozilla::Maybe<ModuleScope::BindingData*> newModuleScopeData(ParseContext::Scope& scope);
     mozilla::Maybe<EvalScope::BindingData*> newEvalScopeData(ParseContext::Scope& scope,
                                                              uint32_t* functionBindingEnd);
     mozilla::Maybe<FunctionScope::BindingData*> newFunctionScopeData(ParseContext::Scope& scope,

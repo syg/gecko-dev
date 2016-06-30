@@ -462,6 +462,7 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
     MOZ_MUST_USE bool enterFunctionBody(BytecodeEmitter* bce, FunctionBox* funbox);
     MOZ_MUST_USE bool enterGlobal(BytecodeEmitter* bce, GlobalSharedContext* globalsc);
     MOZ_MUST_USE bool enterEval(BytecodeEmitter* bce, EvalSharedContext* evalsc);
+    MOZ_MUST_USE bool enterModule(BytecodeEmitter* module, ModuleSharedContext* modulesc);
     MOZ_MUST_USE bool enterWith(BytecodeEmitter* bce);
 
     MOZ_MUST_USE bool leave(BytecodeEmitter* bce, bool nonLocal = false);
@@ -541,6 +542,9 @@ BytecodeEmitter::EmitterScope::dump(BytecodeEmitter* bce)
           case NameLocation::Kind::NamedLambdaCallee:
             fprintf(stdout, "named lambda callee\n");
             break;
+          case NameLocation::Kind::Import:
+            fprintf(stdout, "import\n");
+            break;
           case NameLocation::Kind::ArgumentSlot:
             fprintf(stdout, "arg slot=%u\n", l.argumentSlot());
             break;
@@ -604,7 +608,7 @@ BytecodeEmitter::EmitterScope::searchInEnclosingScope(JSAtom* name, Scope* scope
           case ScopeKind::NamedLambda:
           case ScopeKind::StrictNamedLambda:
           case ScopeKind::Catch:
-          case ScopeKind::StrictEval:
+          case ScopeKind::Module:
             if (hasEnv) {
                 for (BindingIter bi(si.scope()); bi; bi++) {
                     if (bi.name() != name)
@@ -614,23 +618,24 @@ BytecodeEmitter::EmitterScope::searchInEnclosingScope(JSAtom* name, Scope* scope
                     // over. If this assertion is hit, there is a bug in
                     // the name analysis.
                     BindingLocation bindLoc = bi.location();
+
+                    if (bindLoc.kind() == BindingLocation::Kind::Import) {
+                        MOZ_ASSERT(si.kind() == ScopeKind::Module);
+                        return NameLocation::Import();
+                    }
+
                     MOZ_ASSERT(bindLoc.kind() == BindingLocation::Kind::Environment);
                     return NameLocation::EnvironmentCoordinate(bi.kind(), hops, bindLoc.slot());
                 }
             }
-
-            // Don't try to look for names past an eval boundary.
-            if (si.kind() == ScopeKind::StrictEval)
-                return NameLocation::Dynamic();
-
             break;
 
           case ScopeKind::Global:
             return NameLocation::Global(BindingKind::Var);
 
           case ScopeKind::With:
-          case ScopeKind::Module:
           case ScopeKind::Eval:
+          case ScopeKind::StrictEval:
           case ScopeKind::NonSyntactic:
             return NameLocation::Dynamic();
         }
@@ -1037,6 +1042,49 @@ BytecodeEmitter::EmitterScope::enterEval(BytecodeEmitter* bce, EvalSharedContext
         return EvalScope::create(cx, scopeKind, evalsc->bindings, enclosing);
     };
     return internBodyScope(bce, createScope);
+}
+
+bool
+BytecodeEmitter::EmitterScope::enterModule(BytecodeEmitter* bce, ModuleSharedContext* modulesc)
+{
+    MOZ_ASSERT(this == bce->innermostEmitterScope);
+
+    bce->setBodyEmitterScope(this);
+
+    if (!ensureCache(bce))
+        return false;
+
+    // Resolve body-level bindings, if there are any.
+    if (ModuleScope::BindingData* bindings = modulesc->bindings) {
+        BindingIter bi(*bindings);
+        for (; bi; bi++) {
+            if (!checkSlotLimits(bce, bi))
+                return false;
+
+            NameLocation loc = NameLocation::fromBinding(bi.kind(), bi.location());
+            if (loc.kind() == NameLocation::Kind::EnvironmentCoordinate)
+                hasEnvironment_ = true;
+
+            if (!putNameInCache(bce, bi.name(), loc))
+                return false;
+        }
+
+        updateFrameFixedSlots(bce, bi);
+    } else {
+        nextFrameSlot_ = 0;
+    }
+
+    // Modules are toplevel, so any free names are global.
+    fallbackFreeNameLocation_ = Some(NameLocation::Global(BindingKind::Var));
+
+    // Create and intern the VM scope.
+    auto createScope = [modulesc](ExclusiveContext* cx, HandleScope enclosing) {
+        return ModuleScope::create(cx, modulesc->bindings, modulesc->module(), enclosing);
+    };
+    if (!internBodyScope(bce, createScope))
+        return false;
+
+    return checkEnvironmentChainLength(bce);
 }
 
 bool
@@ -2603,6 +2651,11 @@ BytecodeEmitter::emitGetNameAtLocation(JSAtom* name, const NameLocation& loc, bo
             return false;
         break;
 
+      case NameLocation::Kind::Import:
+        if (!emitAtomOp(name, JSOP_GETIMPORT))
+            return false;
+        break;
+
       case NameLocation::Kind::ArgumentSlot:
         if (!emitArgOp(JSOP_GETARG, loc.argumentSlot()))
             return false;
@@ -2636,6 +2689,7 @@ BytecodeEmitter::emitGetNameAtLocation(JSAtom* name, const NameLocation& loc, bo
 
           case NameLocation::Kind::Intrinsic:
           case NameLocation::Kind::NamedLambdaCallee:
+          case NameLocation::Kind::Import:
           case NameLocation::Kind::ArgumentSlot:
           case NameLocation::Kind::FrameSlot:
           case NameLocation::Kind::EnvironmentCoordinate:
@@ -2662,7 +2716,8 @@ BytecodeEmitter::emitSetOrInitializeNameAtLocation(JSAtom* name, const NameLocat
     bool emittedBindOp = false;
 
     switch (loc.kind()) {
-      case NameLocation::Kind::Dynamic: {
+      case NameLocation::Kind::Dynamic:
+      case NameLocation::Kind::Import: {
         uint32_t atomIndex;
         if (!makeAtomIndex(name, &atomIndex))
             return false;
@@ -3667,10 +3722,15 @@ BytecodeEmitter::emitScript(ParseNode* body)
     if (sc->isGlobalContext()) {
         if (!emitterScope.enterGlobal(this, sc->asGlobalContext()))
             return false;
-    } else {
+    } else if (sc->isEvalContext()) {
         if (!emitterScope.enterEval(this, sc->asEvalContext()))
             return false;
+    } else if (sc->isModuleContext()) {
+        if (!emitterScope.enterModule(this, sc->asModuleContext()))
+            return false;
     }
+
+    setFunctionBodyEndPos(body->pn_pos);
 
     if (!emitTree(body))
         return false;
@@ -3745,29 +3805,6 @@ BytecodeEmitter::emitFunctionScript(ParseNode* body)
         return false;
 
     tellDebuggerAboutCompiledScript(cx);
-
-    return true;
-}
-
-bool
-BytecodeEmitter::emitModuleScript(ParseNode* body)
-{
-    MOZ_ASSERT(sc->asModuleBox());
-
-    setFunctionBodyEndPos(body->pn_pos);
-    if (!emitTree(body))
-        return false;
-
-    // Always end the script with a JSOP_RETRVAL. Some other parts of the codebase
-    // depend on this opcode, e.g. InterpreterRegs::setToEndOfScript.
-    if (!emit1(JSOP_RETRVAL))
-        return false;
-
-    if (!JSScript::fullyInitFromEmitter(cx, script, this))
-        return false;
-
-    tellDebuggerAboutCompiledScript(cx);
-
     return true;
 }
 
@@ -6248,11 +6285,11 @@ BytecodeEmitter::emitFunction(ParseNode* pn, bool needsProto)
         if (!updateSourceCoordNotes(pn->pn_pos.begin))
             return false;
         switchToMain();
-    } else if (sc->isModuleBox()) {
+    } else if (sc->isModuleContext()) {
         // For modules, we record the function and instantiate the binding
         // during ModuleDeclarationInstantiation(), before the script is run.
 
-        RootedModuleObject module(cx, sc->asModuleBox()->module());
+        RootedModuleObject module(cx, sc->asModuleContext()->module());
         if (!module->noteFunctionDeclaration(cx, name, fun))
             return false;
     } else {
@@ -8611,11 +8648,11 @@ BytecodeEmitter::emitTree(ParseNode* pn, EmitLineNumberNote emitLineNote)
         break;
 
       case PNK_IMPORT:
-        MOZ_ASSERT(sc->isModuleBox());
+        MOZ_ASSERT(sc->isModuleContext());
         break;
 
       case PNK_EXPORT:
-        MOZ_ASSERT(sc->isModuleBox());
+        MOZ_ASSERT(sc->isModuleContext());
         if (pn->pn_kid->getKind() != PNK_EXPORT_SPEC_LIST) {
             if (!emitTree(pn->pn_kid))
                 return false;
@@ -8623,7 +8660,7 @@ BytecodeEmitter::emitTree(ParseNode* pn, EmitLineNumberNote emitLineNote)
         break;
 
       case PNK_EXPORT_DEFAULT:
-        MOZ_ASSERT(sc->isModuleBox());
+        MOZ_ASSERT(sc->isModuleContext());
         if (!emitTree(pn->pn_kid))
             return false;
         if (pn->pn_right) {
@@ -8635,7 +8672,7 @@ BytecodeEmitter::emitTree(ParseNode* pn, EmitLineNumberNote emitLineNote)
         break;
 
       case PNK_EXPORT_FROM:
-        MOZ_ASSERT(sc->isModuleBox());
+        MOZ_ASSERT(sc->isModuleContext());
         break;
 
       case PNK_ARRAYPUSH:

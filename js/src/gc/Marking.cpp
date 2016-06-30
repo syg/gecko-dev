@@ -1208,6 +1208,12 @@ TraceBindingData<FunctionScope::BindingData>(JSTracer* trc, FunctionScope::Bindi
 {
     TraceNullableBindingNames(trc, data->names, data->length);
 }
+template <>
+void
+TraceBindingData<ModuleScope::BindingData>(JSTracer* trc, ModuleScope::BindingData* data)
+{
+    TraceNullableBindingNames(trc, data->names, data->length);
+}
 void
 BindingIter::trace(JSTracer* trc)
 {
@@ -1240,9 +1246,12 @@ Scope::traceChildren(JSTracer* trc)
       case ScopeKind::StrictEval:
         TraceBindingData(trc, reinterpret_cast<EvalScope::BindingData*>(data_));
         break;
-      case ScopeKind::Module:
-        MOZ_CRASH("NYI");
+      case ScopeKind::Module: {
+        ModuleScope::Data* data = reinterpret_cast<ModuleScope::Data*>(data_);
+        TraceEdge(trc, &data->module, "scope module");
+        TraceBindingData(trc, data->bindings);
         break;
+      }
       case ScopeKind::With:
         break;
     }
@@ -1292,9 +1301,13 @@ js::GCMarker::eagerlyMarkChildren(Scope* scope)
         length = data->length;
         break;
       }
-      case ScopeKind::Module:
-        MOZ_CRASH("NYI");
+      case ScopeKind::Module: {
+        ModuleScope::Data* data = reinterpret_cast<ModuleScope::Data*>(scope->data_);
+        traverseEdge(scope, static_cast<JSObject*>(data->module));
+        names = data->bindings->names;
+        length = data->bindings->length;
         break;
+      }
       case ScopeKind::With:
         break;
     }

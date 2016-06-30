@@ -2533,8 +2533,8 @@ JSScript::initFromFunctionBox(ExclusiveContext* cx, HandleScript script,
 }
 
 /* static */ void
-JSScript::initFromModuleBox(ExclusiveContext* cx, HandleScript script,
-                            frontend::ModuleBox* modulebox)
+JSScript::initFromModuleContext(ExclusiveContext* cx, HandleScript script,
+                                frontend::ModuleSharedContext* modulesc)
 {
     script->funHasExtensibleScope_ = false;
     script->needsHomeObject_ = false;
@@ -2551,7 +2551,7 @@ JSScript::initFromModuleBox(ExclusiveContext* cx, HandleScript script,
 
     // Link the module and the script to each other, so that StaticScopeIter
     // may walk the scope chain of currently compiling scripts.
-    RootedModuleObject module(cx, modulebox->module());
+    RootedModuleObject module(cx, modulesc->module());
     script->setModule(module);
 }
 
@@ -2624,8 +2624,8 @@ JSScript::fullyInitFromEmitter(ExclusiveContext* cx, HandleScript script, Byteco
 
     if (bce->sc->isFunctionBox())
         initFromFunctionBox(cx, script, bce->sc->asFunctionBox());
-    else if (bce->sc->isModuleBox())
-        initFromModuleBox(cx, script, bce->sc->asModuleBox());
+    else if (bce->sc->isModuleContext())
+        initFromModuleContext(cx, script, bce->sc->asModuleContext());
 
     // Copy yield offsets last, as the generator kind is set in
     // initFromFunctionBox.

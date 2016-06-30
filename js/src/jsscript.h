@@ -57,7 +57,7 @@ class Shape;
 namespace frontend {
     struct BytecodeEmitter;
     class FunctionBox;
-    class ModuleBox;
+    class ModuleSharedContext;
 } // namespace frontend
 
 namespace detail {
@@ -895,8 +895,8 @@ class JSScript : public js::gc::TenuredCell
   private:
     static void initFromFunctionBox(js::ExclusiveContext* cx, js::HandleScript script,
                                     js::frontend::FunctionBox* funbox);
-    static void initFromModuleBox(js::ExclusiveContext* cx, js::HandleScript script,
-                                  js::frontend::ModuleBox* modulebox);
+    static void initFromModuleContext(js::ExclusiveContext* cx, js::HandleScript script,
+                                      js::frontend::ModuleSharedContext* modulesc);
 
   public:
     static bool fullyInitFromEmitter(js::ExclusiveContext* cx, js::HandleScript script,

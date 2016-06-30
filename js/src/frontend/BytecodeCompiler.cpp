@@ -74,9 +74,8 @@ class MOZ_STACK_CLASS BytecodeCompiler
     bool createParser();
     bool createSourceAndParser();
     bool createScript();
-    bool createEmitter(SharedContext* sharedContext);
+    bool emplaceEmitter(Maybe<BytecodeEmitter>& emitter, SharedContext* sharedContext);
     bool handleParseFailure(const Directives& newDirectives);
-    bool prepareTree(ParseNode** pn);
     bool deoptimizeArgumentsInEnclosingScripts(JSContext* cx, HandleObject environment);
     bool maybeSetDisplayURL(TokenStream& tokenStream);
     bool maybeSetSourceMap(TokenStream& tokenStream);
@@ -107,7 +106,6 @@ class MOZ_STACK_CLASS BytecodeCompiler
     TokenStream::Position startPosition;
 
     RootedScript script;
-    Maybe<BytecodeEmitter> emitter;
 };
 
 AutoCompilationTraceLogger::AutoCompilationTraceLogger(ExclusiveContext* cx,
@@ -256,7 +254,7 @@ BytecodeCompiler::createScript()
 }
 
 bool
-BytecodeCompiler::createEmitter(SharedContext* sharedContext)
+BytecodeCompiler::emplaceEmitter(Maybe<BytecodeEmitter>& emitter, SharedContext* sharedContext)
 {
     BytecodeEmitter::EmitterMode emitterMode =
         options.selfHostingMode ? BytecodeEmitter::SelfHosting : BytecodeEmitter::Normal;
@@ -283,19 +281,6 @@ BytecodeCompiler::handleParseFailure(const Directives& newDirectives)
     MOZ_ASSERT_IF(directives.strict(), newDirectives.strict());
     MOZ_ASSERT_IF(directives.asmJS(), newDirectives.asmJS());
     directives = newDirectives;
-    return true;
-}
-
-bool
-BytecodeCompiler::prepareTree(ParseNode** ppn)
-{
-    if (!FoldConstants(cx, ppn, parser.ptr()) ||
-        !NameFunctions(cx, *ppn))
-    {
-        return false;
-    }
-
-    emitter->setFunctionBodyEndPos((*ppn)->pn_pos);
     return true;
 }
 
@@ -377,19 +362,16 @@ BytecodeCompiler::compileScript(HandleObject environment, SharedContext* sc)
     if (!createScript())
         return nullptr;
 
-    if (!createEmitter(sc))
+    Maybe<BytecodeEmitter> emitter;
+    if (!emplaceEmitter(emitter, sc))
         return nullptr;
 
     for (;;) {
-        ParseContext pc(parser.ptr(), sc, /* newDirectives = */ nullptr);
-        if (!pc.init())
-            return nullptr;
-
         ParseNode* pn;
         if (sc->isEvalContext())
-            pn = parser->evalBody();
+            pn = parser->evalBody(sc->asEvalContext());
         else
-            pn = parser->globalBody();
+            pn = parser->globalBody(sc->asGlobalContext());
 
         // Successfully parsed. Emit the script.
         if (pn) {
@@ -401,7 +383,7 @@ BytecodeCompiler::compileScript(HandleObject environment, SharedContext* sc)
                 if (!deoptimizeArgumentsInEnclosingScripts(cx->asJSContext(), environment))
                     return nullptr;
             }
-            if (!prepareTree(&pn))
+            if (!NameFunctions(cx, pn))
                 return nullptr;
             if (!emitter->emitScript(pn))
                 return nullptr;
@@ -460,7 +442,8 @@ BytecodeCompiler::compileModule()
     module->init(script);
 
     ModuleBuilder builder(cx, module);
-    ParseNode* pn = parser->standaloneModule(module, builder);
+    ModuleSharedContext modulesc(cx, module, enclosingScope, builder);
+    ParseNode* pn = parser->moduleBody(&modulesc);
     if (!pn)
         return nullptr;
 
@@ -471,21 +454,22 @@ BytecodeCompiler::compileModule()
         return nullptr;
     }
 
-    RootedModuleEnvironmentObject dynamicScope(cx, ModuleEnvironmentObject::create(cx, module));
-    if (!dynamicScope)
+    Maybe<BytecodeEmitter> emitter;
+    if (!emplaceEmitter(emitter, &modulesc))
+        return nullptr;
+    if (!emitter->emitScript(pn->pn_body))
         return nullptr;
 
-    module->setInitialEnvironment(dynamicScope);
-
-    if (!createEmitter(pn->pn_modulebox))
-        return nullptr;
-    if (!emitter->emitModuleScript(pn->pn_body))
-        return nullptr;
+    parser->handler.freeTree(pn);
 
     if (!builder.initModule())
         return nullptr;
 
-    parser->handler.freeTree(pn);
+    RootedModuleEnvironmentObject env(cx, ModuleEnvironmentObject::create(cx, module));
+    if (!env)
+        return nullptr;
+
+    module->setInitialEnvironment(env);
 
     if (!maybeCompleteCompressSource())
         return nullptr;
@@ -534,7 +518,8 @@ BytecodeCompiler::compileFunctionBody(MutableHandleFunction fun,
         if (!createScript())
             return false;
 
-        if (!createEmitter(fn->pn_funbox))
+        Maybe<BytecodeEmitter> emitter;
+        if (!emplaceEmitter(emitter, fn->pn_funbox))
             return false;
         if (!emitter->emitFunctionScript(fn->pn_body))
             return false;

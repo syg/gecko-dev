@@ -427,14 +427,11 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     // Emit code for the tree rooted at pn.
     MOZ_MUST_USE bool emitTree(ParseNode* pn, EmitLineNumberNote emitLineNote = EMIT_LINENOTE);
 
-    // Emit global or eval code for tree rooted at body.
+    // Emit global, eval, or module code for tree rooted at body.
     MOZ_MUST_USE bool emitScript(ParseNode* body);
 
     // Emit function code for the tree rooted at body.
     MOZ_MUST_USE bool emitFunctionScript(ParseNode* body);
-
-    // Emit module code for the tree rooted at body.
-    MOZ_MUST_USE bool emitModuleScript(ParseNode* body);
 
     // If op is JOF_TYPESET (see the type barriers comment in TypeInference.h),
     // reserve a type set to store its result.

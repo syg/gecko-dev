@@ -20,12 +20,15 @@
 
 namespace js {
 
+class ModuleObject;
+
 enum class BindingKind : uint8_t
 {
     FormalParameter,
     Var,
     Let,
     Const,
+    Import,
 
     // So you think named lambda callee names are consts? Nope! They don't
     // throw when being assigned to in sloppy mode.
@@ -92,7 +95,8 @@ class BindingLocation
         Argument,
         Frame,
         Environment,
-        NamedLambdaCallee
+        NamedLambdaCallee,
+        Import
     };
 
   private:
@@ -125,6 +129,10 @@ class BindingLocation
 
     static BindingLocation NamedLambdaCallee() {
         return BindingLocation(Kind::NamedLambdaCallee, UINT32_MAX);
+    }
+
+    static BindingLocation Import() {
+        return BindingLocation(Kind::Import, UINT32_MAX);
     }
 
     bool operator==(const BindingLocation& other) const {
@@ -415,9 +423,9 @@ class FunctionScope : public Scope
                     MutableHandleScope scope);
 
   private:
-    // Because canonicalFunction is per-compartment and cannot be shared
-    // across runtimes, FunctionScopes have two data pointers, one for
-    // shareable data and one for per-compartment data.
+    // Because canonicalFunction is per-compartment and cannot be shared,
+    // FunctionScopes have two data pointers, one for shareable data and one
+    // for per-compartment data.
     struct Data
     {
         // The canonical function of the scope, as during a scope walk we
@@ -673,6 +681,88 @@ Scope::is<EvalScope>() const
 }
 
 //
+// Scope corresponding to the toplevel script in an ES module.
+//
+// Like GlobalScopes, these scopes contain both vars and lexical bindings, as
+// the treating of imports and exports requires putting them in one scope.
+//
+// Corresponds to a ModuleEnvironmentObject on the environment chain.
+//
+class ModuleScope : public Scope
+{
+    friend class GCMarker;
+    friend class BindingIter;
+    friend class Scope;
+    static const ScopeKind classScopeKind_ = ScopeKind::Module;
+
+  public:
+    // Data is public because it is created by the frontend. See
+    // Parser<FullParseHandler>::newModuleScopeData.
+    struct BindingData : public RefCountedData
+    {
+        // Bindings are sorted by kind.
+        //
+        // imports - [0, varStart)
+        //    vars - [varStart, letStart)
+        //    lets - [letStart, constStart)
+        //  consts - [constStart, length)
+        uint32_t varStart;
+        uint32_t letStart;
+        uint32_t constStart;
+        uint32_t length;
+
+        // Frame slots [0, nextFrameSlot) are live when this is the innermost
+        // scope.
+        uint32_t nextFrameSlot;
+
+        // The array of tagged JSAtom* names, allocated beyond the end of the
+        // struct.
+        BindingName names[1];
+    };
+
+    static size_t sizeOfBindingData(uint32_t length) {
+        return GlobalScope::sizeOfBindingData(length);
+    }
+
+    static ModuleScope* create(ExclusiveContext* cx, BindingData* bindings,
+                               Handle<ModuleObject*> module, HandleScope enclosing);
+
+  private:
+    // Because module is per-compartment and cannot be shared, ModuleScopes
+    // have two data pointers, one for shareable data and one for
+    // per-compartment data.
+    struct Data
+    {
+        // The module of the scope.
+        GCPtr<ModuleObject*> module;
+
+        // Shareable bindings.
+        BindingData* bindings;
+    };
+
+    Data& data() {
+        return *reinterpret_cast<Data*>(data_);
+    }
+
+    const Data& data() const {
+        return *reinterpret_cast<Data*>(data_);
+    }
+
+    BindingData& bindingData() {
+        return *data().bindings;
+    }
+
+    const BindingData& bindingData() const {
+        return *data().bindings;
+    }
+
+  public:
+    size_t sizeOfData(mozilla::MallocSizeOf mallocSizeOf) const;
+
+    static Shape* getEmptyEnvironmentShape(ExclusiveContext* cx);
+};
+
+//
 // An iterator for a Scope's bindings. This is the source of truth for frame
 // and environment object layout.
 //
@@ -691,12 +781,14 @@ class BindingIter
     // laid out BindingData for packing, BindingIter must handle all binding kinds.
     //
     // positional formals - [0, nonPositionalFormalStart)
-    //      other formals - [nonPositionalParamStart, varStart)
+    //      other formals - [nonPositionalParamStart, importStart)
+    //            imports - [importStart, varStart)
     //               vars - [varStart, letStart)
     //               lets - [letStart, constStart)
     //             consts - [constStart, length)
     uint16_t nonPositionalFormalStart_;
-    uint16_t varStart_;
+    uint16_t importStart_;
+    uint32_t varStart_;
     uint32_t letStart_;
     uint32_t constStart_;
     uint32_t length_;
@@ -726,12 +818,13 @@ class BindingIter
 
     BindingName* names_;
 
-    void init(uint16_t nonPositionalFormalStart, uint16_t varStart,
-              uint32_t letStart, uint32_t constStart, uint8_t flags,
-              uint32_t firstFrameSlot, uint32_t firstEnvironmentSlot,
+    void init(uint16_t nonPositionalFormalStart, uint16_t importStart,
+              uint32_t varStart, uint32_t letStart, uint32_t constStart,
+              uint8_t flags, uint32_t firstFrameSlot, uint32_t firstEnvironmentSlot,
               BindingName* names, uint32_t length)
     {
         nonPositionalFormalStart_ = nonPositionalFormalStart;
+        importStart_ = importStart;
         varStart_ = varStart;
         letStart_ = letStart;
         constStart_ = constStart;
@@ -750,6 +843,7 @@ class BindingIter
     void init(FunctionScope::BindingData& data, uint32_t firstFrameSlot, uint8_t flags);
     void init(GlobalScope::BindingData& data);
     void init(EvalScope::BindingData& data, bool strict);
+    void init(ModuleScope::BindingData& data);
 
     bool ignorePositionalFormalParameters() const {
         return flags_ & IgnorePositionalFormalParameters;
@@ -773,7 +867,7 @@ class BindingIter
             if (closedOver()) {
                 MOZ_ASSERT(canHaveEnvironmentSlots());
                 environmentSlot_++;
-            } else if (index_ >= nonPositionalFormalStart_) {
+            } else if (index_ >= importStart_) {
                 if (canHaveFrameSlots())
                     frameSlot_++;
             }
@@ -823,12 +917,17 @@ class BindingIter
         init(data);
     }
 
+    explicit BindingIter(ModuleScope::BindingData& data) {
+        init(data);
+    }
+
     BindingIter(EvalScope::BindingData& data, bool strict) {
         init(data, strict);
     }
 
     explicit BindingIter(const BindingIter& bi)
       : nonPositionalFormalStart_(bi.nonPositionalFormalStart_),
+        importStart_(bi.importStart_),
         varStart_(bi.varStart_),
         letStart_(bi.letStart_),
         constStart_(bi.constStart_),
@@ -893,6 +992,8 @@ class BindingIter
             MOZ_ASSERT(canHaveArgumentSlots());
             return BindingLocation::Argument(argumentSlot_);
         }
+        if (index_ < importStart_)
+            return BindingLocation::Import();
         if (canHaveFrameSlots())
             return BindingLocation::Frame(frameSlot_);
         MOZ_ASSERT(isNamedLambda());
@@ -901,6 +1002,8 @@ class BindingIter
 
     BindingKind kind() const {
         MOZ_ASSERT(!done());
+        if (index_ < importStart_)
+            return BindingKind::Import;
         if (index_ < varStart_)
             return BindingKind::FormalParameter;
         if (index_ < letStart_)

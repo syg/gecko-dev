@@ -667,10 +667,6 @@ class FullParseHandler
     ParseNode* newModule() {
         return new_<CodeNode>(PNK_MODULE, pos());
     }
-    void setModuleBox(ParseNode* pn, ModuleBox* modulebox) {
-        MOZ_ASSERT(pn->isKind(PNK_MODULE));
-        pn->pn_modulebox = modulebox;
-    }
 
     ParseNode* newLexicalScope(LexicalScope::BindingData* bindings, ParseNode* body) {
         return new_<LexicalScopeNode>(bindings, body);
