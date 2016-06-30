@@ -885,7 +885,7 @@ template <>
 inline bool
 JSObject::is<js::VarEnvironmentObject>() const
 {
-    return is<js::CallObject>();
+    return is<js::CallObject>() || is<js::ModuleEnvironmentObject>();
 }
 
 template <>
@@ -906,18 +906,18 @@ JSObject::is<js::DebugEnvironmentProxy>() const;
 namespace js {
 
 inline bool
-IsSyntacticEnvironment(JSObject* scope)
+IsSyntacticEnvironment(JSObject* env)
 {
-    if (!scope->is<EnvironmentObject>())
+    if (!env->is<EnvironmentObject>())
         return false;
 
-    if (scope->is<WithEnvironmentObject>())
-        return scope->as<WithEnvironmentObject>().isSyntactic();
+    if (env->is<WithEnvironmentObject>())
+        return env->as<WithEnvironmentObject>().isSyntactic();
 
-    if (scope->is<LexicalEnvironmentObject>())
-        return scope->as<LexicalEnvironmentObject>().isSyntactic();
+    if (env->is<LexicalEnvironmentObject>())
+        return env->as<LexicalEnvironmentObject>().isSyntactic();
 
-    if (scope->is<NonSyntacticVariablesObject>())
+    if (env->is<NonSyntacticVariablesObject>())
         return false;
 
     return true;
@@ -953,16 +953,16 @@ CheckVarNameConflict(JSContext* cx, Handle<LexicalEnvironmentObject*> lexicalEnv
                      HandlePropertyName name);
 
 MOZ_MUST_USE bool
-CheckLexicalNameConflict(JSContext* cx, Handle<LexicalEnvironmentObject*> lexicalScope,
+CheckLexicalNameConflict(JSContext* cx, Handle<LexicalEnvironmentObject*> lexicalEnv,
                          HandleObject varObj, HandlePropertyName name);
 
 MOZ_MUST_USE bool
 CheckGlobalDeclarationConflicts(JSContext* cx, HandleScript script,
-                                Handle<LexicalEnvironmentObject*> lexicalScope,
+                                Handle<LexicalEnvironmentObject*> lexicalEnv,
                                 HandleObject varObj);
 
 MOZ_MUST_USE bool
-CheckEvalDeclarationConflicts(JSContext* cx, HandleScript script, HandleObject scopeChain,
+CheckEvalDeclarationConflicts(JSContext* cx, HandleScript script, HandleObject envChain,
                               HandleObject varObj);
 
 MOZ_MUST_USE bool

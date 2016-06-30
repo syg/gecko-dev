@@ -670,8 +670,6 @@ class JSScript : public js::gc::TenuredCell
     // source object. Instead, the clone refers to a wrapper.)
     js::GCPtrObject sourceObject_;
 
-    js::GCPtrModuleObject module_;
-
     /*
      * Information attached by Ion. Nexto a valid IonScript this could be
      * ION_DISABLED_SCRIPT, ION_COMPILING_SCRIPT or ION_PENDING_SCRIPT.
@@ -1334,9 +1332,8 @@ class JSScript : public js::gc::TenuredCell
      */
     inline JSFunction* functionDelazifying() const;
     JSFunction* functionNonDelazifying() const {
-        js::Scope* scope = bodyScope();
-        if (scope->is<js::FunctionScope>())
-            return scope->as<js::FunctionScope>().canonicalFunction();
+        if (bodyScope()->is<js::FunctionScope>())
+            return bodyScope()->as<js::FunctionScope>().canonicalFunction();
         return nullptr;
     }
     /*
@@ -1346,9 +1343,10 @@ class JSScript : public js::gc::TenuredCell
     inline void ensureNonLazyCanonicalFunction(JSContext* cx);
 
     js::ModuleObject* module() const {
-        return module_;
+        if (bodyScope()->is<js::ModuleScope>())
+            return bodyScope()->as<js::ModuleScope>().module();
+        return nullptr;
     }
-    inline void setModule(js::ModuleObject* module);
 
     bool isGlobalOrEvalCode() const {
         return bodyScope()->is<js::GlobalScope>() || bodyScope()->is<js::EvalScope>();

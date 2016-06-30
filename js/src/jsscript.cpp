@@ -2548,11 +2548,6 @@ JSScript::initFromModuleContext(ExclusiveContext* cx, HandleScript script,
     // created within it may be given more precise types.
     script->setTreatAsRunOnce();
     MOZ_ASSERT(!script->hasRunOnce());
-
-    // Link the module and the script to each other, so that StaticScopeIter
-    // may walk the scope chain of currently compiling scripts.
-    RootedModuleObject module(cx, modulesc->module());
-    script->setModule(module);
 }
 
 /* static */ bool
@@ -3569,8 +3564,6 @@ JSScript::traceChildren(JSTracer* trc)
 
     MOZ_ASSERT_IF(sourceObject(), MaybeForwarded(sourceObject())->compartment() == compartment());
     TraceNullableEdge(trc, &sourceObject_, "sourceObject");
-
-    TraceNullableEdge(trc, &module_, "module");
 
     if (maybeLazyScript())
         TraceManuallyBarrieredEdge(trc, &lazyScript, "lazyScript");

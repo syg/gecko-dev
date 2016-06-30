@@ -2850,14 +2850,11 @@ WithEnvironmentObject::scope() const
 ModuleEnvironmentObject*
 js::GetModuleEnvironmentForScript(JSScript* script)
 {
-    ScopeIter si(script);
-    while (si && si.kind() != ScopeKind::Module)
-        si++;
-    if (!si)
-        return nullptr;
-
-    // TODOshu
-    return nullptr; // ssi.module().environment();
+    for (ScopeIter si(script); si; si++) {
+        if (si.kind() == ScopeKind::Module)
+            return si.scope()->as<ModuleScope>().module()->environment();
+    }
+    return nullptr;
 }
 
 bool

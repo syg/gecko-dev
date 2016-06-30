@@ -757,6 +757,10 @@ class ModuleScope : public Scope
     }
 
   public:
+    ModuleObject* module() const {
+        return data().module;
+    }
+
     size_t sizeOfData(mozilla::MallocSizeOf mallocSizeOf) const;
 
     static Shape* getEmptyEnvironmentShape(ExclusiveContext* cx);
@@ -992,7 +996,7 @@ class BindingIter
             MOZ_ASSERT(canHaveArgumentSlots());
             return BindingLocation::Argument(argumentSlot_);
         }
-        if (index_ < importStart_)
+        if (index_ < varStart_)
             return BindingLocation::Import();
         if (canHaveFrameSlots())
             return BindingLocation::Frame(frameSlot_);
@@ -1003,9 +1007,9 @@ class BindingIter
     BindingKind kind() const {
         MOZ_ASSERT(!done());
         if (index_ < importStart_)
-            return BindingKind::Import;
-        if (index_ < varStart_)
             return BindingKind::FormalParameter;
+        if (index_ < varStart_)
+            return BindingKind::Import;
         if (index_ < letStart_)
             return BindingKind::Var;
         if (index_ < constStart_)

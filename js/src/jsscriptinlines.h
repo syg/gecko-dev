@@ -100,13 +100,6 @@ JSScript::functionDelazifying() const
 }
 
 inline void
-JSScript::setModule(js::ModuleObject* module)
-{
-    MOZ_ASSERT(!module_);
-    module_ = module;
-}
-
-inline void
 JSScript::ensureNonLazyCanonicalFunction(JSContext* cx)
 {
     // Infallibly delazify the canonical script.
