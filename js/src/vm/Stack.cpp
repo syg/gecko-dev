@@ -85,16 +85,6 @@ InterpreterFrame::isNonGlobalEvalFrame() const
     return isEvalFrame() && script()->bodyScope()->as<EvalScope>().isNonGlobal();
 }
 
-bool
-InterpreterFrame::copyRawFrameSlots(MutableHandle<GCVector<Value>> vec)
-{
-    if (!vec.resize(numFormalArgs() + script()->nfixed()))
-        return false;
-    PodCopy(vec.begin(), argv(), numFormalArgs());
-    PodCopy(vec.begin() + numFormalArgs(), slots(), script()->nfixed());
-    return true;
-}
-
 JSObject*
 InterpreterFrame::createRestParameter(JSContext* cx)
 {

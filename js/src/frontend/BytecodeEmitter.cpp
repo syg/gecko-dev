@@ -442,6 +442,9 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
     MOZ_MUST_USE bool internBodyScope(BytecodeEmitter* bce, ScopeCreator createScope);
     MOZ_MUST_USE bool appendScopeNote(BytecodeEmitter* bce);
 
+    MOZ_MUST_USE bool deadZoneFrameSlotRange(BytecodeEmitter* bce, uint32_t slotStart,
+                                             uint32_t slotEnd);
+
   public:
     EmitterScope(BytecodeEmitter* bce)
       : Nestable<EmitterScope>(&bce->innermostEmitterScope),
@@ -722,6 +725,24 @@ BytecodeEmitter::EmitterScope::locationBoundInScope(BytecodeEmitter* bce, JSAtom
 }
 
 bool
+BytecodeEmitter::EmitterScope::deadZoneFrameSlotRange(BytecodeEmitter* bce, uint32_t slotStart,
+                                                      uint32_t slotEnd)
+{
+    if (slotStart != slotEnd) {
+        if (!bce->emit1(JSOP_UNINITIALIZED))
+            return false;
+        for (uint32_t slot = slotStart; slot < slotEnd; slot++) {
+            if (!bce->emitLocalOp(JSOP_INITLEXICAL, slot))
+                return false;
+        }
+        if (!bce->emit1(JSOP_POP))
+            return false;
+    }
+
+    return true;
+}
+
+bool
 BytecodeEmitter::EmitterScope::enterLexical(BytecodeEmitter* bce, ScopeKind kind,
                                             LexicalScope::BindingData* bindings)
 {
@@ -748,18 +769,10 @@ BytecodeEmitter::EmitterScope::enterLexical(BytecodeEmitter* bce, ScopeKind kind
 
     updateFrameFixedSlots(bce, bi);
 
-    // Initialized frame slots to TDZ poison. Environment slots are
-    // poisoned by environment creation.
-    if (firstFrameSlot != frameSlotEnd()) {
-        if (!bce->emit1(JSOP_UNINITIALIZED))
-            return false;
-        for (uint32_t slot = firstFrameSlot; slot < frameSlotEnd(); slot++) {
-            if (!bce->emitLocalOp(JSOP_INITLEXICAL, slot))
-                return false;
-        }
-        if (!bce->emit1(JSOP_POP))
-            return false;
-    }
+    // Put frame slots in TDZ. Environment slots are poisoned during
+    // environment creation.
+    if (!deadZoneFrameSlotRange(bce, firstFrameSlot, frameSlotEnd()))
+        return false;
 
     // Create and intern the VM scope.
     auto createScope = [kind, bindings, firstFrameSlot](ExclusiveContext* cx,
@@ -1057,6 +1070,7 @@ BytecodeEmitter::EmitterScope::enterModule(BytecodeEmitter* bce, ModuleSharedCon
         return false;
 
     // Resolve body-level bindings, if there are any.
+    Maybe<uint32_t> firstLexicalFrameSlot;
     if (ModuleScope::BindingData* bindings = modulesc->bindings) {
         BindingIter bi(*bindings);
         for (; bi; bi++) {
@@ -1064,8 +1078,19 @@ BytecodeEmitter::EmitterScope::enterModule(BytecodeEmitter* bce, ModuleSharedCon
                 return false;
 
             NameLocation loc = NameLocation::fromBinding(bi.kind(), bi.location());
-            if (loc.kind() == NameLocation::Kind::EnvironmentCoordinate)
+            switch (loc.kind()) {
+              case NameLocation::Kind::EnvironmentCoordinate:
                 hasEnvironment_ = true;
+                break;
+
+              case NameLocation::Kind::FrameSlot:
+                if (BindingKindIsLexical(bi.kind()) && !firstLexicalFrameSlot)
+                    firstLexicalFrameSlot = Some(loc.frameSlot());
+                break;
+
+              default:
+                break;
+            }
 
             if (!putNameInCache(bce, bi.name(), loc))
                 return false;
@@ -1078,6 +1103,13 @@ BytecodeEmitter::EmitterScope::enterModule(BytecodeEmitter* bce, ModuleSharedCon
 
     // Modules are toplevel, so any free names are global.
     fallbackFreeNameLocation_ = Some(NameLocation::Global(BindingKind::Var));
+
+    // Put lexical frame slots in TDZ. Environment slots are
+    // poisoned during environment creation.
+    if (firstLexicalFrameSlot) {
+        if (!deadZoneFrameSlotRange(bce, *firstLexicalFrameSlot, nextFrameSlot_))
+            return false;
+    }
 
     // Create and intern the VM scope.
     auto createScope = [modulesc](ExclusiveContext* cx, HandleScope enclosing) {
@@ -5478,7 +5510,7 @@ BytecodeEmitter::emitForOf(ParseNode* forOfLoop)
         return false;
 
     // If the loop had an escaping lexical declaration, replace the current
-    // environment with an uninitialized one to implement TDZ semantics.
+    // environment with an dead zoned one to implement TDZ semantics.
     if (forLoopRequiresFreshEnvironment) {
         // The environment chain only includes an environment for the for-of
         // loop head *if* a scope binding is captured, thereby requiring
@@ -5611,7 +5643,7 @@ BytecodeEmitter::emitForIn(ParseNode* forInLoop)
         return false;
 
     // If the loop had an escaping lexical declaration, replace the current
-    // environment with an uninitialized one to implement TDZ semantics.
+    // environment with an dead zoned one to implement TDZ semantics.
     if (forLoopRequiresFreshEnvironment) {
         // The environment chain only includes an environment for the for-in
         // loop head *if* a scope binding is captured, thereby requiring
@@ -5874,7 +5906,7 @@ BytecodeEmitter::emitComprehensionForInOrOfVariables(ParseNode* pn, bool* lexica
 {
     // ES6 specifies that lexical for-loop variables get a fresh binding each
     // iteration, and that evaluation of the expression looped over occurs with
-    // these variables uninitialized.  But these rules only apply to *standard*
+    // these variables dead zoned.  But these rules only apply to *standard*
     // for-in/of loops, and we haven't extended these requirements to
     // comprehension syntax.
 

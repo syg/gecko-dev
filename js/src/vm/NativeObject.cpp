@@ -2248,9 +2248,6 @@ static bool
 SetNonexistentProperty(JSContext* cx, HandleId id, HandleValue v, HandleValue receiver,
                        QualifiedBool qualified, ObjectOpResult& result)
 {
-    // We should never add properties to lexical blocks.
-    MOZ_ASSERT_IF(receiver.isObject(), !receiver.toObject().is<LexicalEnvironmentObject>());
-
     if (!qualified && receiver.isObject() && receiver.toObject().isUnqualifiedVarObj()) {
         if (!MaybeReportUndeclaredVarAssignment(cx, JSID_TO_STRING(id)))
             return false;

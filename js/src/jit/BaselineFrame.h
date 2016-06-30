@@ -229,8 +229,6 @@ class BaselineFrame
         return UndefinedValue();
     }
 
-    MOZ_MUST_USE bool copyRawFrameSlots(MutableHandle<GCVector<Value>> vec) const;
-
     bool hasReturnValue() const {
         return flags_ & HAS_RVAL;
     }

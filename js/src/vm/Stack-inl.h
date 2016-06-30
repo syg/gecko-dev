@@ -766,14 +766,6 @@ AbstractFramePtr::initArgsObj(ArgumentsObject& argsobj) const
 }
 
 inline bool
-AbstractFramePtr::copyRawFrameSlots(MutableHandle<GCVector<Value>> vec) const
-{
-    if (isInterpreterFrame())
-        return asInterpreterFrame()->copyRawFrameSlots(vec);
-    return asBaselineFrame()->copyRawFrameSlots(vec);
-}
-
-inline bool
 AbstractFramePtr::prevUpToDate() const
 {
     if (isInterpreterFrame())

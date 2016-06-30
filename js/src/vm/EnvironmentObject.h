@@ -407,10 +407,6 @@ class LexicalEnvironmentObject : public EnvironmentObject
     // this, with all variables uninitialized.
     static LexicalEnvironmentObject* recreate(JSContext* cx, Handle<LexicalEnvironmentObject*> env);
 
-    // Copy in all the unaliased formals and locals.
-    static bool copyUnaliasedValues(JSContext* cx, Handle<LexicalEnvironmentObject*> env,
-                                    AbstractFramePtr frame);
-
     // For non-extensible lexical environments, the LexicalScope that created
     // this environment. Otherwise asserts.
     LexicalScope& scope() const {
@@ -868,6 +864,15 @@ class DebugEnvironments
     // envs keyed on, and live envs containing, the old
     // RematerializedFrame. Forward those values to the new BaselineFrame.
     static void forwardLiveFrame(JSContext* cx, AbstractFramePtr from, AbstractFramePtr to);
+
+    // When an environment is popped, we store a snapshot of its bindings that
+    // live on the frame.
+    //
+    // This is done during frame unwinding, which cannot handle errors
+    // gracefully. Errors result in no snapshot being set on the
+    // DebugEnvironmentProxy.
+    static void takeFrameSnapshot(JSContext* cx, Handle<DebugEnvironmentProxy*> debugEnv,
+                                  AbstractFramePtr frame);
 
     // In debug-mode, these must be called whenever exiting a scope that might
     // have stack-allocated locals.

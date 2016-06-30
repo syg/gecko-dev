@@ -898,24 +898,6 @@ LexicalEnvironmentObject::recreate(JSContext* cx, Handle<LexicalEnvironmentObjec
     return createTemplateObject(cx, scope, enclosing, gc::TenuredHeap);
 }
 
-/* static */ bool
-LexicalEnvironmentObject::copyUnaliasedValues(JSContext* cx, Handle<LexicalEnvironmentObject*> env,
-                                              AbstractFramePtr frame)
-{
-    RootedId id(cx);
-    RootedValue v(cx);
-    for (Rooted<BindingIter> bi(cx, BindingIter(&env->scope())); bi; bi++) {
-        BindingLocation loc = bi.location();
-        if (loc.kind() == BindingLocation::Kind::Frame) {
-            id = NameToId(bi.name()->asPropertyName());
-            v = frame.unaliasedLocal(loc.slot());
-            if (!SetProperty(cx, env, id, v))
-                return false;
-        }
-    }
-    return true;
-}
-
 bool
 LexicalEnvironmentObject::isExtensible() const
 {
@@ -1459,6 +1441,7 @@ class DebugEnvironmentProxyHandler : public BaseProxyHandler
                 return true;
             }
 
+            uint32_t firstFrameSlot = block->scope().firstFrameSlot();
             BindingIter bi(&block->scope());
             while (bi && NameToId(bi.name()->asPropertyName()) != id)
                 bi++;
@@ -1478,6 +1461,15 @@ class DebugEnvironmentProxyHandler : public BaseProxyHandler
                     vp.set(frame.unaliasedLocal(local));
                 else
                     frame.unaliasedLocal(local) = vp;
+            } else if (NativeObject* snapshot = debugEnv->maybeSnapshot()) {
+                // Indices in the frame snapshot are offset by the first frame
+                // slot. See DebugEnvironments::takeFrameSnapshot.
+                MOZ_ASSERT(loc.slot() >= firstFrameSlot);
+                uint32_t snapshotIndex = loc.slot() - firstFrameSlot;
+                if (action == GET)
+                    vp.set(snapshot->getDenseElement(snapshotIndex));
+                else
+                    snapshot->setDenseElement(snapshotIndex, vp);
             } else {
                 if (action == GET) {
                     // A LexicalEnvironmentObject whose static scope does not
@@ -2283,7 +2275,7 @@ DebugEnvironments::ensureCompartmentData(JSContext* cx)
     return c->debugEnvs;
 }
 
-DebugEnvironmentProxy*
+/* static */ DebugEnvironmentProxy*
 DebugEnvironments::hasDebugEnvironment(JSContext* cx, EnvironmentObject& env)
 {
     DebugEnvironments* envs = env.compartment()->debugEnvs;
@@ -2298,7 +2290,7 @@ DebugEnvironments::hasDebugEnvironment(JSContext* cx, EnvironmentObject& env)
     return nullptr;
 }
 
-bool
+/* static */ bool
 DebugEnvironments::addDebugEnvironment(JSContext* cx, EnvironmentObject& env,
                                        DebugEnvironmentProxy& debugEnv)
 {
@@ -2315,7 +2307,7 @@ DebugEnvironments::addDebugEnvironment(JSContext* cx, EnvironmentObject& env,
     return envs->proxiedEnvs.add(cx, &env, &debugEnv);
 }
 
-DebugEnvironmentProxy*
+/* static */ DebugEnvironmentProxy*
 DebugEnvironments::hasDebugEnvironment(JSContext* cx, const EnvironmentIter& ei)
 {
     MOZ_ASSERT(!ei.hasSyntacticEnvironment());
@@ -2331,7 +2323,7 @@ DebugEnvironments::hasDebugEnvironment(JSContext* cx, const EnvironmentIter& ei)
     return nullptr;
 }
 
-bool
+/* static */ bool
 DebugEnvironments::addDebugEnvironment(JSContext* cx, const EnvironmentIter& ei,
                                        DebugEnvironmentProxy& debugEnv)
 {
@@ -2367,7 +2359,78 @@ DebugEnvironments::addDebugEnvironment(JSContext* cx, const EnvironmentIter& ei,
     return true;
 }
 
-void
+/* static */ void
+DebugEnvironments::takeFrameSnapshot(JSContext* cx, Handle<DebugEnvironmentProxy*> debugEnv,
+                                     AbstractFramePtr frame)
+{
+    /*
+     * When the JS stack frame is popped, the values of unaliased variables
+     * are lost. If there is any debug env referring to this environment, save a
+     * copy of the unaliased variables' values in an array for later debugger
+     * access via DebugEnvironmentProxy::handleUnaliasedAccess.
+     *
+     * Note: since it is simplest for this function to be infallible, failure
+     * in this code will be silently ignored. This does not break any
+     * invariants since DebugEnvironmentProxy::maybeSnapshot can already be nullptr.
+     */
+
+    Rooted<GCVector<Value>> vec(cx, GCVector<Value>(cx));
+    if (debugEnv->environment().is<CallObject>()) {
+        JSScript* script = debugEnv->environment().as<CallObject>().callee().nonLazyScript();
+        FunctionScope* scope = &script->bodyScope()->as<FunctionScope>();
+        uint32_t frameSlotCount = scope->nextFrameSlot();
+        MOZ_ASSERT(frameSlotCount < frame.script()->nfixed());
+
+        // For simplicity, copy all frame slots from 0 to the frameSlotCount,
+        // even if we don't need all of them (like in the case of a defaults
+        // parameter scope having frame slots).
+        uint32_t numFormals = frame.numFormalArgs();
+        if (!vec.resize(numFormals + frameSlotCount))
+            return;
+        mozilla::PodCopy(vec.begin(), frame.argv(), numFormals);
+        for (uint32_t slot = 0; slot < frameSlotCount; slot++)
+            vec[slot + frame.numFormalArgs()].set(frame.unaliasedLocal(slot));
+
+        /*
+         * Copy in formals that are not aliased via the scope chain
+         * but are aliased via the arguments object.
+         */
+        if (script->analyzedArgsUsage() && script->needsArgsObj() && frame.hasArgsObj()) {
+            for (unsigned i = 0; i < frame.numFormalArgs(); ++i) {
+                if (script->formalLivesInArgumentsObject(i))
+                    vec[i].set(frame.argsObj().arg(i));
+            }
+        }
+    } else {
+        LexicalScope* scope = &debugEnv->environment().as<LexicalEnvironmentObject>().scope();
+        uint32_t frameSlotStart = scope->firstFrameSlot();
+        uint32_t frameSlotEnd = scope->nextFrameSlot();
+        uint32_t frameSlotCount = frameSlotEnd - frameSlotStart;
+        MOZ_ASSERT(frameSlotCount < frame.script()->nfixed());
+
+        if (!vec.resize(frameSlotCount))
+            return;
+        for (uint32_t slot = frameSlotStart; slot < frameSlotCount; slot++)
+            vec[slot - frameSlotStart].set(frame.unaliasedLocal(slot));
+    }
+
+    if (vec.length() == 0)
+        return;
+
+    /*
+     * Use a dense array as storage (since proxies do not have trace
+     * hooks). This array must not escape into the wild.
+     */
+    RootedArrayObject snapshot(cx, NewDenseCopiedArray(cx, vec.length(), vec.begin()));
+    if (!snapshot) {
+        cx->clearPendingException();
+        return;
+    }
+
+    debugEnv->initSnapshot(*snapshot);
+}
+
+/* static */ void
 DebugEnvironments::onPopCall(AbstractFramePtr frame, JSContext* cx)
 {
     assertSameCompartment(cx, frame);
@@ -2402,50 +2465,8 @@ DebugEnvironments::onPopCall(AbstractFramePtr frame, JSContext* cx)
         }
     }
 
-    /*
-     * When the JS stack frame is popped, the values of unaliased variables
-     * are lost. If there is any debug env referring to this environment, save a
-     * copy of the unaliased variables' values in an array for later debugger
-     * access via DebugEnvironmentProxy::handleUnaliasedAccess.
-     *
-     * Note: since it is simplest for this function to be infallible, failure
-     * in this code will be silently ignored. This does not break any
-     * invariants since DebugEnvironmentProxy::maybeSnapshot can already be nullptr.
-     */
-    if (debugEnv) {
-        /*
-         * Copy all frame values into the snapshot, regardless of
-         * aliasing. This unnecessarily includes aliased variables
-         * but it simplifies later indexing logic.
-         */
-        Rooted<GCVector<Value>> vec(cx, GCVector<Value>(cx));
-        if (!frame.copyRawFrameSlots(&vec) || vec.length() == 0)
-            return;
-
-        /*
-         * Copy in formals that are not aliased via the scope chain
-         * but are aliased via the arguments object.
-         */
-        RootedScript script(cx, frame.script());
-        if (script->analyzedArgsUsage() && script->needsArgsObj() && frame.hasArgsObj()) {
-            for (unsigned i = 0; i < frame.numFormalArgs(); ++i) {
-                if (script->formalLivesInArgumentsObject(i))
-                    vec[i].set(frame.argsObj().arg(i));
-            }
-        }
-
-        /*
-         * Use a dense array as storage (since proxies do not have trace
-         * hooks). This array must not escape into the wild.
-         */
-        RootedArrayObject snapshot(cx, NewDenseCopiedArray(cx, vec.length(), vec.begin()));
-        if (!snapshot) {
-            cx->clearPendingException();
-            return;
-        }
-
-        debugEnv->initSnapshot(*snapshot);
-    }
+    if (debugEnv)
+        DebugEnvironments::takeFrameSnapshot(cx, debugEnv, frame);
 }
 
 void
@@ -2479,10 +2500,14 @@ DebugEnvironments::onPopLexical(JSContext* cx, const EnvironmentIter& ei)
         env = &ei.environment().as<LexicalEnvironmentObject>();
     }
 
-    envs->liveEnvs.remove(env);
+    if (env) {
+        envs->liveEnvs.remove(env);
 
-    if (!LexicalEnvironmentObject::copyUnaliasedValues(cx, env, ei.initialFrame()))
-        cx->recoverFromOutOfMemory();
+        if (JSObject* obj = envs->proxiedEnvs.lookup(env)) {
+            Rooted<DebugEnvironmentProxy*> debugEnv(cx, &obj->as<DebugEnvironmentProxy>());
+            DebugEnvironments::takeFrameSnapshot(cx, debugEnv, ei.initialFrame());
+        }
+    }
 }
 
 void
@@ -2684,7 +2709,7 @@ GetDebugEnvironmentForMissing(JSContext* cx, const EnvironmentIter& ei)
      * envs must not be put on the frame's environment chain; instead, they are
      * maintained via DebugEnvironments hooks.
      */
-    DebugEnvironmentProxy* debugEnv = nullptr;
+    Rooted<DebugEnvironmentProxy*> debugEnv(cx);
     if (ei.scope().is<FunctionScope>()) {
         RootedFunction callee(cx, ei.scope().as<FunctionScope>().canonicalFunction());
         // Generators should always reify their scopes.
@@ -2705,8 +2730,6 @@ GetDebugEnvironmentForMissing(JSContext* cx, const EnvironmentIter& ei)
         if (ei.withinInitialFrame()) {
             AbstractFramePtr frame = ei.initialFrame();
             env = LexicalEnvironmentObject::create(cx, lexicalScope, frame);
-            if (env && !LexicalEnvironmentObject::copyUnaliasedValues(cx, env, frame))
-                return nullptr;
         } else {
             env = LexicalEnvironmentObject::createHollowForDebug(cx, lexicalScope);
         }

@@ -91,21 +91,6 @@ BaselineFrame::isNonGlobalEvalFrame() const
 }
 
 bool
-BaselineFrame::copyRawFrameSlots(MutableHandle<GCVector<Value>> vec) const
-{
-    unsigned nfixed = script()->nfixed();
-    unsigned nformals = numFormalArgs();
-
-    if (!vec.resize(nformals + nfixed))
-        return false;
-
-    mozilla::PodCopy(vec.begin(), argv(), nformals);
-    for (unsigned i = 0; i < nfixed; i++)
-        vec[nformals + i].set(*valueSlot(i));
-    return true;
-}
-
-bool
 BaselineFrame::initEvalEnvironmentObjects(JSContext* cx)
 {
     CallObject* callobj = CallObject::createForEval(cx, this);

@@ -237,8 +237,6 @@ class AbstractFramePtr
     inline void initArgsObj(ArgumentsObject& argsobj) const;
     inline bool createSingleton() const;
 
-    inline bool copyRawFrameSlots(MutableHandle<GCVector<Value>> vec) const;
-
     inline Value& unaliasedLocal(uint32_t i);
     inline Value& unaliasedFormal(unsigned i, MaybeCheckAliasing checkAliasing = CHECK_ALIASING);
     inline Value& unaliasedActual(unsigned i, MaybeCheckAliasing checkAliasing = CHECK_ALIASING);
@@ -498,8 +496,6 @@ class InterpreterFrame
     inline Value& unaliasedFormal(unsigned i, MaybeCheckAliasing = CHECK_ALIASING);
     inline Value& unaliasedActual(unsigned i, MaybeCheckAliasing = CHECK_ALIASING);
     template <class Op> inline void unaliasedForEachActual(Op op);
-
-    bool copyRawFrameSlots(MutableHandle<GCVector<Value>> v);
 
     unsigned numFormalArgs() const { MOZ_ASSERT(hasArgs()); return callee().nargs(); }
     unsigned numActualArgs() const { MOZ_ASSERT(hasArgs()); return nactual_; }
