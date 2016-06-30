@@ -386,13 +386,6 @@ class LexicalEnvironmentObject : public EnvironmentObject
         initScopeUnchecked(scope);
     }
 
-    void setBindingsToUninitialized() {
-        uint32_t slotCount = lastProperty()->slot();
-        MOZ_ASSERT(slotCount == scope().environmentShape()->slot());
-        for (uint32_t i = JSSLOT_FREE(&class_); i < slotCount; i++)
-            setSlot(i, MagicValue(JS_UNINITIALIZED_LEXICAL));
-    }
-
   public:
     static LexicalEnvironmentObject* createTemplateObject(JSContext* cx,
                                                           Handle<LexicalScope*> scope,

@@ -782,8 +782,13 @@ LexicalEnvironmentObject::createTemplateObject(JSContext* cx, Handle<LexicalScop
     if (!env)
         return nullptr;
 
+    // All lexical bindings start off uninitialized for TDZ.
+    uint32_t slotCount = shape->slot();
+    MOZ_ASSERT(slotCount == env->slotSpan());
+    for (uint32_t slot = JSSLOT_FREE(&class_); slot < slotCount; slot++)
+        env->initSlot(slot, MagicValue(JS_UNINITIALIZED_LEXICAL));
+
     env->initScopeUnchecked(scope);
-    env->setBindingsToUninitialized();
     return env;
 }
 
