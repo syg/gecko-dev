@@ -299,9 +299,6 @@ Scope::clone(JSContext* cx, HandleScope scope, HandleScope enclosing)
 {
     MOZ_ASSERT(!scope->is<FunctionScope>() && !scope->is<GlobalScope>(),
                "FunctionScopes and GlobalScopes should use the class-specific clone.");
-    MOZ_ASSERT_IF(scope->is<LexicalScope>(),
-                  scope->as<LexicalScope>().computeFirstFrameSlot() ==
-                  LexicalScope::computeNextFrameSlot(enclosing));
 
     RootedShape envShape(cx);
     if (scope->environmentShape()) {
@@ -351,18 +348,38 @@ Scope::dump()
     fprintf(stderr, "\n");
 }
 
-/* static */ uint32_t
-LexicalScope::computeNextFrameSlot(Scope* start)
+uint32_t
+LexicalScope::firstFrameSlot() const
 {
-    for (Scope* it = start; it; it = it->enclosing()) {
-        if (it->is<LexicalScope>())
-            return it->as<LexicalScope>().nextFrameSlot();
-        if (it->is<FunctionScope>())
-            return it->as<FunctionScope>().nextFrameSlot();
-        if (it->is<EvalScope>())
-            return it->as<EvalScope>().nextFrameSlot();
+    switch (kind()) {
+      case ScopeKind::Lexical:
+      case ScopeKind::Catch:
+        // For intra-frame scopes, find the enclosing scope's next frame slot.
+        return nextFrameSlot(enclosing());
+      default:
+        // Otherwise start at 0.
+        break;
     }
     return 0;
+}
+
+/* static */ uint32_t
+LexicalScope::nextFrameSlot(Scope* scope)
+{
+    switch (scope->kind()) {
+      case ScopeKind::Function:
+        return scope->as<FunctionScope>().nextFrameSlot();
+      case ScopeKind::Lexical:
+      case ScopeKind::Catch:
+        return scope->as<LexicalScope>().nextFrameSlot();
+      case ScopeKind::Eval:
+      case ScopeKind::StrictEval:
+        return scope->as<EvalScope>().nextFrameSlot();
+      case ScopeKind::Module:
+        return scope->as<ModuleScope>().nextFrameSlot();
+      default:
+        MOZ_CRASH("Not an enclosing intra-frame Scope");
+    }
 }
 
 /* static */ LexicalScope*
@@ -373,7 +390,7 @@ LexicalScope::create(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
 
     MOZ_ASSERT(data, "LexicalScopes should not be created if there are no bindings.");
     MOZ_ASSERT_IF(!isNamedLambda && firstFrameSlot != 0,
-                  firstFrameSlot == computeNextFrameSlot(enclosing));
+                  firstFrameSlot == nextFrameSlot(enclosing));
     MOZ_ASSERT_IF(isNamedLambda, firstFrameSlot == LOCALNO_LIMIT);
 
     // The data that's passed in is from the frontend and is LifoAlloc'd or is
@@ -422,7 +439,7 @@ LexicalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, HandleScope enclosing,
         return false;
 
     if (mode == XDR_DECODE) {
-        scope.set(create(cx, kind, data, computeNextFrameSlot(enclosing), enclosing));
+        scope.set(create(cx, kind, data, nextFrameSlot(enclosing), enclosing));
         if (!scope)
             return false;
         js_free(data);
@@ -449,7 +466,7 @@ FunctionScope::create(ExclusiveContext* cx, BindingData* bindings, uint32_t firs
                       bool hasDefaults, bool isExtensible, HandleFunction fun,
                       HandleScope enclosing)
 {
-    MOZ_ASSERT_IF(firstFrameSlot != 0, firstFrameSlot == computeNextFrameSlot(enclosing));
+    MOZ_ASSERT_IF(firstFrameSlot != 0, firstFrameSlot == nextFrameSlot(enclosing));
     MOZ_ASSERT(fun->isTenured());
 
     // Note that enclosing->kind() == ScopeKind::ParameterDefaults does not
@@ -502,7 +519,7 @@ FunctionScope::create(ExclusiveContext* cx, BindingData* bindings, uint32_t firs
 FunctionScope::clone(JSContext* cx, Handle<FunctionScope*> scope, HandleFunction fun,
                      HandleScope enclosing)
 {
-    MOZ_ASSERT_IF(enclosing, scope->computeFirstFrameSlot() == computeNextFrameSlot(enclosing));
+    MOZ_ASSERT_IF(enclosing, scope->firstFrameSlot() == nextFrameSlot(enclosing));
     MOZ_ASSERT(fun != scope->canonicalFunction());
 
     Data* dataClone = NewEmptyScopeData<Data>(cx, sizeof(Data));
@@ -570,7 +587,7 @@ FunctionScope::XDR(XDRState<mode>* xdr, HandleFunction fun, HandleScope enclosin
         return false;
 
     if (mode == XDR_DECODE) {
-        scope.set(create(cx, data, computeNextFrameSlot(enclosing), hasDefaults, isExtensible,
+        scope.set(create(cx, data, nextFrameSlot(enclosing), hasDefaults, isExtensible,
                          fun, enclosing));
         if (!scope)
             return false;
@@ -879,7 +896,7 @@ BindingIter::BindingIter(Scope* scope)
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
         init(scope->as<LexicalScope>().bindingData(),
-             scope->as<LexicalScope>().computeFirstFrameSlot(), 0);
+             scope->as<LexicalScope>().firstFrameSlot(), 0);
         break;
       case ScopeKind::NamedLambda:
       case ScopeKind::StrictNamedLambda:
@@ -895,7 +912,7 @@ BindingIter::BindingIter(Scope* scope)
         if (scope->as<FunctionScope>().canonicalFunction()->nonLazyScript()->hasDefaults())
             ignoreFlags |= IgnorePositionalFormalParameters;
         init(scope->as<FunctionScope>().bindingData(),
-             scope->as<FunctionScope>().computeFirstFrameSlot(),
+             scope->as<FunctionScope>().firstFrameSlot(),
              ignoreFlags);
         break;
       }

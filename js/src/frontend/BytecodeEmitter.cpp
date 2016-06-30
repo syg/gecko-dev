@@ -6275,25 +6275,30 @@ BytecodeEmitter::emitFunction(ParseNode* pn, bool needsProto)
 
     MOZ_ASSERT(!needsProto);
 
-    if (sc->isGlobalContext() && lookupName(name).bindingKind() == BindingKind::Var) {
-        // For global and eval scripts we put the bytecode for top-level
-        // functions in the prologue to predefine their names in the variable
-        // object before the main code is executed.
+    bool topLevelFunction = !sc->isFunctionBox() &&
+                            lookupName(name).bindingKind() == BindingKind::Var;
+    if (topLevelFunction) {
+        if (sc->isModuleContext()) {
+            // For modules, we record the function and instantiate the binding
+            // during ModuleDeclarationInstantiation(), before the script is run.
 
-        MOZ_ASSERT(pn->getOp() == JSOP_NOP);
-        switchToPrologue();
-        if (!emitIndex32(JSOP_DEFFUN, index))
-            return false;
-        if (!updateSourceCoordNotes(pn->pn_pos.begin))
-            return false;
-        switchToMain();
-    } else if (sc->isModuleContext()) {
-        // For modules, we record the function and instantiate the binding
-        // during ModuleDeclarationInstantiation(), before the script is run.
+            RootedModuleObject module(cx, sc->asModuleContext()->module());
+            if (!module->noteFunctionDeclaration(cx, name, fun))
+                return false;
+        } else {
+            // For global and eval scripts we put the bytecode for top-level
+            // functions in the prologue to predefine their names in the variable
+            // object before the main code is executed.
 
-        RootedModuleObject module(cx, sc->asModuleContext()->module());
-        if (!module->noteFunctionDeclaration(cx, name, fun))
-            return false;
+            MOZ_ASSERT(sc->isGlobalContext() || sc->isEvalContext());
+            MOZ_ASSERT(pn->getOp() == JSOP_NOP);
+            switchToPrologue();
+            if (!emitIndex32(JSOP_DEFFUN, index))
+                return false;
+            if (!updateSourceCoordNotes(pn->pn_pos.begin))
+                return false;
+            switchToMain();
+        }
     } else {
         // For functions nested within functions and blocks, make a lambda and
         // initialize the binding name of the function in the current scope.

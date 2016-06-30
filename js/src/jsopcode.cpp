@@ -1356,7 +1356,7 @@ ExpressionDecompiler::getLocal(uint32_t local, jsbytecode* pc)
         LexicalScope& lexicalScope = si.scope()->as<LexicalScope>();
 
         // Is the slot within bounds of the current lexical scope?
-        if (local < lexicalScope.computeFirstFrameSlot())
+        if (local < lexicalScope.firstFrameSlot())
             continue;
         if (local >= lexicalScope.nextFrameSlot())
             break;

@@ -43,17 +43,28 @@ BindingKindIsLexical(BindingKind kind)
 
 enum class ScopeKind : uint8_t
 {
+    // FunctionScope
     Function,
+
+    // LexicalScope
     ParameterDefaults,
     Lexical,
     Catch,
     NamedLambda,
     StrictNamedLambda,
+
+    // WithScope
     With,
+
+    // EvalScope
     Eval,
     StrictEval,
+
+    // GlobalScope
     Global,
     NonSyntactic,
+
+    // ModuleScope
     Module
 };
 
@@ -335,12 +346,10 @@ class LexicalScope : public Scope
         return *reinterpret_cast<BindingData*>(data_);
     }
 
-    static uint32_t computeNextFrameSlot(Scope* start);
+    static uint32_t nextFrameSlot(Scope* start);
 
   public:
-    uint32_t computeFirstFrameSlot() const {
-        return computeNextFrameSlot(enclosing());
-    }
+    uint32_t firstFrameSlot() const;
 
     uint32_t nextFrameSlot() const {
         return bindingData().nextFrameSlot;
@@ -453,13 +462,13 @@ class FunctionScope : public Scope
         return *data().bindings;
     }
 
-    static uint32_t computeNextFrameSlot(Scope* start) {
+    static uint32_t nextFrameSlot(Scope* scope) {
         // A function scope's first frame slot may be non-0 when a formal
         // parameter default expression scope is present. In that case, if the
         // defaults scope has any non-closed over bindings, the first function
         // scope frame slot would be non-0.
-        if (start->kind() == ScopeKind::ParameterDefaults)
-            return start->as<LexicalScope>().nextFrameSlot();
+        if (scope->kind() == ScopeKind::ParameterDefaults)
+            return scope->as<LexicalScope>().nextFrameSlot();
         return 0;
     }
 
@@ -467,8 +476,8 @@ class FunctionScope : public Scope
     static FunctionScope* clone(JSContext* cx, Handle<FunctionScope*> scope, HandleFunction fun,
                                 HandleScope enclosing);
 
-    uint32_t computeFirstFrameSlot() const {
-        return computeNextFrameSlot(enclosing());
+    uint32_t firstFrameSlot() const {
+        return nextFrameSlot(enclosing());
     }
 
     uint32_t nextFrameSlot() const {
@@ -758,6 +767,10 @@ class ModuleScope : public Scope
     }
 
   public:
+    uint32_t nextFrameSlot() const {
+        return bindingData().nextFrameSlot;
+    }
+
     ModuleObject* module() const {
         return data().module;
     }

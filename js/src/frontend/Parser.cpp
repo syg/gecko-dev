@@ -2513,6 +2513,10 @@ Parser<ParseHandler>::checkFunctionDefinition(HandleAtom funAtom, Node pn, Funct
         if (bodyLevelFunction) {
             if (!noteDeclaredName(funName, DeclarationKind::BodyLevelFunction, pn))
                 return false;
+
+            // Body-level functions in modules are always closed over.
+            if (pc->atModuleLevel())
+                pc->varScope().lookupDeclaredName(funName)->value()->setClosedOver();
         } else {
             if (!pc->sc()->strict()) {
                 // Under sloppy mode, try Annex B.3.3 semantics. If making an
@@ -4581,10 +4585,13 @@ Parser<FullParseHandler>::exportDeclaration()
             if (!kid)
                 return null();
             break;
-          default:
+          default: {
             tokenStream.ungetToken();
-            nameNode = newName(context->names().starDefaultStar);
+            RootedPropertyName name(context, context->names().starDefaultStar);
+            nameNode = newName(name);
             if (!nameNode)
+                return null();
+            if (!noteDeclaredName(name, DeclarationKind::Const))
                 return null();
             kid = assignExpr(InAllowed, YieldIsKeyword, TripledotProhibited);
             if (!kid)
@@ -4592,6 +4599,7 @@ Parser<FullParseHandler>::exportDeclaration()
             if (!MatchOrInsertSemicolonAfterExpression(tokenStream))
                 return null();
             break;
+          }
         }
 
         ParseNode* node = handler.newExportDefaultDeclaration(kid, nameNode,

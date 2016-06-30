@@ -4957,7 +4957,7 @@ js::ReportRuntimeLexicalError(JSContext* cx, unsigned errorNumber,
             RootedScope scope(cx, script->lookupScope(pc));
             MOZ_ASSERT(scope && scope->is<LexicalScope>());
             Rooted<LexicalScope*> lexicalScope(cx, &scope->as<LexicalScope>());
-            while (slot < lexicalScope->computeFirstFrameSlot())
+            while (slot < lexicalScope->firstFrameSlot())
                 lexicalScope = &lexicalScope->enclosing()->as<LexicalScope>();
 
             // Get the name of the slot.
