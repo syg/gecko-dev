@@ -621,7 +621,7 @@ BytecodeEmitter::EmitterScope::searchInEnclosingScope(JSAtom* name, Scope* scope
 
                     if (bindLoc.kind() == BindingLocation::Kind::Import) {
                         MOZ_ASSERT(si.kind() == ScopeKind::Module);
-                        return NameLocation::Import();
+                        return NameLocation::Import(bindLoc.slot());
                     }
 
                     MOZ_ASSERT(bindLoc.kind() == BindingLocation::Kind::Environment);
@@ -750,14 +750,16 @@ BytecodeEmitter::EmitterScope::enterLexical(BytecodeEmitter* bce, ScopeKind kind
 
     // Initialized frame slots to TDZ poison. Environment slots are
     // poisoned by environment creation.
-    if (!bce->emit1(JSOP_UNINITIALIZED))
-        return false;
-    for (uint32_t slot = frameSlotStart(); slot < frameSlotEnd(); slot++) {
-        if (!bce->emitLocalOp(JSOP_INITLEXICAL, slot))
+    if (firstFrameSlot != frameSlotEnd()) {
+        if (!bce->emit1(JSOP_UNINITIALIZED))
+            return false;
+        for (uint32_t slot = firstFrameSlot; slot < frameSlotEnd(); slot++) {
+            if (!bce->emitLocalOp(JSOP_INITLEXICAL, slot))
+                return false;
+        }
+        if (!bce->emit1(JSOP_POP))
             return false;
     }
-    if (!bce->emit1(JSOP_POP))
-        return false;
 
     // Create and intern the VM scope.
     auto createScope = [kind, bindings, firstFrameSlot](ExclusiveContext* cx,

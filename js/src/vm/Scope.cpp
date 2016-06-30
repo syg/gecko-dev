@@ -107,10 +107,15 @@ CreateEnvironmentShape(ExclusiveContext* cx, BindingIter& bi, const Class* cls,
     StackBaseShape stackBase(cx, cls, baseShapeFlags);
     for (; bi; bi++) {
         BindingLocation loc = bi.location();
-        if (loc.kind() == BindingLocation::Kind::Environment) {
+        switch (loc.kind()) {
+          case BindingLocation::Kind::Environment:
+          case BindingLocation::Kind::Import:
             shape = NextEnvironmentShape(cx, bi.name(), bi.kind(), loc.slot(), stackBase, shape);
             if (!shape)
                 return nullptr;
+            break;
+          default:
+            break;
         }
     }
 
@@ -919,8 +924,8 @@ BindingIter::init(LexicalScope::BindingData& data, uint32_t firstFrameSlot, uint
     } else {
         // positional formals - [0, 0)
         //      other formals - [0, 0)
-        //            imports - [0, 0)
         //               vars - [0, 0)
+        //            imports - [0, 0)
         //               lets - [0, data.constStart)
         //             consts - [data.constStart, data.length)
         init(0, 0, 0, 0, data.constStart,
@@ -935,11 +940,11 @@ BindingIter::init(FunctionScope::BindingData& data, uint32_t firstFrameSlot, uin
 {
     // positional formals - [0, data.nonPositionalFormalStart)
     //      other formals - [data.nonPositionalParamStart, data.varStart)
-    //            imports - [data.varStart, data.varStart)
     //               vars - [data.varStart, data.length)
+    //            imports - [data.length, data.length)
     //               lets - [data.length, data.length)
     //             consts - [data.length, data.length)
-    init(data.nonPositionalFormalStart, data.varStart, data.varStart, data.length, data.length,
+    init(data.nonPositionalFormalStart, data.varStart, data.length, data.length, data.length,
          CanHaveArgumentSlots | CanHaveFrameSlots | CanHaveEnvironmentSlots | flags,
          firstFrameSlot, JSSLOT_FREE(&CallObject::class_),
          data.names, data.length);
@@ -950,11 +955,11 @@ BindingIter::init(GlobalScope::BindingData& data)
 {
     // positional formals - [0, 0)
     //      other formals - [0, 0)
-    //            imports - [0, 0)
     //               vars - [0, data.letStart)
+    //            imports - [data.letStart, data.letStart)
     //               lets - [data.letStart, data.constStart)
     //             consts - [data.constStart, data.length)
-    init(0, 0, 0, data.letStart, data.constStart,
+    init(0, 0, data.letStart, data.letStart, data.constStart,
          CannotHaveSlots,
          UINT32_MAX, UINT32_MAX,
          data.names, data.length);
@@ -965,12 +970,12 @@ BindingIter::init(EvalScope::BindingData& data, bool strict)
 {
     // positional formals - [0, 0)
     //      other formals - [0, 0)
-    //            imports - [0, 0)
     //               vars - [0, data.length)
+    //            imports - [data.length, data.length)
     //               lets - [data.length, data.length)
     //             consts - [data.length, data.length)
     if (strict) {
-        init(0, 0, 0, data.length, data.length,
+        init(0, 0, data.length, data.length, data.length,
              CanHaveFrameSlots | CanHaveEnvironmentSlots,
              0, JSSLOT_FREE(&CallObject::class_),
              data.names, data.length);
@@ -986,11 +991,11 @@ BindingIter::init(ModuleScope::BindingData& data)
 {
     // positional formals - [0, 0)
     //      other formals - [0, 0)
-    //            imports - [0, data.varStart)
-    //               vars - [data.varStart, data.letStart)
+    //               vars - [0, data.importStart)
+    //            imports - [data.importStart, data.letStart)
     //               lets - [data.letStart, data.constStart)
     //             consts - [data.constStart, data.length)
-    init(0, 0, data.varStart, data.letStart, data.constStart,
+    init(0, 0, data.importStart, data.letStart, data.constStart,
          CanHaveFrameSlots | CanHaveEnvironmentSlots,
          0, JSSLOT_FREE(&ModuleEnvironmentObject::class_),
          data.names, data.length);

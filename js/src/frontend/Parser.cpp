@@ -1177,12 +1177,12 @@ Parser<FullParseHandler>::newGlobalScopeData(ParseContext::Scope& scope,
 
         PodCopy(cursor, vars.begin(), vars.length());
         cursor += vars.length();
-        bindings->letStart = cursor - start;
 
+        bindings->letStart = cursor - start;
         PodCopy(cursor, lets.begin(), lets.length());
         cursor += lets.length();
-        bindings->constStart = cursor - start;
 
+        bindings->constStart = cursor - start;
         PodCopy(cursor, consts.begin(), consts.length());
         bindings->length = numBindings;
     }
@@ -1194,21 +1194,25 @@ template <>
 Maybe<ModuleScope::BindingData*>
 Parser<FullParseHandler>::newModuleScopeData(ParseContext::Scope& scope)
 {
-    Vector<BindingName> imports(context);
     Vector<BindingName> vars(context);
+    Vector<BindingName> imports(context);
     Vector<BindingName> lets(context);
     Vector<BindingName> consts(context);
 
     bool closeOverAllBindings = pc->sc()->closeOverAllBindings();
     for (BindingIter bi = scope.bindings(pc); bi; bi++) {
-        BindingName binding(bi.name(), closeOverAllBindings || bi.closedOver());
+        // Mark all imports as closed over as they are currently looked up by
+        // name.
+        BindingName binding(bi.name(), closeOverAllBindings ||
+                                       bi.closedOver() ||
+                                       bi.kind() == BindingKind::Import);
         switch (bi.kind()) {
-          case BindingKind::Import:
-            if (!imports.append(binding))
-                return Nothing();
-            break;
           case BindingKind::Var:
             if (!vars.append(binding))
+                return Nothing();
+            break;
+          case BindingKind::Import:
+            if (!imports.append(binding))
                 return Nothing();
             break;
           case BindingKind::Let:
@@ -1236,18 +1240,18 @@ Parser<FullParseHandler>::newModuleScopeData(ParseContext::Scope& scope)
         BindingName* start = bindings->names;
         BindingName* cursor = start;
 
-        PodCopy(cursor, imports.begin(), imports.length());
-        cursor += imports.length();
-        bindings->varStart = cursor - start;
-
         PodCopy(cursor, vars.begin(), vars.length());
         cursor += vars.length();
-        bindings->letStart = cursor - start;
 
+        bindings->importStart = cursor - start;
+        PodCopy(cursor, imports.begin(), imports.length());
+        cursor += imports.length();
+
+        bindings->letStart = cursor - start;
         PodCopy(cursor, lets.begin(), lets.length());
         cursor += lets.length();
-        bindings->constStart = cursor - start;
 
+        bindings->constStart = cursor - start;
         PodCopy(cursor, consts.begin(), consts.length());
         bindings->length = numBindings;
     }
@@ -1373,12 +1377,12 @@ Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope, bool 
 
         PodCopy(cursor, positionalFormals.begin(), positionalFormals.length());
         cursor += positionalFormals.length();
-        bindings->nonPositionalFormalStart = cursor - start;
 
+        bindings->nonPositionalFormalStart = cursor - start;
         PodCopy(cursor, formals.begin(), formals.length());
         cursor += formals.length();
-        bindings->varStart = cursor - start;
 
+        bindings->varStart = cursor - start;
         PodCopy(cursor, vars.begin(), vars.length());
         bindings->length = numBindings;
     }
@@ -1424,8 +1428,8 @@ Parser<FullParseHandler>::newLexicalScopeData(ParseContext::Scope& scope)
 
         PodCopy(cursor, lets.begin(), lets.length());
         cursor += lets.length();
-        bindings->constStart = cursor - start;
 
+        bindings->constStart = cursor - start;
         PodCopy(cursor, consts.begin(), consts.length());
         bindings->length = numBindings;
     }

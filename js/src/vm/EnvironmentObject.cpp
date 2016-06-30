@@ -370,6 +370,19 @@ ModuleEnvironmentObject::create(ExclusiveContext* cx, HandleModuleObject module)
     // causing assertions.
     env->initEnclosingEnvironment(&cx->global()->lexicalEnvironment());
 
+    // Initialize all lexical bindings as uninitialized. Imports get
+    // uninitialized because they have a special TDZ for cyclic imports.
+    uint32_t firstLexicalSlot = JSSLOT_FREE(&class_);
+    for (BindingIter bi(script); bi; bi++) {
+        if (bi.closedOver()) {
+            firstLexicalSlot = bi.nextEnvironmentSlot();
+            break;
+        }
+    }
+    uint32_t slotCount = env->slotSpan();
+    for (uint32_t slot = firstLexicalSlot; slot < slotCount; slot++)
+        env->initSlot(slot, MagicValue(JS_UNINITIALIZED_LEXICAL));
+
     // It is not be possible to add or remove bindings from a module environment
     // after this point as module code is always strict.
 #ifdef DEBUG
@@ -749,7 +762,6 @@ LexicalEnvironmentObject::createTemplateObject(JSContext* cx, HandleShape shape,
     MOZ_ASSERT(obj->isDelegate());
 
     LexicalEnvironmentObject* env = &obj->as<LexicalEnvironmentObject>();
-
     if (enclosing)
         env->initEnclosingEnvironment(enclosing);
 
@@ -769,6 +781,7 @@ LexicalEnvironmentObject::createTemplateObject(JSContext* cx, Handle<LexicalScop
         return nullptr;
 
     env->initScopeUnchecked(scope);
+    env->setBindingsToUninitialized();
     return env;
 }
 
@@ -875,17 +888,7 @@ LexicalEnvironmentObject::recreate(JSContext* cx, Handle<LexicalEnvironmentObjec
 {
     Rooted<LexicalScope*> scope(cx, &env->scope());
     RootedObject enclosing(cx, &env->enclosingEnvironment());
-    Rooted<LexicalEnvironmentObject*> copy(cx, createTemplateObject(cx, scope, enclosing,
-                                                                    gc::TenuredHeap));
-    if (!copy)
-        return nullptr;
-
-    uint32_t slotCount = scope->environmentShape()->slot();
-    MOZ_ASSERT(slotCount == env->lastProperty()->slot());
-    for (uint32_t i = JSSLOT_FREE(&class_); i < slotCount; i++)
-        copy->setSlot(i, MagicValue(JS_UNINITIALIZED_LEXICAL));
-
-    return copy;
+    return createTemplateObject(cx, scope, enclosing, gc::TenuredHeap);
 }
 
 /* static */ bool

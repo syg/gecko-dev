@@ -173,9 +173,6 @@ class NameLocation
         // In a named lambda, the name is the callee itself.
         NamedLambdaCallee,
 
-        // An imported name in a module.
-        Import,
-
         // The name is a simple formal parameter name and can be retrieved
         // directly from the stack using slot_.
         ArgumentSlot,
@@ -185,6 +182,9 @@ class NameLocation
 
         // The name is closed over and lives on an environment hops_ away in slot_.
         EnvironmentCoordinate,
+
+        // An imported name in a module.
+        Import
     };
 
   private:
@@ -240,10 +240,6 @@ class NameLocation
         return NameLocation(Kind::NamedLambdaCallee, BindingKind::NamedLambdaCallee);
     }
 
-    static NameLocation Import() {
-        return NameLocation(Kind::Import, BindingKind::Import);
-    }
-
     static NameLocation ArgumentSlot(uint16_t slot) {
         return NameLocation(Kind::ArgumentSlot, BindingKind::FormalParameter, 0, slot);
     }
@@ -258,6 +254,10 @@ class NameLocation
         return NameLocation(Kind::EnvironmentCoordinate, bindKind, hops, slot);
     }
 
+    static NameLocation Import(uint32_t slot) {
+        return NameLocation(Kind::Import, BindingKind::Import, 0, slot);
+    }
+
     static NameLocation fromBinding(BindingKind bindKind, const BindingLocation& bl) {
         switch (bl.kind()) {
           case BindingLocation::Kind::Global:
@@ -269,7 +269,7 @@ class NameLocation
           case BindingLocation::Kind::Environment:
             return EnvironmentCoordinate(bindKind, 0, bl.slot());
           case BindingLocation::Kind::Import:
-            return Import();
+            return Import(bl.slot());
           case BindingLocation::Kind::NamedLambdaCallee:
             return NamedLambdaCallee();
         }
