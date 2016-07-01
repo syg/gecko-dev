@@ -138,8 +138,8 @@ class BindingLocation
         return BindingLocation(Kind::Environment, slot);
     }
 
-    static BindingLocation Import(uint32_t slot) {
-        return BindingLocation(Kind::Import, slot);
+    static BindingLocation Import() {
+        return BindingLocation(Kind::Import, UINT32_MAX);
     }
 
     static BindingLocation NamedLambdaCallee() {
@@ -826,7 +826,10 @@ class BindingIter
         IgnoreDestructuredFormalParameters = 1 << 4,
 
         // Truly I hate named lambdas.
-        IsNamedLambda = 1 << 5
+        IsNamedLambda = 1 << 5,
+
+        // Imports are weird.
+        CanHaveImports = 1 << 6
     };
 
     static const uint8_t CanHaveSlotsMask = 0x7;
@@ -875,6 +878,10 @@ class BindingIter
 
     bool isNamedLambda() const {
         return flags_ & IsNamedLambda;
+    }
+
+    bool canHaveImports() const {
+        return flags_ & CanHaveImports;
     }
 
     void increment() {
@@ -1006,14 +1013,14 @@ class BindingIter
             return BindingLocation::Global();
         if (closedOver()) {
             MOZ_ASSERT(canHaveEnvironmentSlots());
-            if (kind() == BindingKind::Import)
-                return BindingLocation::Import(environmentSlot_);
             return BindingLocation::Environment(environmentSlot_);
         }
         if (index_ < nonPositionalFormalStart_) {
             MOZ_ASSERT(canHaveArgumentSlots());
             return BindingLocation::Argument(argumentSlot_);
         }
+        if (canHaveImports() && kind() == BindingKind::Import)
+            return BindingLocation::Import();
         if (canHaveFrameSlots())
             return BindingLocation::Frame(frameSlot_);
         MOZ_ASSERT(isNamedLambda());

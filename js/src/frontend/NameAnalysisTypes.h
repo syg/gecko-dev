@@ -254,8 +254,8 @@ class NameLocation
         return NameLocation(Kind::EnvironmentCoordinate, bindKind, hops, slot);
     }
 
-    static NameLocation Import(uint32_t slot) {
-        return NameLocation(Kind::Import, BindingKind::Import, 0, slot);
+    static NameLocation Import() {
+        return NameLocation(Kind::Import, BindingKind::Import);
     }
 
     static NameLocation fromBinding(BindingKind bindKind, const BindingLocation& bl) {
@@ -269,7 +269,7 @@ class NameLocation
           case BindingLocation::Kind::Environment:
             return EnvironmentCoordinate(bindKind, 0, bl.slot());
           case BindingLocation::Kind::Import:
-            return Import(bl.slot());
+            return Import();
           case BindingLocation::Kind::NamedLambdaCallee:
             return NamedLambdaCallee();
         }

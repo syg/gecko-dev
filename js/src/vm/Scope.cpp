@@ -115,15 +115,10 @@ CreateEnvironmentShape(ExclusiveContext* cx, BindingIter& bi, const Class* cls,
     StackBaseShape stackBase(cx, cls, baseShapeFlags);
     for (; bi; bi++) {
         BindingLocation loc = bi.location();
-        switch (loc.kind()) {
-          case BindingLocation::Kind::Environment:
-          case BindingLocation::Kind::Import:
+        if (loc.kind() == BindingLocation::Kind::Environment) {
             shape = NextEnvironmentShape(cx, bi.name(), bi.kind(), loc.slot(), stackBase, shape);
             if (!shape)
                 return nullptr;
-            break;
-          default:
-            break;
         }
     }
 
@@ -1021,7 +1016,7 @@ BindingIter::init(ModuleScope::BindingData& data)
     //               lets - [data.letStart, data.constStart)
     //             consts - [data.constStart, data.length)
     init(0, 0, data.importStart, data.letStart, data.constStart,
-         CanHaveFrameSlots | CanHaveEnvironmentSlots,
+         CanHaveFrameSlots | CanHaveEnvironmentSlots | CanHaveImports,
          0, JSSLOT_FREE(&ModuleEnvironmentObject::class_),
          data.names, data.length);
 }

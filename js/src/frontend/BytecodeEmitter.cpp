@@ -617,16 +617,19 @@ BytecodeEmitter::EmitterScope::searchInEnclosingScope(JSAtom* name, Scope* scope
                     if (bi.name() != name)
                         continue;
 
-                    // The name must already have been marked as closed
-                    // over. If this assertion is hit, there is a bug in
-                    // the name analysis.
                     BindingLocation bindLoc = bi.location();
 
+                    // Imports are on the environment but are indirect
+                    // bindings and must be accessed via name instead of
+                    // EnvironmentCoordinate.
                     if (bindLoc.kind() == BindingLocation::Kind::Import) {
                         MOZ_ASSERT(si.kind() == ScopeKind::Module);
-                        return NameLocation::Import(bindLoc.slot());
+                        return NameLocation::Import();
                     }
 
+                    // The name must already have been marked as closed
+                    // over. If this assertion is hit, there is a bug in the
+                    // name analysis.
                     MOZ_ASSERT(bindLoc.kind() == BindingLocation::Kind::Environment);
                     return NameLocation::EnvironmentCoordinate(bi.kind(), hops, bindLoc.slot());
                 }

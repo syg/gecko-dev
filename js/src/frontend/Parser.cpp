@@ -1203,9 +1203,7 @@ Parser<FullParseHandler>::newModuleScopeData(ParseContext::Scope& scope)
     for (BindingIter bi = scope.bindings(pc); bi; bi++) {
         // Mark all imports as closed over as they are currently looked up by
         // name.
-        BindingName binding(bi.name(), closeOverAllBindings ||
-                                       bi.closedOver() ||
-                                       bi.kind() == BindingKind::Import);
+        BindingName binding(bi.name(), closeOverAllBindings || bi.closedOver());
         switch (bi.kind()) {
           case BindingKind::Var:
             if (!vars.append(binding))
