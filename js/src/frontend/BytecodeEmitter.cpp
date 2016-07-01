@@ -6317,8 +6317,19 @@ BytecodeEmitter::emitFunction(ParseNode* pn, bool needsProto)
 
     MOZ_ASSERT(!needsProto);
 
-    bool topLevelFunction = !sc->isFunctionBox() &&
-                            lookupName(name).bindingKind() == BindingKind::Var;
+    bool topLevelFunction;
+    if (sc->isFunctionBox()) {
+        // No nested functions inside other functions are top-level.
+        topLevelFunction = false;
+    } else {
+        // In eval scripts, top-level functions in eval scripts are accessed
+        // dynamically. In global and module scripts, top-level functions are
+        // those bound in the var scope.
+        NameLocation loc = lookupName(name);
+        topLevelFunction = loc.kind() == NameLocation::Kind::Dynamic ||
+                           loc.bindingKind() == BindingKind::Var;
+    }
+
     if (topLevelFunction) {
         if (sc->isModuleContext()) {
             // For modules, we record the function and instantiate the binding

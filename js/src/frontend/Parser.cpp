@@ -1194,23 +1194,23 @@ template <>
 Maybe<ModuleScope::BindingData*>
 Parser<FullParseHandler>::newModuleScopeData(ParseContext::Scope& scope)
 {
-    Vector<BindingName> vars(context);
     Vector<BindingName> imports(context);
+    Vector<BindingName> vars(context);
     Vector<BindingName> lets(context);
     Vector<BindingName> consts(context);
 
     bool closeOverAllBindings = pc->sc()->closeOverAllBindings();
     for (BindingIter bi = scope.bindings(pc); bi; bi++) {
-        // Mark all imports as closed over as they are currently looked up by
-        // name.
-        BindingName binding(bi.name(), closeOverAllBindings || bi.closedOver());
+        // Imports are indirect bindings and must not be given known slots.
+        BindingName binding(bi.name(), (closeOverAllBindings || bi.closedOver()) &&
+                                       bi.kind() != BindingKind::Import);
         switch (bi.kind()) {
-          case BindingKind::Var:
-            if (!vars.append(binding))
-                return Nothing();
-            break;
           case BindingKind::Import:
             if (!imports.append(binding))
+                return Nothing();
+            break;
+          case BindingKind::Var:
+            if (!vars.append(binding))
                 return Nothing();
             break;
           case BindingKind::Let:
@@ -1227,7 +1227,7 @@ Parser<FullParseHandler>::newModuleScopeData(ParseContext::Scope& scope)
     }
 
     ModuleScope::BindingData* bindings = nullptr;
-    uint32_t numBindings = vars.length() + imports.length() + lets.length() + consts.length();
+    uint32_t numBindings = imports.length() + vars.length() + lets.length() + consts.length();
 
     if (numBindings > 0) {
         bindings = NewEmptyBindingData<ModuleScope>(context, alloc, numBindings);
@@ -1238,12 +1238,12 @@ Parser<FullParseHandler>::newModuleScopeData(ParseContext::Scope& scope)
         BindingName* start = bindings->names;
         BindingName* cursor = start;
 
-        PodCopy(cursor, vars.begin(), vars.length());
-        cursor += vars.length();
-
-        bindings->importStart = cursor - start;
         PodCopy(cursor, imports.begin(), imports.length());
         cursor += imports.length();
+
+        bindings->varStart = cursor - start;
+        PodCopy(cursor, vars.begin(), vars.length());
+        cursor += vars.length();
 
         bindings->letStart = cursor - start;
         PodCopy(cursor, lets.begin(), lets.length());

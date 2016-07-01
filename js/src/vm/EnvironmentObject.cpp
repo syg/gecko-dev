@@ -372,18 +372,13 @@ ModuleEnvironmentObject::create(ExclusiveContext* cx, HandleModuleObject module)
 
     // Initialize all lexical bindings and imports as uninitialized. Imports
     // get uninitialized because they have a special TDZ for cyclic imports.
-    uint32_t slotCount = env->slotSpan();
-    uint32_t firstLexicalSlot = slotCount;
     for (BindingIter bi(script); bi; bi++) {
         if (bi.closedOver() && (BindingKindIsLexical(bi.kind()) ||
                                 bi.kind() == BindingKind::Import))
         {
-            firstLexicalSlot = bi.nextEnvironmentSlot();
-            break;
+            env->initSlot(bi.nextEnvironmentSlot(), MagicValue(JS_UNINITIALIZED_LEXICAL));
         }
     }
-    for (uint32_t slot = firstLexicalSlot; slot < slotCount; slot++)
-        env->initSlot(slot, MagicValue(JS_UNINITIALIZED_LEXICAL));
 
     // It is not be possible to add or remove bindings from a module environment
     // after this point as module code is always strict.

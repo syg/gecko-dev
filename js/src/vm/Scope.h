@@ -24,11 +24,11 @@ class ModuleObject;
 
 enum class BindingKind : uint8_t
 {
+    Import,
     FormalParameter,
     Var,
     Let,
     Const,
-    Import,
 
     // So you think named lambda callee names are consts? Nope! They don't
     // throw when being assigned to in sloppy mode.
@@ -159,7 +159,7 @@ class BindingLocation
     }
 
     uint32_t slot() const {
-        MOZ_ASSERT(kind_ == Kind::Frame || kind_ == Kind::Environment || kind_ == Kind::Import);
+        MOZ_ASSERT(kind_ == Kind::Frame || kind_ == Kind::Environment);
         return slot_;
     }
 
@@ -711,11 +711,11 @@ class ModuleScope : public Scope
     {
         // Bindings are sorted by kind.
         //
-        //    vars - [0, importStart)
-        // imports - [importStart, letStart)
+        // imports - [0, varStart)
+        //    vars - [varStart, letStart)
         //    lets - [letStart, constStart)
         //  consts - [constStart, length)
-        uint32_t importStart;
+        uint32_t varStart;
         uint32_t letStart;
         uint32_t constStart;
         uint32_t length;
@@ -807,15 +807,35 @@ class BindingIter
     // Bindings are sorted by kind. Because different Scopes have differently
     // laid out BindingData for packing, BindingIter must handle all binding kinds.
     //
-    // positional formals - [0, nonPositionalFormalStart)
+    // Kind ranges:
+    //
+    //            imports - [0, positionalFormalStart)
+    // positional formals - [positionalFormalStart, nonPositionalFormalStart)
     //      other formals - [nonPositionalParamStart, varStart)
-    //               vars - [varStart, importStart)
-    //            imports - [importStart, letStart)
+    //               vars - [varStart, letStart)
     //               lets - [letStart, constStart)
     //             consts - [constStart, length)
-    uint16_t nonPositionalFormalStart_;
-    uint16_t varStart_;
-    uint32_t importStart_;
+    //
+    // Access method when not closed over:
+    //
+    //            imports - name
+    // positional formals - argument slot
+    //      other formals - frame slot
+    //               vars - frame slot
+    //               lets - frame slot
+    //             consts - frame slot
+    //
+    // Access method when closed over:
+    //
+    //            imports - name
+    // positional formals - environment slot
+    //      other formals - environment slot
+    //               vars - environment slot
+    //               lets - environment slot
+    //             consts - environment slot
+    uint32_t positionalFormalStart_;
+    uint32_t nonPositionalFormalStart_;
+    uint32_t varStart_;
     uint32_t letStart_;
     uint32_t constStart_;
     uint32_t length_;
@@ -833,10 +853,7 @@ class BindingIter
         IgnoreDestructuredFormalParameters = 1 << 4,
 
         // Truly I hate named lambdas.
-        IsNamedLambda = 1 << 5,
-
-        // Imports are weird.
-        CanHaveImports = 1 << 6
+        IsNamedLambda = 1 << 5
     };
 
     static const uint8_t CanHaveSlotsMask = 0x7;
@@ -848,14 +865,14 @@ class BindingIter
 
     BindingName* names_;
 
-    void init(uint16_t nonPositionalFormalStart, uint16_t varStart,
-              uint32_t importStart, uint32_t letStart, uint32_t constStart,
+    void init(uint32_t positionalFormalStart, uint32_t nonPositionalFormalStart,
+              uint32_t varStart, uint32_t letStart, uint32_t constStart,
               uint8_t flags, uint32_t firstFrameSlot, uint32_t firstEnvironmentSlot,
               BindingName* names, uint32_t length)
     {
+        positionalFormalStart_ = positionalFormalStart;
         nonPositionalFormalStart_ = nonPositionalFormalStart;
         varStart_ = varStart;
-        importStart_ = importStart;
         letStart_ = letStart;
         constStart_ = constStart;
         length_ = length;
@@ -887,22 +904,23 @@ class BindingIter
         return flags_ & IsNamedLambda;
     }
 
-    bool canHaveImports() const {
-        return flags_ & CanHaveImports;
-    }
-
     void increment() {
         MOZ_ASSERT(!done());
         if (flags_ & CanHaveSlotsMask) {
-            if (index_ < nonPositionalFormalStart_) {
-                MOZ_ASSERT(canHaveArgumentSlots());
-                argumentSlot_++;
+            if (canHaveArgumentSlots()) {
+                if (index_ < nonPositionalFormalStart_) {
+                    MOZ_ASSERT(index_ >= positionalFormalStart_);
+                    argumentSlot_++;
+                }
             }
             if (closedOver()) {
+                // Imports must not be given known slots. They are
+                // indirect bindings.
+                MOZ_ASSERT(kind() != BindingKind::Import);
                 MOZ_ASSERT(canHaveEnvironmentSlots());
                 environmentSlot_++;
-            } else if (index_ >= varStart_) {
-                if (canHaveFrameSlots())
+            } else if (canHaveFrameSlots()) {
+                if (index_ >= nonPositionalFormalStart_)
                     frameSlot_++;
             }
         }
@@ -925,6 +943,8 @@ class BindingIter
         // ignore formal parameter names in FunctionScopes with parameters
         // that have default expressions.
         if (ignorePositionalFormalParameters()) {
+            // There can't be imports in a function scope.
+            MOZ_ASSERT(positionalFormalStart_ == 0);
             while (index_ < nonPositionalFormalStart_)
                 increment();
         } else if (ignoreDestructuredFormalParameters()) {
@@ -960,9 +980,9 @@ class BindingIter
     }
 
     explicit BindingIter(const BindingIter& bi)
-      : nonPositionalFormalStart_(bi.nonPositionalFormalStart_),
+      : positionalFormalStart_(bi.positionalFormalStart_),
+        nonPositionalFormalStart_(bi.nonPositionalFormalStart_),
         varStart_(bi.varStart_),
-        importStart_(bi.importStart_),
         letStart_(bi.letStart_),
         constStart_(bi.constStart_),
         length_(bi.length_),
@@ -1018,6 +1038,8 @@ class BindingIter
         MOZ_ASSERT(!done());
         if (!(flags_ & CanHaveSlotsMask))
             return BindingLocation::Global();
+        if (index_ < positionalFormalStart_)
+            return BindingLocation::Import();
         if (closedOver()) {
             MOZ_ASSERT(canHaveEnvironmentSlots());
             return BindingLocation::Environment(environmentSlot_);
@@ -1026,8 +1048,6 @@ class BindingIter
             MOZ_ASSERT(canHaveArgumentSlots());
             return BindingLocation::Argument(argumentSlot_);
         }
-        if (canHaveImports() && kind() == BindingKind::Import)
-            return BindingLocation::Import();
         if (canHaveFrameSlots())
             return BindingLocation::Frame(frameSlot_);
         MOZ_ASSERT(isNamedLambda());
@@ -1036,12 +1056,12 @@ class BindingIter
 
     BindingKind kind() const {
         MOZ_ASSERT(!done());
+        if (index_ < positionalFormalStart_)
+            return BindingKind::Import;
         if (index_ < varStart_)
             return BindingKind::FormalParameter;
-        if (index_ < importStart_)
-            return BindingKind::Var;
         if (index_ < letStart_)
-            return BindingKind::Import;
+            return BindingKind::Var;
         if (index_ < constStart_)
             return BindingKind::Let;
         if (isNamedLambda())
