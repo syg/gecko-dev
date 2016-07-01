@@ -317,9 +317,14 @@ BaselineCompiler::compile()
 }
 
 void
-BaselineCompiler::emitInitializeLocals(size_t n, const Value& v)
+BaselineCompiler::emitInitializeLocals()
 {
-    MOZ_ASSERT(frame.nlocals() > 0 && n <= frame.nlocals());
+    // Initialize all locals to |undefined|. Lexical bindings are temporal
+    // dead zoned in bytecode.
+
+    size_t n = frame.nlocals();
+    if (n == 0)
+        return;
 
     // Use R0 to minimize code size. If the number of locals to push is <
     // LOOP_UNROLL_FACTOR, then the initialization pushes are emitted directly
@@ -327,7 +332,7 @@ BaselineCompiler::emitInitializeLocals(size_t n, const Value& v)
     static const size_t LOOP_UNROLL_FACTOR = 4;
     size_t toPushExtra = n % LOOP_UNROLL_FACTOR;
 
-    masm.moveValue(v, R0);
+    masm.moveValue(UndefinedValue(), R0);
 
     // Handle any extra pushes left over by the optional unrolled loop below.
     for (size_t i = 0; i < toPushExtra; i++)
@@ -403,12 +408,7 @@ BaselineCompiler::emitPrologue()
                           &earlyStackCheckFailed);
     }
 
-    // Initialize local vars to |undefined| and lexicals to a magic value that
-    // throws on touch.
-    if (frame.nvars() > 0)
-        emitInitializeLocals(frame.nvars(), UndefinedValue());
-    if (frame.nlexicals() > 0)
-        emitInitializeLocals(frame.nlexicals(), MagicValue(JS_UNINITIALIZED_LEXICAL));
+    emitInitializeLocals();
 
     if (needsEarlyStackCheck())
         masm.bind(&earlyStackCheckFailed);

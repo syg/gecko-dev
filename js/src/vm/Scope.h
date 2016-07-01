@@ -724,6 +724,9 @@ class ModuleScope : public Scope
         // scope.
         uint32_t nextFrameSlot;
 
+        // Frame slots [0, varFrameSlotEnd) are vars.
+        uint32_t varFrameSlotEnd;
+
         // The array of tagged JSAtom* names, allocated beyond the end of the
         // struct.
         BindingName names[1];
@@ -769,6 +772,10 @@ class ModuleScope : public Scope
   public:
     uint32_t nextFrameSlot() const {
         return bindingData().nextFrameSlot;
+    }
+
+    uint32_t varFrameSlotEnd() const {
+        return bindingData().varFrameSlotEnd;
     }
 
     ModuleObject* module() const {

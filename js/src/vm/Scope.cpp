@@ -815,12 +815,24 @@ ModuleScope::create(ExclusiveContext* cx, BindingData* bindings, HandleModuleObj
         data->bindings = CopyBindingData(cx, bi, bindings, sizeOfBindingData(bindings->length),
                                          &ModuleEnvironmentObject::class_,
                                          ModuleScopeEnvShapeFlags, &envShape);
+
     } else {
         data->bindings = NewEmptyScopeData<BindingData>(cx, sizeOfBindingData(1));
     }
 
     if (!data->bindings)
         return nullptr;
+
+    // Find the last var frame slot.
+    data->bindings->varFrameSlotEnd = data->bindings->nextFrameSlot;
+    for (BindingIter bi(*data->bindings); bi; bi++) {
+        if (bi.location().kind() == BindingLocation::Kind::Frame &&
+            BindingKindIsLexical(bi.kind()))
+        {
+            data->bindings->varFrameSlotEnd = bi.location().slot();
+            break;
+        }
+    }
 
     // Modules always need an environment object for now.
     if (!envShape) {

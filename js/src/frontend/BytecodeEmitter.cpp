@@ -731,6 +731,13 @@ bool
 BytecodeEmitter::EmitterScope::deadZoneFrameSlotRange(BytecodeEmitter* bce, uint32_t slotStart,
                                                       uint32_t slotEnd)
 {
+    // Lexical bindings throw ReferenceErrors if they are used before
+    // initialization. See ES6 8.1.1.1.6.
+    //
+    // For completeness, lexical bindings are initialized in ES6 by calling
+    // InitializeBinding, after which touching the binding will no longer
+    // throw reference errors. See 13.1.11, 9.2.13, 13.6.3.4, 13.6.4.6,
+    // 13.6.4.8, 13.14.5, 15.1.8, and 15.2.0.15.
     if (slotStart != slotEnd) {
         if (!bce->emit1(JSOP_UNINITIALIZED))
             return false;
@@ -1107,8 +1114,8 @@ BytecodeEmitter::EmitterScope::enterModule(BytecodeEmitter* bce, ModuleSharedCon
     // Modules are toplevel, so any free names are global.
     fallbackFreeNameLocation_ = Some(NameLocation::Global(BindingKind::Var));
 
-    // Put lexical frame slots in TDZ. Environment slots are
-    // poisoned during environment creation.
+    // Put lexical frame slots in TDZ. Environment slots are poisoned during
+    // environment creation.
     if (firstLexicalFrameSlot) {
         if (!deadZoneFrameSlotRange(bce, *firstLexicalFrameSlot, nextFrameSlot_))
             return false;

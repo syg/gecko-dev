@@ -506,7 +506,7 @@ InterpreterStack::pushExecuteFrame(JSContext* cx, HandleScript script, const Val
     InterpreterFrame* fp = reinterpret_cast<InterpreterFrame*>(buffer + 1 * sizeof(Value));
     fp->mark_ = mark;
     fp->initExecuteFrame(cx, script, evalInFrame, newTargetValue, envChain);
-    fp->initLocals();
+    fp->initVars();
 
     return fp;
 }

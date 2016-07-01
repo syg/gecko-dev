@@ -276,7 +276,7 @@ class BaselineCompiler : public BaselineCompilerSpecific
     MOZ_MUST_USE bool emitCheckThis(ValueOperand val);
     void emitLoadReturnValue(ValueOperand val);
 
-    void emitInitializeLocals(size_t n, const Value& v);
+    void emitInitializeLocals();
     MOZ_MUST_USE bool emitPrologue();
     MOZ_MUST_USE bool emitEpilogue();
     MOZ_MUST_USE bool emitOutOfLinePostBarrierSlot();

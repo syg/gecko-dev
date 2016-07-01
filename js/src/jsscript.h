@@ -976,20 +976,13 @@ class JSScript : public js::gc::TenuredCell
     size_t nfixedvars() const {
         if (bodyScope()->is<js::FunctionScope>())
             return bodyScope()->as<js::FunctionScope>().nextFrameSlot();
+        if (bodyScope()->is<js::ModuleScope>())
+            return bodyScope()->as<js::ModuleScope>().varFrameSlotEnd();
         return 0;
     }
 
     // Calculate the number of fixed slots that are live at a particular bytecode.
     size_t calculateLiveFixed(jsbytecode* pc);
-
-    // Aliases for clarity when dealing with lexical slots.
-    size_t fixedLexicalBegin() const {
-        return nfixedvars();
-    }
-
-    size_t fixedLexicalEnd() const {
-        return nfixed();
-    }
 
     size_t nslots() const {
         return nslots_;

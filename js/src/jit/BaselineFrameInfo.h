@@ -190,9 +190,6 @@ class FrameInfo
     size_t nvars() const {
         return script->nfixedvars();
     }
-    size_t nlexicals() const {
-        return script->fixedLexicalEnd() - script->fixedLexicalBegin();
-    }
 
   private:
     inline StackValue* rawPush() {

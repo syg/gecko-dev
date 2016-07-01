@@ -824,7 +824,7 @@ IonBuilder::build()
 #endif
 
     initParameters();
-    initLocals();
+    initVars();
 
     // Initialize something for the env chain. We can bail out before the
     // start instruction, but the snapshot is encoded *at* the start
@@ -1068,10 +1068,9 @@ IonBuilder::buildInline(IonBuilder* callerBuilder, MResumePoint* callerResumePoi
         current->initSlot(info().argSlot(i), arg);
     }
 
-    JitSpew(JitSpew_Inlining, "Initializing %u local slots; fixed lexicals begin at %u",
-            info().nlocals(), info().fixedLexicalBegin());
+    JitSpew(JitSpew_Inlining, "Initializing %u vars", info().nfixedvars());
 
-    initLocals();
+    initVars();
 
     JitSpew(JitSpew_Inlining, "Inline entry block MResumePoint %p, %u stack slots",
             (void*) current->entryResumePoint(), current->entryResumePoint()->stackDepth());
@@ -1190,28 +1189,16 @@ IonBuilder::initParameters()
 }
 
 void
-IonBuilder::initLocals()
+IonBuilder::initVars()
 {
-    if (info().nlocals() == 0)
+    if (info().nfixedvars() == 0)
         return;
 
-    MConstant* undef = nullptr;
-    if (info().fixedLexicalBegin() > 0) {
-        undef = MConstant::New(alloc(), UndefinedValue());
-        current->add(undef);
-    }
+    MConstant* undef = MConstant::New(alloc(), UndefinedValue());
+    current->add(undef);
 
-    MConstant* uninitLexical = nullptr;
-    if (info().fixedLexicalBegin() < info().nlocals()) {
-        uninitLexical = MConstant::New(alloc(), MagicValue(JS_UNINITIALIZED_LEXICAL));
-        current->add(uninitLexical);
-    }
-
-    for (uint32_t i = 0; i < info().nlocals(); i++) {
-        current->initSlot(info().localSlot(i), (i < info().fixedLexicalBegin()
-                                                ? undef
-                                                : uninitLexical));
-    }
+    for (uint32_t i = 0; i < info().nfixedvars(); i++)
+        current->initSlot(info().localSlot(i), undef);
 }
 
 bool

@@ -337,7 +337,7 @@ class IonBuilder
     void insertRecompileCheck();
 
     void initParameters();
-    void initLocals();
+    void initVars();
     void rewriteParameter(uint32_t slotIdx, MDefinition* param, int32_t argIndex);
     void rewriteParameters();
     MOZ_MUST_USE bool initEnvironmentChain(MDefinition* callee = nullptr);

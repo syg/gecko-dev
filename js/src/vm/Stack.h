@@ -405,11 +405,9 @@ class InterpreterFrame
     bool initExtraFunctionEnvironmentObjects(JSContext* cx);
 
     /*
-     * Initialize local variables of newly-pushed frame. 'var' bindings are
-     * initialized to undefined and lexical bindings are initialized to
-     * JS_UNINITIALIZED_LEXICAL.
+     * Initialize vars of newly-pushed frame to undefined.
      */
-    void initLocals();
+    void initVars();
 
     /*
      * Stack frame type
