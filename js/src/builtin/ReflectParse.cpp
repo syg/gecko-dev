@@ -1730,7 +1730,7 @@ class ASTSerializer
     bool expressions(ParseNode* pn, NodeVector& elts);
     bool leftAssociate(ParseNode* pn, MutableHandleValue dst);
     bool rightAssociate(ParseNode* pn, MutableHandleValue dst);
-    bool functionArgs(ParseNode* pn, ParseNode* pnargs, ParseNode* pnbody,
+    bool functionArgs(ParseNode* pn, ParseNode* pnargs,
                       NodeVector& args, NodeVector& defaults, MutableHandleValue rest);
 
     bool sourceElement(ParseNode* pn, MutableHandleValue dst);
@@ -3422,10 +3422,13 @@ ASTSerializer::functionArgsAndBody(ParseNode* pn, NodeVector& args, NodeVector& 
         pnbody = pn;
     }
 
+    if (pnbody->isKind(PNK_LEXICALSCOPE))
+        pnbody = pnbody->scopeBody();
+
     /* Serialize the arguments and body. */
     switch (pnbody->getKind()) {
       case PNK_RETURN: /* expression closure, no destructured args */
-        return functionArgs(pn, pnargs, pnbody, args, defaults, rest) &&
+        return functionArgs(pn, pnargs, args, defaults, rest) &&
                expression(pnbody->pn_kid, body);
 
       case PNK_STATEMENTLIST:     /* statement closure */
@@ -3438,7 +3441,7 @@ ASTSerializer::functionArgsAndBody(ParseNode* pn, NodeVector& args, NodeVector& 
             pnstart = pnstart->pn_next;
         }
 
-        return functionArgs(pn, pnargs, pnbody, args, defaults, rest) &&
+        return functionArgs(pn, pnargs, args, defaults, rest) &&
                functionBody(pnstart, &pnbody->pn_pos, body);
       }
 
@@ -3449,7 +3452,7 @@ ASTSerializer::functionArgsAndBody(ParseNode* pn, NodeVector& args, NodeVector& 
 
 bool
 ASTSerializer::functionArgs(ParseNode* pn, ParseNode* pnargs,
-                            ParseNode* pnbody, NodeVector& args, NodeVector& defaults,
+                            NodeVector& args, NodeVector& defaults,
                             MutableHandleValue rest)
 {
     if (!pnargs)
@@ -3461,7 +3464,7 @@ ASTSerializer::functionArgs(ParseNode* pn, ParseNode* pnargs,
                "must be initially empty for it to be proper to clear this "
                "when there are no defaults");
 
-    for (ParseNode* arg = pnargs->pn_head; arg && arg != pnbody; arg = arg->pn_next) {
+    for (ParseNode* arg = pnargs->pn_head; arg && arg != pnargs->last(); arg = arg->pn_next) {
         MOZ_ASSERT(arg->isKind(PNK_NAME) || arg->isKind(PNK_ASSIGN));
         ParseNode* argName = nullptr;
         ParseNode* defNode = nullptr;
@@ -3482,7 +3485,7 @@ ASTSerializer::functionArgs(ParseNode* pn, ParseNode* pnargs,
         if (argName) {
             if (!identifier(argName, &node))
                 return false;
-            if (rest.isUndefined() && arg->pn_next == pnbody)
+            if (rest.isUndefined() && arg->pn_next == pnargs->last())
                 rest.setObject(node.toObject());
             else if (!args.append(node))
                 return false;

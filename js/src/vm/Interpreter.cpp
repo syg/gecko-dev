@@ -4951,26 +4951,28 @@ js::ReportRuntimeLexicalError(JSContext* cx, unsigned errorNumber,
     } else if (IsLocalOp(op)) {
         uint32_t slot = GET_LOCALNO(pc);
 
-        // Failing that, it must be a block-local let.
-        if (!name) {
-            // Skip to the right scope.
-            RootedScope scope(cx, script->lookupScope(pc));
-            MOZ_ASSERT(scope && scope->is<LexicalScope>());
+        // The only scripts with lexical bindings in frame slots that are
+        // outside of LexicalScopes are top-level module scripts.
+        RootedScope scope(cx, script->innermostScope(pc));
+        if (scope->is<LexicalScope>()) {
             Rooted<LexicalScope*> lexicalScope(cx, &scope->as<LexicalScope>());
             while (slot < lexicalScope->firstFrameSlot())
                 lexicalScope = &lexicalScope->enclosing()->as<LexicalScope>();
-
-            // Get the name of the slot.
-            for (BindingIter bi(lexicalScope); bi; bi++) {
-                BindingLocation loc = bi.location();
-                if (loc.kind() == BindingLocation::Kind::Frame && loc.slot() == slot) {
-                    name = bi.name()->asPropertyName();
-                    break;
-                }
-            }
-
-            MOZ_ASSERT(name);
+            scope = lexicalScope;
+        } else {
+            MOZ_ASSERT(scope->is<ModuleScope>());
         }
+
+        // Get the name of the slot.
+        for (BindingIter bi(scope); bi; bi++) {
+            BindingLocation loc = bi.location();
+            if (loc.kind() == BindingLocation::Kind::Frame && loc.slot() == slot) {
+                name = bi.name()->asPropertyName();
+                break;
+            }
+        }
+
+        MOZ_ASSERT(name);
     } else if (IsAtomOp(op)) {
         name = script->getName(pc);
     } else {
