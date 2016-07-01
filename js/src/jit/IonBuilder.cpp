@@ -824,7 +824,7 @@ IonBuilder::build()
 #endif
 
     initParameters();
-    initVars();
+    initLocals();
 
     // Initialize something for the env chain. We can bail out before the
     // start instruction, but the snapshot is encoded *at* the start
@@ -1070,7 +1070,7 @@ IonBuilder::buildInline(IonBuilder* callerBuilder, MResumePoint* callerResumePoi
 
     JitSpew(JitSpew_Inlining, "Initializing %u vars", info().nfixedvars());
 
-    initVars();
+    initLocals();
 
     JitSpew(JitSpew_Inlining, "Inline entry block MResumePoint %p, %u stack slots",
             (void*) current->entryResumePoint(), current->entryResumePoint()->stackDepth());
@@ -1189,15 +1189,18 @@ IonBuilder::initParameters()
 }
 
 void
-IonBuilder::initVars()
+IonBuilder::initLocals()
 {
-    if (info().nfixedvars() == 0)
+    // Initialize all frame slots to undefined. Lexical bindings are temporal
+    // dead zoned in bytecode.
+
+    if (info().nlocals() == 0)
         return;
 
     MConstant* undef = MConstant::New(alloc(), UndefinedValue());
     current->add(undef);
 
-    for (uint32_t i = 0; i < info().nfixedvars(); i++)
+    for (uint32_t i = 0; i < info().nlocals(); i++)
         current->initSlot(info().localSlot(i), undef);
 }
 
