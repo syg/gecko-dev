@@ -373,11 +373,9 @@ ModuleEnvironmentObject::create(ExclusiveContext* cx, HandleModuleObject module)
     // Initialize all lexical bindings and imports as uninitialized. Imports
     // get uninitialized because they have a special TDZ for cyclic imports.
     for (BindingIter bi(script); bi; bi++) {
-        if (bi.closedOver() && (BindingKindIsLexical(bi.kind()) ||
-                                bi.kind() == BindingKind::Import))
-        {
-            env->initSlot(bi.nextEnvironmentSlot(), MagicValue(JS_UNINITIALIZED_LEXICAL));
-        }
+        BindingLocation loc = bi.location();
+        if (loc.kind() == BindingLocation::Kind::Environment && BindingKindIsLexical(bi.kind()))
+            env->initSlot(loc.slot(), MagicValue(JS_UNINITIALIZED_LEXICAL));
     }
 
     // It is not be possible to add or remove bindings from a module environment
@@ -2374,7 +2372,7 @@ DebugEnvironments::takeFrameSnapshot(JSContext* cx, Handle<DebugEnvironmentProxy
         JSScript* script = debugEnv->environment().as<CallObject>().callee().nonLazyScript();
         FunctionScope* scope = &script->bodyScope()->as<FunctionScope>();
         uint32_t frameSlotCount = scope->nextFrameSlot();
-        MOZ_ASSERT(frameSlotCount < frame.script()->nfixed());
+        MOZ_ASSERT(frameSlotCount <= frame.script()->nfixed());
 
         // For simplicity, copy all frame slots from 0 to the frameSlotCount,
         // even if we don't need all of them (like in the case of a defaults
@@ -2401,7 +2399,7 @@ DebugEnvironments::takeFrameSnapshot(JSContext* cx, Handle<DebugEnvironmentProxy
         uint32_t frameSlotStart = scope->firstFrameSlot();
         uint32_t frameSlotEnd = scope->nextFrameSlot();
         uint32_t frameSlotCount = frameSlotEnd - frameSlotStart;
-        MOZ_ASSERT(frameSlotCount < frame.script()->nfixed());
+        MOZ_ASSERT(frameSlotCount <= frame.script()->nfixed());
 
         if (!vec.resize(frameSlotCount))
             return;

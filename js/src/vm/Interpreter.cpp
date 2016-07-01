@@ -3802,8 +3802,11 @@ END_CASE(JSOP_RECREATELEXICALENV)
 
 CASE(JSOP_PUSHCALLOBJ)
 {
+    // Consider failure to push the CallObject a prologue error. Code that
+    // executed before this point dealt with parameter defaults and cannot
+    // contain try-catch or try-finally blocks.
     if (!REGS.fp()->pushCallObject(cx))
-        goto error;
+        goto prologue_error;
 }
 END_CASE(JSOP_PUSHCALLOBJ)
 

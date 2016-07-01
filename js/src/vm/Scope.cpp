@@ -371,6 +371,9 @@ LexicalScope::nextFrameSlot(Scope* scope)
         return scope->as<EvalScope>().nextFrameSlot();
       case ScopeKind::Module:
         return scope->as<ModuleScope>().nextFrameSlot();
+      case ScopeKind::Global:
+      case ScopeKind::NonSyntactic:
+        return 0;
       default:
         MOZ_CRASH("Not an enclosing intra-frame Scope");
     }
