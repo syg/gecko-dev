@@ -3286,27 +3286,11 @@ js::CloneScriptIntoFunction(JSContext* cx, HandleScope enclosingScope, HandleFun
                             HandleScript src)
 {
     MOZ_ASSERT(fun->isInterpreted());
+    MOZ_ASSERT(!fun->hasScript() || fun->hasUncompiledScript());
 
-    // Allocate the destination script up front and set it as the script of
-    // |fun|, which is to be its container.
-    //
-    // This is so that when cloning nested functions, they can walk the static
-    // scope chain via fun and correctly compute the presence of a
-    // non-syntactic global.
     RootedScript dst(cx, CreateEmptyScriptForClone(cx, src));
     if (!dst)
         return nullptr;
-
-    // Save flags in case we need to undo the early mutations.
-    const int preservedFlags = fun->flags();
-
-    Rooted<LazyScript*> lazy(cx);
-    if (fun->isInterpretedLazy()) {
-        lazy = fun->lazyScriptOrNull();
-        fun->setUnlazifiedScript(dst);
-    } else {
-        fun->initScript(dst);
-    }
 
     // Clone the non-intra-body scopes.
     Rooted<GCVector<Scope*>> scopes(cx, GCVector<Scope*>(cx));
@@ -3332,14 +3316,18 @@ js::CloneScriptIntoFunction(JSContext* cx, HandleScope enclosingScope, HandleFun
             return nullptr;
     }
 
+    // Save flags in case we need to undo the early mutations.
+    const int preservedFlags = fun->flags();
     if (!detail::CopyScript(cx, src, dst, &scopes)) {
-        if (lazy)
-            fun->initLazyScript(lazy);
-        else
-            fun->setScript(nullptr);
         fun->setFlags(preservedFlags);
         return nullptr;
     }
+
+    // Finally set the script after all the fallible operations.
+    if (fun->isInterpretedLazy())
+        fun->setUnlazifiedScript(dst);
+    else
+        fun->initScript(dst);
 
     return dst;
 }
