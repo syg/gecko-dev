@@ -144,6 +144,7 @@ class InlineTablePool
     template <typename Table>
     void release(Table** table) {
         assertInvariants<Table>();
+        MOZ_ASSERT(*table);
 
 #ifdef DEBUG
         bool ok = false;
@@ -198,7 +199,9 @@ class NameMapPool
     template <typename Map>
     void release(Map** map) {
         MOZ_ASSERT(hasActiveCompilation());
-        pool_.release(map);
+        MOZ_ASSERT(map);
+        if (*map)
+            pool_.release(map);
     }
 
     void purge() {

@@ -3913,6 +3913,8 @@ LazyScript::Create(ExclusiveContext* cx, HandleFunction fun,
     p.needsHomeObject = false;
 
     LazyScript* res = LazyScript::CreateRaw(cx, fun, packedFields, begin, end, lineno, column);
+    if (!res)
+        return nullptr;
 
     JSAtom** resFreeVariables = res->freeVariables();
     for (size_t i = 0; i < res->numFreeVariables(); i++)
