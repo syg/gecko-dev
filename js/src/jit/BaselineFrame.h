@@ -263,7 +263,6 @@ class BaselineFrame
     inline MOZ_MUST_USE bool freshenLexicalEnvironment(JSContext* cx);
     inline MOZ_MUST_USE bool recreateLexicalEnvironment(JSContext* cx);
 
-    MOZ_MUST_USE bool initEvalEnvironmentObjects(JSContext* cx);
     MOZ_MUST_USE bool initExtraFunctionEnvironmentObjects(JSContext* cx);
     MOZ_MUST_USE bool pushCallObject(JSContext* cx);
 

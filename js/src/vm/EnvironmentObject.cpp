@@ -2323,7 +2323,8 @@ DebugEnvironments::addDebugEnvironment(JSContext* cx, const EnvironmentIter& ei,
     MOZ_ASSERT(!ei.hasSyntacticEnvironment());
     MOZ_ASSERT(cx->compartment() == debugEnv.compartment());
     // Generators should always have environments.
-    MOZ_ASSERT_IF(ei.scope().kind() == ScopeKind::Function, !ei.callee().isGenerator());
+    MOZ_ASSERT_IF(ei.scope().is<FunctionScope>(),
+                  !ei.scope().as<FunctionScope>().canonicalFunction()->isGenerator());
 
     if (!CanUseDebugEnvironmentMaps(cx))
         return true;
@@ -2708,24 +2709,15 @@ GetDebugEnvironmentForMissing(JSContext* cx, const EnvironmentIter& ei)
         // Generators should always reify their scopes.
         MOZ_ASSERT(!callee->isGenerator());
 
-        Rooted<CallObject*> callobj(cx);
-        if (ei.withinInitialFrame())
-            callobj = CallObject::createForFunction(cx, ei.initialFrame());
-        else
-            callobj = CallObject::createHollowForDebug(cx, callee);
+        Rooted<CallObject*> callobj(cx, CallObject::createHollowForDebug(cx, callee));
         if (!callobj)
             return nullptr;
 
         debugEnv = DebugEnvironmentProxy::create(cx, *callobj, enclosingDebug);
     } else if (ei.scope().is<LexicalScope>()) {
         Rooted<LexicalScope*> lexicalScope(cx, &ei.scope().as<LexicalScope>());
-        Rooted<LexicalEnvironmentObject*> env(cx);
-        if (ei.withinInitialFrame()) {
-            AbstractFramePtr frame = ei.initialFrame();
-            env = LexicalEnvironmentObject::create(cx, lexicalScope, frame);
-        } else {
-            env = LexicalEnvironmentObject::createHollowForDebug(cx, lexicalScope);
-        }
+        Rooted<LexicalEnvironmentObject*> env(cx,
+            LexicalEnvironmentObject::createHollowForDebug(cx, lexicalScope));
         if (!env)
             return nullptr;
 

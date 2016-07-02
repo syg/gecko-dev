@@ -633,9 +633,9 @@ BaselineCompiler::emitDebugPrologue()
     return true;
 }
 
-typedef bool (*InitGlobalOrEvalEnvironmentObjectsFn)(JSContext*, BaselineFrame*);
-static const VMFunction InitGlobalOrEvalEnvironmentObjectsInfo =
-    FunctionInfo<InitGlobalOrEvalEnvironmentObjectsFn>(jit::InitGlobalOrEvalEnvironmentObjects);
+typedef bool (*CheckGlobalOrEvalDeclarationConflictsFn)(JSContext*, BaselineFrame*);
+static const VMFunction CheckGlobalOrEvalDeclarationConflictsInfo =
+    FunctionInfo<CheckGlobalOrEvalDeclarationConflictsFn>(jit::CheckGlobalOrEvalDeclarationConflicts);
 
 typedef bool (*InitExtraFunctionEnvironmentObjectsFn)(JSContext*, BaselineFrame*);
 static const VMFunction InitExtraFunctionEnvironmentObjectsInfo =
@@ -676,16 +676,13 @@ BaselineCompiler::initEnvironmentChain()
         masm.storePtr(scope, frame.addressOfEnvironmentChain());
     } else {
         // EnvironmentChain pointer in BaselineFrame has already been initialized
-        // in prologue, but we need to do two more things:
-        //
-        // 1. Check for redeclaration errors
-        // 2. Possibly create a new call object for strict eval.
+        // in prologue, but we need to check for redeclaration errors.
 
         prepareVMCall();
         masm.loadBaselineFramePtr(BaselineFrameReg, R0.scratchReg());
         pushArg(R0.scratchReg());
 
-        if (!callVMNonOp(InitGlobalOrEvalEnvironmentObjectsInfo, phase))
+        if (!callVMNonOp(CheckGlobalOrEvalDeclarationConflictsInfo, phase))
             return false;
     }
 

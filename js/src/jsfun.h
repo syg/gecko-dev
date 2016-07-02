@@ -126,7 +126,6 @@ class JSFunction : public js::NativeObject
     js::GCPtrAtom atom_;      /* name for diagnostics and decompiling */
 
   public:
-
     /* Call objects must be created for each invocation of this function. */
     bool needsCallObject() const {
         MOZ_ASSERT(!isInterpretedLazy());
@@ -134,13 +133,14 @@ class JSFunction : public js::NativeObject
         if (isNative())
             return false;
 
-        // Note: this should be kept in sync with FunctionBox::needsCallObject().
+        // Note: this should be kept in sync with
+        // FunctionBox::needsCallObjectRegardlessOfBindings().
         MOZ_ASSERT(nonLazyScript()->bodyScope()->hasEnvironment() ==
-                   (nonLazyScript()->hasAnyAliasedBindings() ||
-                    nonLazyScript()->funHasExtensibleScope() ||
-                    nonLazyScript()->needsHomeObject()       ||
-                    nonLazyScript()->isDerivedClassConstructor() ||
-                    isGenerator()));
+                   nonLazyScript()->hasAnyAliasedBindings() ||
+                   nonLazyScript()->funHasExtensibleScope() ||
+                   nonLazyScript()->needsHomeObject()       ||
+                   nonLazyScript()->isDerivedClassConstructor() ||
+                   isGenerator());
 
         return nonLazyScript()->bodyScope()->hasEnvironment();
     }

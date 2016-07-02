@@ -91,18 +91,6 @@ BaselineFrame::isNonGlobalEvalFrame() const
 }
 
 bool
-BaselineFrame::initEvalEnvironmentObjects(JSContext* cx)
-{
-    CallObject* callobj = CallObject::createForEval(cx, this);
-    if (!callobj)
-        return false;
-
-    pushOnEnvironmentChain(*callobj);
-    flags_ |= HAS_CALL_OBJ;
-    return true;
-}
-
-bool
 BaselineFrame::initExtraFunctionEnvironmentObjects(JSContext* cx)
 {
     return js::InitExtraFunctionEnvironmentObjects(cx, this);
@@ -111,11 +99,18 @@ BaselineFrame::initExtraFunctionEnvironmentObjects(JSContext* cx)
 bool
 BaselineFrame::pushCallObject(JSContext* cx)
 {
-    MOZ_ASSERT(isFunctionFrame());
-    MOZ_ASSERT(callee()->needsCallObject());
     MOZ_ASSERT(!hasCallObj());
 
-    CallObject* callobj = CallObject::createForFunction(cx, this);
+    CallObject* callobj;
+    if (isEvalFrame()) {
+        MOZ_ASSERT(script()->strict() ||
+                   script()->enclosingScope()->kind() == ScopeKind::ParameterDefaults);
+        callobj = CallObject::createForEval(cx, this);
+    } else {
+        MOZ_ASSERT(callee()->needsCallObject());
+        callobj = CallObject::createForFunction(cx, this);
+    }
+
     if (!callobj)
         return false;
 

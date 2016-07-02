@@ -2001,7 +2001,7 @@ CASE(JSOP_RETRVAL)
         if (MOZ_LIKELY(!frameHalfInitialized)) {
             interpReturnOK = Debugger::onLeaveFrame(cx, REGS.fp(), REGS.pc, interpReturnOK);
 
-            REGS.fp()->epilogue(cx);
+            REGS.fp()->epilogue(cx, REGS.pc);
         }
 
   jit_return_pop_frame:
@@ -4117,7 +4117,7 @@ DEFAULT()
     if (MOZ_LIKELY(!frameHalfInitialized)) {
         interpReturnOK = Debugger::onLeaveFrame(cx, REGS.fp(), REGS.pc, interpReturnOK);
 
-        REGS.fp()->epilogue(cx);
+        REGS.fp()->epilogue(cx, REGS.pc);
     }
 
     gc::MaybeVerifyBarriers(cx, true);

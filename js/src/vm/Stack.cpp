@@ -99,6 +99,7 @@ InterpreterFrame::createRestParameter(JSContext* cx)
 static inline void
 AssertScopeMatchesEnvironment(Scope* scope, JSObject* originalEnv)
 {
+#ifdef DEBUG
     JSObject* env = originalEnv;
     for (ScopeIter si(scope); si; si++) {
         if (si.kind() == ScopeKind::NonSyntactic) {
@@ -164,6 +165,15 @@ AssertScopeMatchesEnvironment(Scope* scope, JSObject* originalEnv)
     // GlobalObject.
     MOZ_ASSERT(env->is<GlobalObject>() || IsGlobalLexicalEnvironment(env) ||
                env->is<DebugEnvironmentProxy>());
+#endif
+}
+
+static inline void
+AssertScopeMatchesEnvironment(JSScript* script, jsbytecode* pc, JSObject* env)
+{
+#ifdef DEBUG
+    AssertScopeMatchesEnvironment(script->innermostScope(pc), env);
+#endif
 }
 
 bool
@@ -180,13 +190,9 @@ InterpreterFrame::prologue(JSContext* cx)
     MOZ_ASSERT(cx->interpreterRegs().pc == script->code());
 
     if (isEvalFrame()) {
-        if (script->strict() || script->enclosingScope()->kind() == ScopeKind::ParameterDefaults) {
-            CallObject* callobj = CallObject::createForEval(cx, this);
-            if (!callobj)
-                return false;
-            pushOnEnvironmentChain(*callobj);
-            flags_ |= HAS_CALL_OBJ;
-        } else {
+        if (!script->callObjScope()->hasEnvironment()) {
+            MOZ_ASSERT(!script->strict() &&
+                       script->enclosingScope()->kind() != ScopeKind::ParameterDefaults);
             // Non-strict eval may introduce var bindings that conflict with
             // lexical bindings in an enclosing lexical scope.
             RootedObject varObjRoot(cx, &varObj());
@@ -243,7 +249,7 @@ InterpreterFrame::prologue(JSContext* cx)
 }
 
 void
-InterpreterFrame::epilogue(JSContext* cx)
+InterpreterFrame::epilogue(JSContext* cx, jsbytecode* pc)
 {
     RootedScript script(cx, this->script());
     probes::ExitScript(cx, script, script->functionNonDelazifying(), hasPushedSPSFrame());
@@ -275,10 +281,9 @@ InterpreterFrame::epilogue(JSContext* cx)
 
     MOZ_ASSERT(isFunctionFrame());
 
-    // At this point, we have popped all environments except the call object,
-    // the defaults environment, and the decl env, if they exist. That is,
-    // environments starting at the body scope.
-    AssertScopeMatchesEnvironment(script->bodyScope(), environmentChain());
+    // Check that the scope matches the environment at the point of leaving
+    // the frame.
+    AssertScopeMatchesEnvironment(script, pc, environmentChain());
 
     if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
         DebugEnvironments::onPopCall(this, cx);
@@ -318,11 +323,18 @@ InterpreterFrame::checkReturn(JSContext* cx, HandleValue thisv)
 bool
 InterpreterFrame::pushCallObject(JSContext* cx)
 {
-    MOZ_ASSERT(isFunctionFrame());
-    MOZ_ASSERT(callee().needsCallObject());
     MOZ_ASSERT(!hasCallObjUnchecked());
 
-    CallObject* callobj = CallObject::createForFunction(cx, this);
+    CallObject* callobj;
+    if (isEvalFrame()) {
+        MOZ_ASSERT(script()->strict() ||
+                   script()->enclosingScope()->kind() == ScopeKind::ParameterDefaults);
+        callobj = CallObject::createForEval(cx, this);
+    } else {
+        MOZ_ASSERT(callee().needsCallObject());
+        callobj = CallObject::createForFunction(cx, this);
+    }
+
     if (!callobj)
         return false;
 

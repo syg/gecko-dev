@@ -246,9 +246,15 @@ class Scope : public js::gc::TenuredCell
     }
 
     bool hasEnvironment() const {
-        // If there's a shape, some binding is closed over: an environment must
-        // be created for this scope.
-        return environmentShape_ != nullptr;
+        switch (kind()) {
+          case ScopeKind::With:
+          case ScopeKind::Global:
+          case ScopeKind::NonSyntactic:
+            return true;
+          default:
+            // If there's a shape, an environment must be created for this scope.
+            return environmentShape_ != nullptr;
+        }
     }
 
     uint32_t chainLength() const;
@@ -424,7 +430,7 @@ class FunctionScope : public Scope
     }
 
     static FunctionScope* create(ExclusiveContext* cx, BindingData* data, uint32_t firstFrameSlot,
-                                 bool hasDefaults, bool isExtensible, HandleFunction fun,
+                                 bool hasDefaults, bool needsEnvironment, HandleFunction fun,
                                  HandleScope enclosing);
 
     template <XDRMode mode>

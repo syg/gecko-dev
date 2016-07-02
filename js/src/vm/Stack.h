@@ -398,7 +398,7 @@ class InterpreterFrame
      */
 
     bool prologue(JSContext* cx);
-    void epilogue(JSContext* cx);
+    void epilogue(JSContext* cx, jsbytecode* pc);
 
     bool checkReturn(JSContext* cx, HandleValue thisv);
 

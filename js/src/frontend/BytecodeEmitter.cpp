@@ -329,7 +329,8 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
     // global scope, the NameLocation to return.
     Maybe<NameLocation> fallbackFreeNameLocation_;
 
-    // Whether there are any closed over bindings.
+    // Whether there is a corresponding EnvironmentObject on the environment
+    // chain.
     bool hasEnvironment_;
 
     // The number of enclosing environments. Used for error checking.
@@ -572,6 +573,7 @@ BytecodeEmitter::EmitterScope::internScope(BytecodeEmitter* bce, ScopeCreator cr
     Scope* scope = createScope(bce->cx, enclosing);
     if (!scope)
         return false;
+    hasEnvironment_ = scope->hasEnvironment();
     scopeIndex_ = bce->scopeList.length();
     return bce->scopeList.append(scope);
 }
@@ -770,9 +772,6 @@ BytecodeEmitter::EmitterScope::enterLexical(BytecodeEmitter* bce, ScopeKind kind
             return false;
 
         NameLocation loc = NameLocation::fromBinding(bi.kind(), bi.location());
-        if (loc.kind() == NameLocation::Kind::EnvironmentCoordinate)
-            hasEnvironment_ = true;
-
         if (!putNameInCache(bce, bi.name(), loc))
             return false;
     }
@@ -821,9 +820,6 @@ BytecodeEmitter::EmitterScope::enterNamedLambda(BytecodeEmitter* bce, FunctionBo
     // The lambda name, if not closed over, is accessed via JSOP_CALLEE and
     // not a frame slot. Do not update frame slot information.
     NameLocation loc = NameLocation::fromBinding(bi.kind(), bi.location());
-    if (loc.kind() == NameLocation::Kind::EnvironmentCoordinate)
-        hasEnvironment_ = true;
-
     if (!putNameInCache(bce, bi.name(), loc))
         return false;
 
@@ -872,9 +868,6 @@ BytecodeEmitter::EmitterScope::enterFunctionBody(BytecodeEmitter* bce, FunctionB
                 return false;
 
             NameLocation loc = NameLocation::fromBinding(bi.kind(), bi.location());
-            if (loc.kind() == NameLocation::Kind::EnvironmentCoordinate)
-                hasEnvironment_ = true;
-
             NameLocationMap::AddPtr p = cache.lookupForAdd(bi.name());
 
             // The only duplicate bindings that occur are simple formal
@@ -901,23 +894,24 @@ BytecodeEmitter::EmitterScope::enterFunctionBody(BytecodeEmitter* bce, FunctionB
     // direct eval, any names beyond the function scope must be accessed
     // dynamically as we don't know if the name will become a 'var' binding
     // due to direct eval.
-    if (funbox->hasExtensibleScope()) {
-        hasEnvironment_ = true;
+    if (funbox->hasExtensibleScope())
         fallbackFreeNameLocation_ = Some(NameLocation::Dynamic());
-    }
 
     // Create and intern the VM scope.
     auto createScope = [funbox, firstFrameSlot](ExclusiveContext* cx, HandleScope enclosing) {
         RootedFunction fun(cx, funbox->function());
         return FunctionScope::create(cx, funbox->funScopeBindings, firstFrameSlot,
-                                     funbox->hasDefaults(), funbox->hasExtensibleScope(),
+                                     funbox->hasDefaults(),
+                                     funbox->needsCallObjectRegardlessOfBindings(),
                                      fun, enclosing);
     };
     if (!internBodyScope(bce, createScope))
         return false;
 
-    if (hasEnvironment_ && !bce->emit1(JSOP_PUSHCALLOBJ))
-        return false;
+    if (hasEnvironment_) {
+        if (!bce->emit1(JSOP_PUSHCALLOBJ))
+            return false;
+    }
 
     return checkEnvironmentChainLength(bce);
 }
@@ -1066,7 +1060,15 @@ BytecodeEmitter::EmitterScope::enterEval(BytecodeEmitter* bce, EvalSharedContext
         ScopeKind scopeKind = evalsc->strict() ? ScopeKind::StrictEval : ScopeKind::Eval;
         return EvalScope::create(cx, scopeKind, evalsc->bindings, enclosing);
     };
-    return internBodyScope(bce, createScope);
+    if (!internBodyScope(bce, createScope))
+        return false;
+
+    if (hasEnvironment_) {
+        if (!bce->emit1(JSOP_PUSHCALLOBJ))
+            return false;
+    }
+
+    return true;
 }
 
 bool
@@ -1140,7 +1142,6 @@ BytecodeEmitter::EmitterScope::enterWith(BytecodeEmitter* bce)
         return false;
 
     // 'with' make all accesses dynamic and unanalyzable.
-    hasEnvironment_ = true;
     fallbackFreeNameLocation_ = Some(NameLocation::Dynamic());
 
     auto createScope = [](ExclusiveContext* cx, HandleScope enclosing) {
@@ -3739,23 +3740,37 @@ BytecodeEmitter::emitSetThis(ParseNode* pn)
     MOZ_ASSERT(pn->isKind(PNK_SETTHIS));
     MOZ_ASSERT(pn->pn_left->isKind(PNK_NAME));
 
-    ParseNode* nameNode = pn->pn_left;
     JSAtom* name = pn->pn_left->name();
-
-    auto emitRhs = [name, pn](BytecodeEmitter* bce, const NameLocation& loc, bool) {
-        // First, get the original |this| and throw if we already initialized it.
-        if (!bce->emitGetNameAtLocation(name, loc, false))
+    auto emitRhs = [name, pn](BytecodeEmitter* bce, const NameLocation&, bool) {
+        // Emit the new |this| value.
+        if (!bce->emitTree(pn->pn_right))
+            return false;
+        // Get the original |this| and throw if we already initialized
+        // it. Do *not* use the NameLocation argument, as that's the special
+        // lexical location below to deal with super() semantics.
+        if (!bce->emitGetName(name))
             return false;
         if (!bce->emit1(JSOP_CHECKTHISREINIT))
             return false;
         if (!bce->emit1(JSOP_POP))
             return false;
-
-        // Emit the new |this| value.
-        return bce->emitTree(pn->pn_right);
+        return true;
     };
 
-    return emitSetName(nameNode, emitRhs);
+    // The 'this' binding is not lexical when there is no defaults scope, but
+    // due to super() semantics this initialization needs to be treated as a
+    // lexical one.
+    NameLocation loc = lookupName(name);
+    NameLocation lexicalLoc;
+    if (loc.kind() == NameLocation::Kind::FrameSlot) {
+        lexicalLoc = NameLocation::FrameSlot(BindingKind::Let, loc.frameSlot());
+    } else {
+        EnvironmentCoordinate coord = loc.environmentCoordinate();
+        uint8_t hops = AssertedCast<uint8_t>(coord.hops());
+        lexicalLoc = NameLocation::EnvironmentCoordinate(BindingKind::Let, hops, coord.slot());
+    }
+
+    return emitSetOrInitializeNameAtLocation(name, lexicalLoc, emitRhs, true);
 }
 
 bool

@@ -529,6 +529,13 @@ class FunctionBox : public ObjectBox, public SharedContext
         return enclosingScope_;
     }
 
+    bool needsCallObjectRegardlessOfBindings() const {
+        return hasExtensibleScope() ||
+               needsHomeObject() ||
+               isDerivedClassConstructor() ||
+               isGenerator();
+    }
+
     bool isLikelyConstructorWrapper() const {
         return usesArguments && usesApply && usesThis && !usesReturn;
     }

@@ -282,7 +282,7 @@ Scope::maybeCloneEnvironmentShape(JSContext* cx)
         BindingIter bi(this);
         return CreateEnvironmentShape(cx, bi,
                                       environmentShape_->getObjectClass(),
-                                      environmentShape_->slot() + 1,
+                                      environmentShape_->slotSpan(),
                                       environmentShape_->getObjectFlags());
     }
     return environmentShape_;
@@ -460,7 +460,7 @@ static const uint32_t FunctionScopeEnvShapeFlags =
 
 /* static */ FunctionScope*
 FunctionScope::create(ExclusiveContext* cx, BindingData* bindings, uint32_t firstFrameSlot,
-                      bool hasDefaults, bool isExtensible, HandleFunction fun,
+                      bool hasDefaults, bool needsEnvironment, HandleFunction fun,
                       HandleScope enclosing)
 {
     MOZ_ASSERT_IF(firstFrameSlot != 0, firstFrameSlot == nextFrameSlot(enclosing));
@@ -492,9 +492,13 @@ FunctionScope::create(ExclusiveContext* cx, BindingData* bindings, uint32_t firs
     if (!data->bindings)
         return nullptr;
 
-    // Extensible scopes (i.e., due to direct eval) always need an
-    // environment.
-    if (isExtensible && !envShape) {
+    // An environment may be needed regardless of existence of any closed over
+    // bindings:
+    //   - Extensible scopes (i.e., due to direct eval)
+    //   - Needing a home object
+    //   - Being a derived class constructor
+    //   - Being a generator
+    if (!envShape && needsEnvironment) {
         envShape = getEmptyEnvironmentShape(cx);
         if (!envShape)
             return nullptr;
@@ -716,7 +720,7 @@ EvalScope::create(ExclusiveContext* cx, ScopeKind scopeKind, BindingData* data,
     if (!envShape && (scopeKind == ScopeKind::StrictEval ||
                       enclosing->kind() == ScopeKind::ParameterDefaults))
     {
-        envShape = EvalScope::getEmptyEnvironmentShape(cx);
+        envShape = getEmptyEnvironmentShape(cx);
         if (!envShape)
             return nullptr;
     }
@@ -875,27 +879,7 @@ ScopeIter::ScopeIter(JSScript* script)
 bool
 ScopeIter::hasSyntacticEnvironment() const
 {
-    switch (scope()->kind()) {
-      case ScopeKind::Function:
-      case ScopeKind::ParameterDefaults:
-      case ScopeKind::Lexical:
-      case ScopeKind::Catch:
-      case ScopeKind::NamedLambda:
-      case ScopeKind::StrictNamedLambda:
-      case ScopeKind::Eval:
-      case ScopeKind::StrictEval:
-        return !!environmentShape();
-
-      case ScopeKind::With:
-      case ScopeKind::Global:
-      case ScopeKind::Module:
-        return true;
-
-      case ScopeKind::NonSyntactic:
-        return false;
-    }
-
-    MOZ_CRASH("Bad ScopeKind");
+    return scope()->hasEnvironment() && scope()->kind() != ScopeKind::NonSyntactic;
 }
 
 BindingIter::BindingIter(Scope* scope)

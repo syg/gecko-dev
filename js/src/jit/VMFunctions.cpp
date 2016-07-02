@@ -837,22 +837,21 @@ GeneratorThrowOrClose(JSContext* cx, BaselineFrame* frame, Handle<GeneratorObjec
 }
 
 bool
-InitGlobalOrEvalEnvironmentObjects(JSContext* cx, BaselineFrame* frame)
+CheckGlobalOrEvalDeclarationConflicts(JSContext* cx, BaselineFrame* frame)
 {
     RootedScript script(cx, frame->script());
     RootedObject envChain(cx, frame->environmentChain());
     RootedObject varObj(cx, BindVar(cx, envChain));
 
     if (script->isForEval()) {
-        // Strict eval and eval in parameter default expressions needs their
+        // Strict eval and eval in parameter default expressions have their
         // own call objects.
         //
         // Non-strict eval may introduce 'var' bindings that conflict with
         // lexical bindings in an enclosing lexical scope.
-        if (script->strict() || script->enclosingScope()->kind() == ScopeKind::ParameterDefaults) {
-            if (!frame->initEvalEnvironmentObjects(cx))
-                return false;
-        } else {
+        if (script->callObjScope()->hasEnvironment()) {
+            MOZ_ASSERT(!script->strict() &&
+                       script->enclosingScope()->kind() != ScopeKind::ParameterDefaults);
             if (!CheckEvalDeclarationConflicts(cx, script, envChain, varObj))
                 return false;
         }

@@ -709,7 +709,7 @@ GeneratorThrowOrClose(JSContext* cx, BaselineFrame* frame, Handle<GeneratorObjec
 MOZ_MUST_USE bool
 GlobalNameConflictsCheckFromIon(JSContext* cx, HandleScript script);
 MOZ_MUST_USE bool
-InitGlobalOrEvalEnvironmentObjects(JSContext* cx, BaselineFrame* frame);
+CheckGlobalOrEvalDeclarationConflicts(JSContext* cx, BaselineFrame* frame);
 MOZ_MUST_USE bool
 InitExtraFunctionEnvironmentObjects(JSContext* cx, BaselineFrame* frame);
 
