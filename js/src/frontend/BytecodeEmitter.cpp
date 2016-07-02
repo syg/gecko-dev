@@ -661,7 +661,7 @@ NameLocation
 BytecodeEmitter::EmitterScope::searchAndCache(BytecodeEmitter* bce, JSAtom* name)
 {
     Maybe<NameLocation> loc;
-    uint8_t hops = hasEnvironment_ ? 1 : 0;
+    uint8_t hops = hasEnvironment() ? 1 : 0;
     DebugOnly<bool> inCurrentScript = enclosingInFrame();
 
     // Start searching in the current compilation.
@@ -673,7 +673,7 @@ BytecodeEmitter::EmitterScope::searchAndCache(BytecodeEmitter* bce, JSAtom* name
             break;
         }
 
-        if (es->hasEnvironment_)
+        if (es->hasEnvironment())
             hops++;
 
 #ifdef DEBUG
@@ -711,7 +711,7 @@ BytecodeEmitter::EmitterScope::locationBoundInScope(BytecodeEmitter* bce, JSAtom
     // one. Count the number of extra hops to reach it.
     uint8_t extraHops = 0;
     for (EmitterScope* es = this; es != target; es = es->enclosingInFrame()) {
-        if (es->hasEnvironment_)
+        if (es->hasEnvironment())
             extraHops++;
     }
 
@@ -792,7 +792,7 @@ BytecodeEmitter::EmitterScope::enterLexical(BytecodeEmitter* bce, ScopeKind kind
     if (!internScope(bce, createScope))
         return false;
 
-    if (ScopeKindIsInBody(kind) && hasEnvironment_) {
+    if (ScopeKindIsInBody(kind) && hasEnvironment()) {
         // After interning the VM scope we can get the scope index.
         if (!bce->emitInternedScopeOp(index(), JSOP_PUSHLEXICALENV))
             return false;
@@ -908,7 +908,7 @@ BytecodeEmitter::EmitterScope::enterFunctionBody(BytecodeEmitter* bce, FunctionB
     if (!internBodyScope(bce, createScope))
         return false;
 
-    if (hasEnvironment_) {
+    if (hasEnvironment()) {
         if (!bce->emit1(JSOP_PUSHCALLOBJ))
             return false;
     }
@@ -1063,7 +1063,7 @@ BytecodeEmitter::EmitterScope::enterEval(BytecodeEmitter* bce, EvalSharedContext
     if (!internBodyScope(bce, createScope))
         return false;
 
-    if (hasEnvironment_) {
+    if (hasEnvironment()) {
         if (!bce->emit1(JSOP_PUSHCALLOBJ))
             return false;
     }
@@ -1090,18 +1090,11 @@ BytecodeEmitter::EmitterScope::enterModule(BytecodeEmitter* bce, ModuleSharedCon
                 return false;
 
             NameLocation loc = NameLocation::fromBinding(bi.kind(), bi.location());
-            switch (loc.kind()) {
-              case NameLocation::Kind::EnvironmentCoordinate:
-                hasEnvironment_ = true;
-                break;
-
-              case NameLocation::Kind::FrameSlot:
-                if (BindingKindIsLexical(bi.kind()) && !firstLexicalFrameSlot)
-                    firstLexicalFrameSlot = Some(loc.frameSlot());
-                break;
-
-              default:
-                break;
+            if (loc.kind() == NameLocation::Kind::FrameSlot &&
+                BindingKindIsLexical(bi.kind()) &&
+                !firstLexicalFrameSlot)
+            {
+                firstLexicalFrameSlot = Some(loc.frameSlot());
             }
 
             if (!putNameInCache(bce, bi.name(), loc))
@@ -1167,7 +1160,7 @@ BytecodeEmitter::EmitterScope::leave(BytecodeEmitter* bce, bool nonLocal)
     switch (kind) {
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
-        if (!bce->emit1(hasEnvironment_ ? JSOP_POPLEXICALENV : JSOP_DEBUGLEAVELEXICALENV))
+        if (!bce->emit1(hasEnvironment() ? JSOP_POPLEXICALENV : JSOP_DEBUGLEAVELEXICALENV))
             return false;
         break;
 
