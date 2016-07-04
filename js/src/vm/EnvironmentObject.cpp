@@ -777,9 +777,9 @@ LexicalEnvironmentObject::createTemplateObject(JSContext* cx, Handle<LexicalScop
         return nullptr;
 
     // All lexical bindings start off uninitialized for TDZ.
-    uint32_t slotCount = shape->slot() + 1;
-    MOZ_ASSERT(slotCount == env->slotSpan());
-    for (uint32_t slot = JSSLOT_FREE(&class_); slot < slotCount; slot++)
+    uint32_t lastSlot = shape->slot();
+    MOZ_ASSERT(lastSlot == env->lastProperty()->slot());
+    for (uint32_t slot = JSSLOT_FREE(&class_); slot <= lastSlot; slot++)
         env->initSlot(slot, MagicValue(JS_UNINITIALIZED_LEXICAL));
 
     env->initScopeUnchecked(scope);
@@ -878,9 +878,9 @@ LexicalEnvironmentObject::clone(JSContext* cx, Handle<LexicalEnvironmentObject*>
     if (!copy)
         return nullptr;
 
-    uint32_t slotCount = scope->environmentShape()->slot();
-    MOZ_ASSERT(slotCount == env->lastProperty()->slot());
-    for (uint32_t i = JSSLOT_FREE(&class_); i < slotCount; i++)
+    MOZ_ASSERT(env->lastProperty() == copy->lastProperty());
+    uint32_t lastSlot = env->lastProperty()->slot();
+    for (uint32_t i = JSSLOT_FREE(&class_); i <= lastSlot; i++)
         copy->setSlot(i, env->getSlot(i));
 
     return copy;
