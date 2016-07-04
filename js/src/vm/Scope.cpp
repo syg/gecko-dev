@@ -360,23 +360,28 @@ LexicalScope::firstFrameSlot() const
 /* static */ uint32_t
 LexicalScope::nextFrameSlot(Scope* scope)
 {
-    switch (scope->kind()) {
-      case ScopeKind::Function:
-        return scope->as<FunctionScope>().nextFrameSlot();
-      case ScopeKind::Lexical:
-      case ScopeKind::Catch:
-        return scope->as<LexicalScope>().nextFrameSlot();
-      case ScopeKind::Eval:
-      case ScopeKind::StrictEval:
-        return scope->as<EvalScope>().nextFrameSlot();
-      case ScopeKind::Module:
-        return scope->as<ModuleScope>().nextFrameSlot();
-      case ScopeKind::Global:
-      case ScopeKind::NonSyntactic:
-        return 0;
-      default:
-        MOZ_CRASH("Not an enclosing intra-frame Scope");
+    for (ScopeIter si(scope); si; si++) {
+        switch (si.kind()) {
+          case ScopeKind::Function:
+            return si.scope()->as<FunctionScope>().nextFrameSlot();
+          case ScopeKind::Lexical:
+          case ScopeKind::Catch:
+            return si.scope()->as<LexicalScope>().nextFrameSlot();
+          case ScopeKind::Eval:
+          case ScopeKind::StrictEval:
+            return si.scope()->as<EvalScope>().nextFrameSlot();
+          case ScopeKind::Module:
+            return si.scope()->as<ModuleScope>().nextFrameSlot();
+          case ScopeKind::With:
+            continue;
+          case ScopeKind::Global:
+          case ScopeKind::NonSyntactic:
+            return 0;
+          default:
+            break;
+        }
     }
+    MOZ_CRASH("Not an enclosing intra-frame Scope");
 }
 
 /* static */ LexicalScope*

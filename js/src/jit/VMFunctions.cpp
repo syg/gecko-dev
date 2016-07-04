@@ -710,15 +710,6 @@ DebugEpilogue(JSContext* cx, BaselineFrame* frame, jsbytecode* pc, bool ok)
     JSScript* script = frame->script();
     frame->setOverridePc(script->lastPC());
 
-    if (frame->isFunctionFrame()) {
-        MOZ_ASSERT_IF(ok, frame->hasReturnValue());
-        DebugEnvironments::onPopCall(frame, cx);
-    } else if (frame->isStrictEvalFrame()) {
-        MOZ_ASSERT_IF(frame->hasCallObj(),
-                      frame->environmentChain()->as<CallObject>().isForEval());
-        DebugEnvironments::onPopStrictEval(frame);
-    }
-
     if (!ok) {
         // Pop this frame by updating jitTop, so that the exception handling
         // code will start at the previous frame.
@@ -1000,9 +991,9 @@ PushLexicalEnv(JSContext* cx, BaselineFrame* frame, Handle<LexicalScope*> scope)
 }
 
 bool
-PopLexicalEnv(JSContext* cx, BaselineFrame* frame)
+PopLexicalEnv(JSContext* cx, BaselineFrame* frame, jsbytecode* pc)
 {
-    frame->popLexicalEnvironment(cx);
+    frame->popLexicalEnvironment(cx, pc);
     return true;
 }
 
@@ -1010,34 +1001,34 @@ bool
 DebugLeaveThenPopLexicalEnv(JSContext* cx, BaselineFrame* frame, jsbytecode* pc)
 {
     MOZ_ALWAYS_TRUE(DebugLeaveLexicalEnv(cx, frame, pc));
-    frame->popLexicalEnvironment(cx);
+    frame->popLexicalEnvironment(cx, pc);
     return true;
 }
 
 bool
-FreshenLexicalEnv(JSContext* cx, BaselineFrame* frame)
+FreshenLexicalEnv(JSContext* cx, BaselineFrame* frame, jsbytecode* pc)
 {
-    return frame->freshenLexicalEnvironment(cx);
+    return frame->freshenLexicalEnvironment(cx, pc);
 }
 
 bool
 DebugLeaveThenFreshenLexicalEnv(JSContext* cx, BaselineFrame* frame, jsbytecode* pc)
 {
     MOZ_ALWAYS_TRUE(DebugLeaveLexicalEnv(cx, frame, pc));
-    return frame->freshenLexicalEnvironment(cx);
+    return frame->freshenLexicalEnvironment(cx, pc);
 }
 
 bool
-RecreateLexicalEnv(JSContext* cx, BaselineFrame* frame)
+RecreateLexicalEnv(JSContext* cx, BaselineFrame* frame, jsbytecode* pc)
 {
-    return frame->recreateLexicalEnvironment(cx);
+    return frame->recreateLexicalEnvironment(cx, pc);
 }
 
 bool
 DebugLeaveThenRecreateLexicalEnv(JSContext* cx, BaselineFrame* frame, jsbytecode* pc)
 {
     MOZ_ALWAYS_TRUE(DebugLeaveLexicalEnv(cx, frame, pc));
-    return frame->recreateLexicalEnvironment(cx);
+    return frame->recreateLexicalEnvironment(cx, pc);
 }
 
 bool

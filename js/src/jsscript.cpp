@@ -2467,8 +2467,9 @@ JSScript::initFunctionPrototype(ExclusiveContext* cx, Handle<JSScript*> script,
     if (!partiallyInit(cx, script, 1, 0, 0, 0, 0, 0, 0))
         return false;
 
+    RootedScope enclosing(cx, &cx->global()->emptyGlobalScope());
     Scope* functionProtoScope = FunctionScope::create(cx, nullptr, 0, false, false, functionProto,
-                                                      nullptr);
+                                                      enclosing);
     if (!functionProtoScope)
         return false;
     script->scopes()->vector[0].init(functionProtoScope);

@@ -1064,8 +1064,12 @@ BytecodeEmitter::EmitterScope::enterEval(BytecodeEmitter* bce, EvalSharedContext
         return false;
 
     if (hasEnvironment()) {
+        // Unlike function scripts, eval emits PUSHCALLOBJ in the prologue
+        // because of presence of DEFFUNs.
+        bce->switchToPrologue();
         if (!bce->emit1(JSOP_PUSHCALLOBJ))
             return false;
+        bce->switchToMain();
     }
 
     return true;

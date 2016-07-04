@@ -259,12 +259,14 @@ class BaselineFrame
     }
 
     inline MOZ_MUST_USE bool pushLexicalEnvironment(JSContext* cx, Handle<LexicalScope*> scope);
-    inline void popLexicalEnvironment(JSContext* cx);
-    inline MOZ_MUST_USE bool freshenLexicalEnvironment(JSContext* cx);
-    inline MOZ_MUST_USE bool recreateLexicalEnvironment(JSContext* cx);
+    inline void popLexicalEnvironment(JSContext* cx, jsbytecode* pc);
+    inline void popLexicalEnvironment(JSContext* cx, EnvironmentIter& ei);
+    inline MOZ_MUST_USE bool freshenLexicalEnvironment(JSContext* cx, jsbytecode* pc);
+    inline MOZ_MUST_USE bool recreateLexicalEnvironment(JSContext* cx, jsbytecode* pc);
 
     MOZ_MUST_USE bool initExtraFunctionEnvironmentObjects(JSContext* cx);
     MOZ_MUST_USE bool pushCallObject(JSContext* cx);
+    void popCallObject(JSContext* cx);
 
     void initArgsObjUnchecked(ArgumentsObject& argsobj) {
         flags_ |= HAS_ARGS_OBJ;

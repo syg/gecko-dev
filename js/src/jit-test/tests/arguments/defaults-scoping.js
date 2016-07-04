@@ -1,3 +1,5 @@
+load(libdir + "asserts.js");
+
 var x = 'global';
 function f(a=x) {  // local variable x
     var x = 'local';
@@ -29,6 +31,6 @@ function j(expr, v=eval(expr)) {
   return v;
 }
 assertEq(j("expr"), "expr");
-assertEq(j("v"), undefined);
+assertThrowsInstanceOf(() => j("v"), ReferenceError);
 assertEq(j("Array"), Array);
 assertEq(j("arguments").length, 1);

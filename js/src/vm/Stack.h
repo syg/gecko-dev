@@ -45,7 +45,7 @@ class ScriptFrameIter;
 class SPSProfiler;
 class InterpreterFrame;
 class LexicalEnvironmentObject;
-
+class EnvironmentIter;
 class EnvironmentCoordinate;
 
 class SavedFrame;
@@ -253,8 +253,10 @@ class AbstractFramePtr
     inline HandleValue returnValue() const;
     inline void setReturnValue(const Value& rval) const;
 
-    inline void popLexicalEnvironment(JSContext* cx) const;
+    inline void popLexicalEnvironment(JSContext* cx, jsbytecode* pc) const;
+    inline void popLexicalEnvironment(JSContext* cx, EnvironmentIter& ei) const;
     inline void popWith(JSContext* cx) const;
+    inline void popCallObject(JSContext* cx);
 
     friend void GDBTestInitAbstractFramePtr(AbstractFramePtr&, void*);
     friend void GDBTestInitAbstractFramePtr(AbstractFramePtr&, InterpreterFrame*);
@@ -551,6 +553,7 @@ class InterpreterFrame
 
     // Push a CallObject for function frames with closed over var bindings.
     bool pushCallObject(JSContext* cx);
+    void popCallObject(JSContext* cx);
 
     /*
      * For lexical envs with aliased locals, these interfaces push and pop
@@ -564,9 +567,10 @@ class InterpreterFrame
      */
 
     bool pushLexicalEnvironment(JSContext* cx, Handle<LexicalScope*> scope);
-    void popLexicalEnvironment(JSContext* cx);
-    bool freshenLexicalEnvironment(JSContext* cx);
-    bool recreateLexicalEnvironment(JSContext* cx);
+    void popLexicalEnvironment(JSContext* cx, jsbytecode* pc);
+    void popLexicalEnvironment(JSContext* cx, EnvironmentIter& ei);
+    bool freshenLexicalEnvironment(JSContext* cx, jsbytecode* pc);
+    bool recreateLexicalEnvironment(JSContext* cx, jsbytecode* pc);
 
     /*
      * With

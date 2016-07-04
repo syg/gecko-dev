@@ -254,47 +254,26 @@ InterpreterFrame::epilogue(JSContext* cx, jsbytecode* pc)
     RootedScript script(cx, this->script());
     probes::ExitScript(cx, script, script->functionNonDelazifying(), hasPushedSPSFrame());
 
-    if (isEvalFrame()) {
-        if (isStrictEvalFrame()) {
-            MOZ_ASSERT_IF(hasCallObj(), environmentChain()->as<CallObject>().isForEval());
-            if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
-                DebugEnvironments::onPopStrictEval(this);
-        } else if (isNonGlobalEvalFrame()) {
-            MOZ_ASSERT_IF(isDebuggerEvalFrame(), !IsSyntacticEnvironment(environmentChain()));
-        }
-        return;
-    }
-
-    if (isGlobalFrame()) {
-        // Confusingly, global frames may run in non-global scopes (that is,
-        // not directly under the GlobalObject and its lexical scope).
-        //
-        // Gecko often runs global scripts under custom environments. See
-        // users of CreateNonSyntacticEnvironmentChain.
-        MOZ_ASSERT(IsGlobalLexicalEnvironment(environmentChain()) ||
-                   !IsSyntacticEnvironment(environmentChain()));
-        return;
-    }
-
-    if (isModuleFrame())
-        return;
-
-    MOZ_ASSERT(isFunctionFrame());
-
     // Check that the scope matches the environment at the point of leaving
     // the frame.
     AssertScopeMatchesEnvironment(script, pc, environmentChain());
 
-    if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
-        DebugEnvironments::onPopCall(this, cx);
+    EnvironmentIter ei(cx, this, pc);
+    UnwindAllEnvironmentsInFrame(cx, ei);
 
-    if (!callee().isGenerator() &&
-        isConstructing() &&
-        thisArgument().isObject() &&
-        returnValue().isPrimitive())
-    {
-        setReturnValue(thisArgument());
+    if (isFunctionFrame()) {
+        if (!callee().isGenerator() &&
+            isConstructing() &&
+            thisArgument().isObject() &&
+            returnValue().isPrimitive())
+        {
+            setReturnValue(thisArgument());
+        }
+
+        return;
     }
+
+    MOZ_ASSERT(isEvalFrame() || isGlobalFrame() || isModuleFrame());
 }
 
 bool
@@ -355,8 +334,11 @@ InterpreterFrame::pushLexicalEnvironment(JSContext* cx, Handle<LexicalScope*> sc
 }
 
 bool
-InterpreterFrame::freshenLexicalEnvironment(JSContext* cx)
+InterpreterFrame::freshenLexicalEnvironment(JSContext* cx, jsbytecode* pc)
 {
+    if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
+        DebugEnvironments::onPopLexical(cx, this, pc);
+
     Rooted<LexicalEnvironmentObject*> env(cx, &envChain_->as<LexicalEnvironmentObject>());
     LexicalEnvironmentObject* fresh = LexicalEnvironmentObject::clone(cx, env);
     if (!fresh)
@@ -367,8 +349,11 @@ InterpreterFrame::freshenLexicalEnvironment(JSContext* cx)
 }
 
 bool
-InterpreterFrame::recreateLexicalEnvironment(JSContext* cx)
+InterpreterFrame::recreateLexicalEnvironment(JSContext* cx, jsbytecode* pc)
 {
+    if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
+        DebugEnvironments::onPopLexical(cx, this, pc);
+
     Rooted<LexicalEnvironmentObject*> env(cx, &envChain_->as<LexicalEnvironmentObject>());
     LexicalEnvironmentObject* fresh = LexicalEnvironmentObject::recreate(cx, env);
     if (!fresh)
@@ -379,8 +364,23 @@ InterpreterFrame::recreateLexicalEnvironment(JSContext* cx)
 }
 
 void
-InterpreterFrame::popLexicalEnvironment(JSContext* cx)
+InterpreterFrame::popLexicalEnvironment(JSContext* cx, jsbytecode* pc)
 {
+    if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
+        DebugEnvironments::onPopLexical(cx, this, pc);
+
+    MOZ_ASSERT(envChain_->is<LexicalEnvironmentObject>());
+    popOffEnvironmentChain();
+}
+
+void
+InterpreterFrame::popLexicalEnvironment(JSContext* cx, EnvironmentIter& ei)
+{
+    if (MOZ_UNLIKELY(cx->compartment()->isDebuggee())) {
+        MOZ_ASSERT(envChain_ == &ei.environment());
+        DebugEnvironments::onPopLexical(cx, ei);
+    }
+
     MOZ_ASSERT(envChain_->is<LexicalEnvironmentObject>());
     popOffEnvironmentChain();
 }
@@ -392,6 +392,20 @@ InterpreterFrame::popWith(JSContext* cx)
         DebugEnvironments::onPopWith(this);
 
     MOZ_ASSERT(environmentChain()->is<WithEnvironmentObject>());
+    popOffEnvironmentChain();
+}
+
+void
+InterpreterFrame::popCallObject(JSContext* cx)
+{
+    if (MOZ_UNLIKELY(cx->compartment()->isDebuggee())) {
+        if (isStrictEvalFrame())
+            DebugEnvironments::onPopStrictEval(this);
+        else
+            DebugEnvironments::onPopCall(cx, this);
+    }
+
+    MOZ_ASSERT(environmentChain()->is<CallObject>());
     popOffEnvironmentChain();
 }
 
@@ -480,7 +494,8 @@ void
 InterpreterRegs::setToEndOfScript()
 {
     sp = fp()->base();
-    pc = fp()->script()->lastPC();
+    // TODOshu see if debugger fails
+    // pc = fp()->script()->lastPC();
 }
 
 /*****************************************************************************/

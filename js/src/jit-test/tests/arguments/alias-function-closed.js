@@ -89,9 +89,9 @@ function f4(a,
             // assignment before body
             b=a=()=>62,
             c=(assertEq(a(), 62)),
-            // function declaration before body
+            // eval in defaults exprs get own var envs
             d=eval("function a() { return 72; }"),
-            e=(assertEq(a(), 72))) {
+            e=(assertEq(a(), 62))) {
   function a() {
     return 52;
   }

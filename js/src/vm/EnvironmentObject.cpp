@@ -292,16 +292,17 @@ CallObject::createHollowForDebug(JSContext* cx, HandleFunction callee)
     if (!callobj)
         return nullptr;
 
-    // This environment's parent link is never used: the DebugEnvironmentProxy
-    // that refers to this scope carries its own parent link, which is what
-    // Debugger uses to construct the tree of Debugger.Environment objects.
-    callobj->initEnclosingEnvironment(nullptr);
+    // This environment's enclosing link is never used: the
+    // DebugEnvironmentProxy that refers to this scope carries its own
+    // enclosing link, which is what Debugger uses to construct the tree of
+    // Debugger.Environment objects.
+    callobj->initEnclosingEnvironment(&cx->global()->lexicalEnvironment());
     callobj->initFixedSlot(CALLEE_SLOT, ObjectOrNullValue(callee));
 
     RootedValue optimizedOut(cx, MagicValue(JS_OPTIMIZED_OUT));
     RootedId id(cx);
     RootedScript script(cx, callee->nonLazyScript());
-    for (Rooted<BindingIter> bi(cx, BindingIter(script)); !bi; bi++) {
+    for (Rooted<BindingIter> bi(cx, BindingIter(script)); bi; bi++) {
         id = NameToId(bi.name()->asPropertyName());
         if (!SetProperty(cx, callobj, id, optimizedOut))
             return nullptr;
@@ -842,17 +843,19 @@ LexicalEnvironmentObject::createHollowForDebug(JSContext* cx, Handle<LexicalScop
     if (!shape)
         return nullptr;
 
-    // This environment's parent link is never used: the DebugEnvironmentProxy
-    // that refers to this scope carries its own parent link, which is what
-    // Debugger uses to construct the tree of Debugger.Environment objects.
-    Rooted<LexicalEnvironmentObject*> env(cx, createTemplateObject(cx, shape, nullptr,
+    // This environment's enclosing link is never used: the
+    // DebugEnvironmentProxy that refers to this scope carries its own
+    // enclosing link, which is what Debugger uses to construct the tree of
+    // Debugger.Environment objects.
+    RootedObject enclosingEnv(cx, &cx->global()->lexicalEnvironment());
+    Rooted<LexicalEnvironmentObject*> env(cx, createTemplateObject(cx, shape, enclosingEnv,
                                                                    gc::TenuredHeap));
     if (!env)
         return nullptr;
 
     RootedValue optimizedOut(cx, MagicValue(JS_OPTIMIZED_OUT));
     RootedId id(cx);
-    for (Rooted<BindingIter> bi(cx, BindingIter(scope)); !bi; bi++) {
+    for (Rooted<BindingIter> bi(cx, BindingIter(scope)); bi; bi++) {
         id = NameToId(bi.name()->asPropertyName());
         if (!SetProperty(cx, env, id, optimizedOut))
             return nullptr;
@@ -861,7 +864,7 @@ LexicalEnvironmentObject::createHollowForDebug(JSContext* cx, Handle<LexicalScop
     if (!env->setFlags(cx, BaseShape::NOT_EXTENSIBLE, JSObject::GENERATE_SHAPE))
         return nullptr;
 
-    env->initScope(scope);
+    env->initScopeUnchecked(scope);
     return env;
 }
 
@@ -1127,42 +1130,23 @@ EnvironmentIter::incrementScopeIter()
 void
 EnvironmentIter::settle()
 {
-    // Check for trying to iterate a function frame before the prologue has
+    // Check for trying to iterate a function or eval frame before the prologue has
     // created the CallObject, in which case we have to skip.
-    if (frame_ && frame_.isFunctionFrame() && frame_.callee()->needsCallObject() &&
-        !frame_.hasCallObj())
-    {
-        // Skip until we're at the function scope.
-        while (si_.kind() != ScopeKind::Function)
+    if (frame_ && frame_.script()->callObjShape() && !frame_.hasCallObj()) {
+        // Skip until we're at the enclosing scope of the script.
+        while (si_.scope() != frame_.script()->enclosingScope()) {
+            // We may need to pop defaults and named lambda lexical
+            // environments.
+            if (env_->is<LexicalEnvironmentObject>() &&
+                !env_->as<LexicalEnvironmentObject>().isExtensible() &&
+                &env_->as<LexicalEnvironmentObject>().scope() == si_.scope())
+            {
+                MOZ_ASSERT(si_.kind() == ScopeKind::ParameterDefaults ||
+                           si_.kind() == ScopeKind::NamedLambda);
+                env_ = &env_->as<EnvironmentObject>().enclosingEnvironment();
+            }
             incrementScopeIter();
-
-        // Since we have no CallObject, skip the function scope.
-        MOZ_ASSERT(si_.scope() == frame_.script()->bodyScope());
-        incrementScopeIter();
-
-        // Having no CallObject means we won't have the defaults scope or the
-        // named lambda environments either. Skip those if present.
-        if (frame_.script()->hasDefaults())
-            incrementScopeIter();
-        if (frame_.callee()->isNamedLambda())
-            incrementScopeIter();
-    }
-
-    // Check for trying to iterate a strict eval frame before the prologue has
-    // created the CallObject.
-    if (frame_ && frame_.isStrictEvalFrame() && !frame_.hasCallObj() && !si_) {
-        // Eval frames always have their own lexical scope. Analogous to the
-        // function frame case above, if the script starts with a
-        // block, the SSI could see 2 lexical scopes here. So skip between 1-2
-        // static block scopes here.
-        if (si_.kind() == ScopeKind::Lexical)
-            incrementScopeIter();
-        if (si_.kind() == ScopeKind::Lexical)
-            incrementScopeIter();
-        MOZ_ASSERT(si_.kind() == ScopeKind::StrictEval);
-        MOZ_ASSERT(si_.scope() == frame_.script()->enclosingScope());
-        incrementScopeIter();
-        frame_ = NullFramePtr();
+        }
     }
 
     // Check if we have left the extent of the initial frame after we've
@@ -2425,7 +2409,7 @@ DebugEnvironments::takeFrameSnapshot(JSContext* cx, Handle<DebugEnvironmentProxy
 }
 
 /* static */ void
-DebugEnvironments::onPopCall(AbstractFramePtr frame, JSContext* cx)
+DebugEnvironments::onPopCall(JSContext* cx, AbstractFramePtr frame)
 {
     assertSameCompartment(cx, frame);
 

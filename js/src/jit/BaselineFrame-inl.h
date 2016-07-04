@@ -64,16 +64,33 @@ BaselineFrame::pushLexicalEnvironment(JSContext* cx, Handle<LexicalScope*> scope
 }
 
 inline void
-BaselineFrame::popLexicalEnvironment(JSContext* cx)
+BaselineFrame::popLexicalEnvironment(JSContext* cx, jsbytecode* pc)
 {
-    MOZ_ASSERT(envChain_->is<LexicalEnvironmentObject>());
+    if (MOZ_UNLIKELY(isDebuggee()))
+        DebugEnvironments::onPopLexical(cx, this, pc);
 
+    MOZ_ASSERT(envChain_->is<LexicalEnvironmentObject>());
+    popOffEnvironmentChain();
+}
+
+inline void
+BaselineFrame::popLexicalEnvironment(JSContext* cx, EnvironmentIter& ei)
+{
+    if (MOZ_UNLIKELY(isDebuggee())) {
+        MOZ_ASSERT(envChain_ == &ei.environment());
+        DebugEnvironments::onPopLexical(cx, ei);
+    }
+
+    MOZ_ASSERT(envChain_->is<LexicalEnvironmentObject>());
     popOffEnvironmentChain();
 }
 
 inline bool
-BaselineFrame::freshenLexicalEnvironment(JSContext* cx)
+BaselineFrame::freshenLexicalEnvironment(JSContext* cx, jsbytecode* pc)
 {
+    if (MOZ_UNLIKELY(isDebuggee()))
+        DebugEnvironments::onPopLexical(cx, this, pc);
+
     Rooted<LexicalEnvironmentObject*> current(cx, &envChain_->as<LexicalEnvironmentObject>());
     LexicalEnvironmentObject* clone = LexicalEnvironmentObject::clone(cx, current);
     if (!clone)
@@ -84,8 +101,11 @@ BaselineFrame::freshenLexicalEnvironment(JSContext* cx)
 }
 
 inline bool
-BaselineFrame::recreateLexicalEnvironment(JSContext* cx)
+BaselineFrame::recreateLexicalEnvironment(JSContext* cx, jsbytecode* pc)
 {
+    if (MOZ_UNLIKELY(isDebuggee()))
+        DebugEnvironments::onPopLexical(cx, this, pc);
+
     Rooted<LexicalEnvironmentObject*> current(cx, &envChain_->as<LexicalEnvironmentObject>());
     LexicalEnvironmentObject* clone = LexicalEnvironmentObject::recreate(cx, current);
     if (!clone)

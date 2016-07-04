@@ -983,16 +983,17 @@ PopEnvironment(JSContext* cx, EnvironmentIter& ei)
     switch (ei.scope().kind()) {
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
-        if (cx->compartment()->isDebuggee())
-            DebugEnvironments::onPopLexical(cx, ei);
+      case ScopeKind::ParameterDefaults:
         if (ei.scope().as<LexicalScope>().hasEnvironment())
-            ei.initialFrame().popLexicalEnvironment(cx);
+            ei.initialFrame().popLexicalEnvironment(cx, ei);
         break;
       case ScopeKind::With:
         ei.initialFrame().popWith(cx);
         break;
       case ScopeKind::Function:
-      case ScopeKind::ParameterDefaults:
+        if (ei.scope().as<FunctionScope>().hasEnvironment())
+            ei.initialFrame().popCallObject(cx);
+        break;
       case ScopeKind::NamedLambda:
       case ScopeKind::StrictNamedLambda:
       case ScopeKind::Eval:
@@ -1270,7 +1271,6 @@ HandleError(JSContext* cx, InterpreterRegs& regs)
 
     // After this point, we will pop the frame regardless. Settle the frame on
     // the end of the script.
-    UnwindAllEnvironmentsInFrame(cx, ei);
     regs.setToEndOfScript();
 
     return ok ? SuccessfulReturnContinuation : ErrorReturnContinuation;
@@ -3758,11 +3758,8 @@ CASE(JSOP_POPLEXICALENV)
     MOZ_ASSERT(scope && scope->is<LexicalScope>() && scope->as<LexicalScope>().hasEnvironment());
 #endif
 
-    if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
-        DebugEnvironments::onPopLexical(cx, REGS.fp(), REGS.pc);
-
     // Pop block from scope chain.
-    REGS.fp()->popLexicalEnvironment(cx);
+    REGS.fp()->popLexicalEnvironment(cx, REGS.pc);
 }
 END_CASE(JSOP_POPLEXICALENV)
 
@@ -3782,20 +3779,14 @@ END_CASE(JSOP_DEBUGLEAVELEXICALENV)
 
 CASE(JSOP_FRESHENLEXICALENV)
 {
-    if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
-        DebugEnvironments::onPopLexical(cx, REGS.fp(), REGS.pc);
-
-    if (!REGS.fp()->freshenLexicalEnvironment(cx))
+    if (!REGS.fp()->freshenLexicalEnvironment(cx, REGS.pc))
         goto error;
 }
 END_CASE(JSOP_FRESHENLEXICALENV)
 
 CASE(JSOP_RECREATELEXICALENV)
 {
-    if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
-        DebugEnvironments::onPopLexical(cx, REGS.fp(), REGS.pc);
-
-    if (!REGS.fp()->recreateLexicalEnvironment(cx))
+    if (!REGS.fp()->recreateLexicalEnvironment(cx, REGS.pc))
         goto error;
 }
 END_CASE(JSOP_RECREATELEXICALENV)
@@ -3806,7 +3797,7 @@ CASE(JSOP_PUSHCALLOBJ)
     // executed before this point dealt with parameter defaults and cannot
     // contain try-catch or try-finally blocks.
     if (!REGS.fp()->pushCallObject(cx))
-        goto prologue_error;
+        goto error;
 }
 END_CASE(JSOP_PUSHCALLOBJ)
 

@@ -3418,7 +3418,7 @@ BaselineCompiler::emit_JSOP_PUSHLEXICALENV()
     return callVM(PushLexicalEnvInfo);
 }
 
-typedef bool (*PopLexicalEnvFn)(JSContext*, BaselineFrame*);
+typedef bool (*PopLexicalEnvFn)(JSContext*, BaselineFrame*, jsbytecode*);
 static const VMFunction PopLexicalEnvInfo = FunctionInfo<PopLexicalEnvFn>(jit::PopLexicalEnv);
 
 typedef bool (*DebugLeaveThenPopLexicalEnvFn)(JSContext*, BaselineFrame*, jsbytecode*);
@@ -3431,18 +3431,15 @@ BaselineCompiler::emit_JSOP_POPLEXICALENV()
     prepareVMCall();
 
     masm.loadBaselineFramePtr(BaselineFrameReg, R0.scratchReg());
-
-    if (compileDebugInstrumentation_) {
-        pushArg(ImmPtr(pc));
-        pushArg(R0.scratchReg());
-        return callVM(DebugLeaveThenPopLexicalEnvInfo);
-    }
-
+    pushArg(ImmPtr(pc));
     pushArg(R0.scratchReg());
+
+    if (compileDebugInstrumentation_)
+        return callVM(DebugLeaveThenPopLexicalEnvInfo);
     return callVM(PopLexicalEnvInfo);
 }
 
-typedef bool (*FreshenLexicalEnvFn)(JSContext*, BaselineFrame*);
+typedef bool (*FreshenLexicalEnvFn)(JSContext*, BaselineFrame*, jsbytecode*);
 static const VMFunction FreshenLexicalEnvInfo =
     FunctionInfo<FreshenLexicalEnvFn>(jit::FreshenLexicalEnv);
 
@@ -3456,18 +3453,15 @@ BaselineCompiler::emit_JSOP_FRESHENLEXICALENV()
     prepareVMCall();
 
     masm.loadBaselineFramePtr(BaselineFrameReg, R0.scratchReg());
-
-    if (compileDebugInstrumentation_) {
-        pushArg(ImmPtr(pc));
-        pushArg(R0.scratchReg());
-        return callVM(DebugLeaveThenFreshenLexicalEnvInfo);
-    }
-
+    pushArg(ImmPtr(pc));
     pushArg(R0.scratchReg());
+
+    if (compileDebugInstrumentation_)
+        return callVM(DebugLeaveThenFreshenLexicalEnvInfo);
     return callVM(FreshenLexicalEnvInfo);
 }
 
-typedef bool (*RecreateLexicalEnvFn)(JSContext*, BaselineFrame*);
+typedef bool (*RecreateLexicalEnvFn)(JSContext*, BaselineFrame*, jsbytecode*);
 static const VMFunction RecreateLexicalEnvInfo =
     FunctionInfo<RecreateLexicalEnvFn>(jit::RecreateLexicalEnv);
 
@@ -3481,14 +3475,11 @@ BaselineCompiler::emit_JSOP_RECREATELEXICALENV()
     prepareVMCall();
 
     masm.loadBaselineFramePtr(BaselineFrameReg, R0.scratchReg());
-
-    if (compileDebugInstrumentation_) {
-        pushArg(ImmPtr(pc));
-        pushArg(R0.scratchReg());
-        return callVM(DebugLeaveThenRecreateLexicalEnvInfo);
-    }
-
+    pushArg(ImmPtr(pc));
     pushArg(R0.scratchReg());
+
+    if (compileDebugInstrumentation_)
+        return callVM(DebugLeaveThenRecreateLexicalEnvInfo);
     return callVM(RecreateLexicalEnvInfo);
 }
 

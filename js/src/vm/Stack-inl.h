@@ -200,7 +200,7 @@ InterpreterFrame::replaceInnermostEnvironment(EnvironmentObject& env)
 bool
 InterpreterFrame::hasCallObj() const
 {
-    MOZ_ASSERT(isStrictEvalFrame() || callee().needsCallObject());
+    MOZ_ASSERT(script()->callObjShape());
     return flags_ & HAS_CALL_OBJ;
 }
 
@@ -476,6 +476,14 @@ AbstractFramePtr::pushCallObject(JSContext* cx)
     if (isBaselineFrame())
         return asBaselineFrame()->pushCallObject(cx);
     return asRematerializedFrame()->pushCallObject(cx);
+}
+
+inline void
+AbstractFramePtr::popCallObject(JSContext* cx)
+{
+    if (isInterpreterFrame())
+        return asInterpreterFrame()->popCallObject(cx);
+    return asBaselineFrame()->popCallObject(cx);
 }
 
 inline JSCompartment*
@@ -813,13 +821,23 @@ AbstractFramePtr::newTarget() const
 }
 
 inline void
-AbstractFramePtr::popLexicalEnvironment(JSContext* cx) const
+AbstractFramePtr::popLexicalEnvironment(JSContext* cx, jsbytecode* pc) const
 {
     if (isInterpreterFrame()) {
-        asInterpreterFrame()->popLexicalEnvironment(cx);
+        asInterpreterFrame()->popLexicalEnvironment(cx, pc);
         return;
     }
-    asBaselineFrame()->popLexicalEnvironment(cx);
+    asBaselineFrame()->popLexicalEnvironment(cx, pc);
+}
+
+inline void
+AbstractFramePtr::popLexicalEnvironment(JSContext* cx, EnvironmentIter& ei) const
+{
+    if (isInterpreterFrame()) {
+        asInterpreterFrame()->popLexicalEnvironment(cx, ei);
+        return;
+    }
+    asBaselineFrame()->popLexicalEnvironment(cx, ei);
 }
 
 inline void
