@@ -119,20 +119,6 @@ BaselineFrame::pushCallObject(JSContext* cx)
     return true;
 }
 
-void
-BaselineFrame::popCallObject(JSContext* cx)
-{
-    if (MOZ_UNLIKELY(isDebuggee())) {
-        if (isStrictEvalFrame())
-            DebugEnvironments::onPopStrictEval(this);
-        else
-            DebugEnvironments::onPopCall(cx, this);
-    }
-
-    MOZ_ASSERT(envChain_->is<CallObject>());
-    popOffEnvironmentChain();
-}
-
 bool
 BaselineFrame::initForOsr(InterpreterFrame* fp, uint32_t numStackValues)
 {

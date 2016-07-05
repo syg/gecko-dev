@@ -876,11 +876,10 @@ class DebugEnvironments
 
     // In debug-mode, these must be called whenever exiting a scope that might
     // have stack-allocated locals.
-    static void onPopCall(JSContext* cx, AbstractFramePtr frame);
+    static void onPopCallObject(JSContext* cx, AbstractFramePtr frame);
     static void onPopLexical(JSContext* cx, const EnvironmentIter& ei);
     static void onPopLexical(JSContext* cx, AbstractFramePtr frame, jsbytecode* pc);
     static void onPopWith(AbstractFramePtr frame);
-    static void onPopStrictEval(AbstractFramePtr frame);
     static void onCompartmentUnsetIsDebuggee(JSCompartment* c);
 };
 

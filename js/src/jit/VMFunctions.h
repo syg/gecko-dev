@@ -734,15 +734,15 @@ LeaveWith(JSContext* cx, BaselineFrame* frame);
 MOZ_MUST_USE bool
 PushLexicalEnv(JSContext* cx, BaselineFrame* frame, Handle<LexicalScope*> scope);
 MOZ_MUST_USE bool
-PopLexicalEnv(JSContext* cx, BaselineFrame* frame, jsbytecode* pc);
+PopLexicalEnv(JSContext* cx, BaselineFrame* frame);
 MOZ_MUST_USE bool
 DebugLeaveThenPopLexicalEnv(JSContext* cx, BaselineFrame* frame, jsbytecode* pc);
 MOZ_MUST_USE bool
-FreshenLexicalEnv(JSContext* cx, BaselineFrame* frame, jsbytecode* pc);
+FreshenLexicalEnv(JSContext* cx, BaselineFrame* frame);
 MOZ_MUST_USE bool
 DebugLeaveThenFreshenLexicalEnv(JSContext* cx, BaselineFrame* frame, jsbytecode* pc);
 MOZ_MUST_USE bool
-RecreateLexicalEnv(JSContext* cx, BaselineFrame* frame, jsbytecode* pc);
+RecreateLexicalEnv(JSContext* cx, BaselineFrame* frame);
 MOZ_MUST_USE bool
 DebugLeaveThenRecreateLexicalEnv(JSContext* cx, BaselineFrame* frame, jsbytecode* pc);
 MOZ_MUST_USE bool

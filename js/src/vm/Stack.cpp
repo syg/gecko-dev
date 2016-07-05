@@ -334,11 +334,8 @@ InterpreterFrame::pushLexicalEnvironment(JSContext* cx, Handle<LexicalScope*> sc
 }
 
 bool
-InterpreterFrame::freshenLexicalEnvironment(JSContext* cx, jsbytecode* pc)
+InterpreterFrame::freshenLexicalEnvironment(JSContext* cx)
 {
-    if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
-        DebugEnvironments::onPopLexical(cx, this, pc);
-
     Rooted<LexicalEnvironmentObject*> env(cx, &envChain_->as<LexicalEnvironmentObject>());
     LexicalEnvironmentObject* fresh = LexicalEnvironmentObject::clone(cx, env);
     if (!fresh)
@@ -349,11 +346,8 @@ InterpreterFrame::freshenLexicalEnvironment(JSContext* cx, jsbytecode* pc)
 }
 
 bool
-InterpreterFrame::recreateLexicalEnvironment(JSContext* cx, jsbytecode* pc)
+InterpreterFrame::recreateLexicalEnvironment(JSContext* cx)
 {
-    if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
-        DebugEnvironments::onPopLexical(cx, this, pc);
-
     Rooted<LexicalEnvironmentObject*> env(cx, &envChain_->as<LexicalEnvironmentObject>());
     LexicalEnvironmentObject* fresh = LexicalEnvironmentObject::recreate(cx, env);
     if (!fresh)
@@ -361,52 +355,6 @@ InterpreterFrame::recreateLexicalEnvironment(JSContext* cx, jsbytecode* pc)
 
     replaceInnermostEnvironment(*fresh);
     return true;
-}
-
-void
-InterpreterFrame::popLexicalEnvironment(JSContext* cx, jsbytecode* pc)
-{
-    if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
-        DebugEnvironments::onPopLexical(cx, this, pc);
-
-    MOZ_ASSERT(envChain_->is<LexicalEnvironmentObject>());
-    popOffEnvironmentChain();
-}
-
-void
-InterpreterFrame::popLexicalEnvironment(JSContext* cx, EnvironmentIter& ei)
-{
-    if (MOZ_UNLIKELY(cx->compartment()->isDebuggee())) {
-        MOZ_ASSERT(envChain_ == &ei.environment());
-        DebugEnvironments::onPopLexical(cx, ei);
-    }
-
-    MOZ_ASSERT(envChain_->is<LexicalEnvironmentObject>());
-    popOffEnvironmentChain();
-}
-
-void
-InterpreterFrame::popWith(JSContext* cx)
-{
-    if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
-        DebugEnvironments::onPopWith(this);
-
-    MOZ_ASSERT(environmentChain()->is<WithEnvironmentObject>());
-    popOffEnvironmentChain();
-}
-
-void
-InterpreterFrame::popCallObject(JSContext* cx)
-{
-    if (MOZ_UNLIKELY(cx->compartment()->isDebuggee())) {
-        if (isStrictEvalFrame())
-            DebugEnvironments::onPopStrictEval(this);
-        else
-            DebugEnvironments::onPopCall(cx, this);
-    }
-
-    MOZ_ASSERT(environmentChain()->is<CallObject>());
-    popOffEnvironmentChain();
 }
 
 void

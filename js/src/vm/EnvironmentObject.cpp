@@ -897,7 +897,6 @@ LexicalEnvironmentObject::recreate(JSContext* cx, Handle<LexicalEnvironmentObjec
 bool
 LexicalEnvironmentObject::isExtensible() const
 {
-    MOZ_ASSERT(nonProxyIsExtensible() == isGlobal() || !isSyntactic());
     return nonProxyIsExtensible();
 }
 
@@ -1116,11 +1115,8 @@ EnvironmentIter::incrementScopeIter()
         // GlobalScopes may be syntactic or non-syntactic. Non-syntactic
         // GlobalScopes correspond to zero or more non-syntactic
         // EnvironmentsObjects followed by the global lexical scope, then the
-        // GlobalObject.
-        //
-        // Thus regardless of whether the GlobalScope is syntactic, only
-        // advance si_ once we see the GlobalObject.
-        if (env_->is<GlobalObject>())
+        // GlobalObject or another non-EnvironmentObject object.
+        if (!env_->is<EnvironmentObject>())
             si_++;
     } else {
         si_++;
@@ -1171,12 +1167,16 @@ EnvironmentIter::settle()
                 MOZ_ASSERT(env_->is<GlobalObject>() || IsGlobalLexicalEnvironment(env_));
             }
         } else if (hasNonSyntacticEnvironmentObject()) {
-            if (env_->is<LexicalEnvironmentObject>())
-                MOZ_ASSERT(!env_->as<LexicalEnvironmentObject>().isSyntactic());
-            else if (env_->is<WithEnvironmentObject>())
+            if (env_->is<LexicalEnvironmentObject>()) {
+                // The global lexical environment still encloses non-syntactic
+                // environment objects.
+                MOZ_ASSERT(!env_->as<LexicalEnvironmentObject>().isSyntactic() ||
+                           env_->as<LexicalEnvironmentObject>().isGlobal());
+            } else if (env_->is<WithEnvironmentObject>()) {
                 MOZ_ASSERT(!env_->as<WithEnvironmentObject>().isSyntactic());
-            else
+            } else {
                 MOZ_ASSERT(env_->is<NonSyntacticVariablesObject>());
+            }
         }
     }
 #endif
@@ -1205,7 +1205,7 @@ EnvironmentIter::hasNonSyntacticEnvironmentObject() const
     if (si_.kind() == ScopeKind::NonSyntactic) {
         MOZ_ASSERT_IF(env_->is<WithEnvironmentObject>(),
                       !env_->as<WithEnvironmentObject>().isSyntactic());
-        return env_->is<EnvironmentObject>() && !IsSyntacticEnvironment(env_);
+        return env_->is<EnvironmentObject>();
     }
     return false;
 }
@@ -1428,6 +1428,13 @@ class DebugEnvironmentProxyHandler : public BaseProxyHandler
             BindingLocation loc = bi.location();
             if (loc.kind() == BindingLocation::Kind::Environment)
                 return true;
+
+            // Named lambdas that are not closed over are lost.
+            if (loc.kind() == BindingLocation::Kind::NamedLambdaCallee) {
+                *accessResult = ACCESS_LOST;
+                return true;
+            }
+
             MOZ_ASSERT(loc.kind() == BindingLocation::Kind::Frame);
 
             if (maybeLiveEnv) {
@@ -2354,30 +2361,44 @@ DebugEnvironments::takeFrameSnapshot(JSContext* cx, Handle<DebugEnvironmentProxy
 
     Rooted<GCVector<Value>> vec(cx, GCVector<Value>(cx));
     if (debugEnv->environment().is<CallObject>()) {
-        JSScript* script = debugEnv->environment().as<CallObject>().callee().nonLazyScript();
-        FunctionScope* scope = &script->bodyScope()->as<FunctionScope>();
-        uint32_t frameSlotCount = scope->nextFrameSlot();
-        MOZ_ASSERT(frameSlotCount <= frame.script()->nfixed());
+        JSScript* script = frame.script();
 
-        // For simplicity, copy all frame slots from 0 to the frameSlotCount,
-        // even if we don't need all of them (like in the case of a defaults
-        // parameter scope having frame slots).
-        uint32_t numFormals = frame.numFormalArgs();
-        if (!vec.resize(numFormals + frameSlotCount))
-            return;
-        mozilla::PodCopy(vec.begin(), frame.argv(), numFormals);
-        for (uint32_t slot = 0; slot < frameSlotCount; slot++)
-            vec[slot + frame.numFormalArgs()].set(frame.unaliasedLocal(slot));
+        if (frame.isFunctionFrame()) {
+            FunctionScope* scope = &script->bodyScope()->as<FunctionScope>();
+            uint32_t frameSlotCount = scope->nextFrameSlot();
+            MOZ_ASSERT(frameSlotCount <= script->nfixed());
 
-        /*
-         * Copy in formals that are not aliased via the scope chain
-         * but are aliased via the arguments object.
-         */
-        if (script->analyzedArgsUsage() && script->needsArgsObj() && frame.hasArgsObj()) {
-            for (unsigned i = 0; i < frame.numFormalArgs(); ++i) {
-                if (script->formalLivesInArgumentsObject(i))
-                    vec[i].set(frame.argsObj().arg(i));
+            // For simplicity, copy all frame slots from 0 to the frameSlotCount,
+            // even if we don't need all of them (like in the case of a defaults
+            // parameter scope having frame slots).
+            uint32_t numFormals = frame.numFormalArgs();
+            if (!vec.resize(numFormals + frameSlotCount))
+                return;
+            mozilla::PodCopy(vec.begin(), frame.argv(), numFormals);
+            for (uint32_t slot = 0; slot < frameSlotCount; slot++)
+                vec[slot + frame.numFormalArgs()].set(frame.unaliasedLocal(slot));
+
+            /*
+             * Copy in formals that are not aliased via the scope chain
+             * but are aliased via the arguments object.
+             */
+            if (script->analyzedArgsUsage() && script->needsArgsObj() && frame.hasArgsObj()) {
+                for (unsigned i = 0; i < frame.numFormalArgs(); ++i) {
+                    if (script->formalLivesInArgumentsObject(i))
+                        vec[i].set(frame.argsObj().arg(i));
+                }
             }
+        } else {
+            MOZ_ASSERT(frame.isEvalFrame());
+
+            EvalScope* scope = &script->bodyScope()->as<EvalScope>();
+            uint32_t frameSlotCount = scope->nextFrameSlot();
+            MOZ_ASSERT(frameSlotCount <= script->nfixed());
+
+            if (!vec.resize(frameSlotCount))
+                return;
+            for (uint32_t slot = 0; slot < frameSlotCount; slot++)
+                vec[slot].set(frame.unaliasedLocal(slot));
         }
     } else {
         LexicalScope* scope = &debugEnv->environment().as<LexicalEnvironmentObject>().scope();
@@ -2409,7 +2430,7 @@ DebugEnvironments::takeFrameSnapshot(JSContext* cx, Handle<DebugEnvironmentProxy
 }
 
 /* static */ void
-DebugEnvironments::onPopCall(JSContext* cx, AbstractFramePtr frame)
+DebugEnvironments::onPopCallObject(JSContext* cx, AbstractFramePtr frame)
 {
     assertSameCompartment(cx, frame);
 
@@ -2419,7 +2440,9 @@ DebugEnvironments::onPopCall(JSContext* cx, AbstractFramePtr frame)
 
     Rooted<DebugEnvironmentProxy*> debugEnv(cx, nullptr);
 
-    if (frame.callee()->needsCallObject()) {
+    if (frame.script()->callObjShape()) {
+        MOZ_ASSERT_IF(frame.isFunctionFrame(), frame.callee()->needsCallObject());
+
         /*
          * The frame may be observed before the prologue has created the
          * CallObject. See EnvironmentIter::settle.
@@ -2427,7 +2450,7 @@ DebugEnvironments::onPopCall(JSContext* cx, AbstractFramePtr frame)
         if (!frame.hasCallObj())
             return;
 
-        if (frame.callee()->isGenerator())
+        if (frame.isFunctionFrame() && frame.callee()->isGenerator())
             return;
 
         CallObject& callobj = frame.environmentChain()->as<CallObject>();
@@ -2468,7 +2491,7 @@ DebugEnvironments::onPopLexical(JSContext* cx, const EnvironmentIter& ei)
         return;
 
     MOZ_ASSERT(ei.withinInitialFrame());
-    MOZ_ASSERT(ei.scope().kind() == ScopeKind::Lexical);
+    MOZ_ASSERT(ei.scope().is<LexicalScope>());
 
     Rooted<LexicalEnvironmentObject*> env(cx);
     if (MissingEnvironmentMap::Ptr p = envs->missingEnvs.lookup(MissingEnvironmentKey(ei))) {
@@ -2494,21 +2517,6 @@ DebugEnvironments::onPopWith(AbstractFramePtr frame)
     DebugEnvironments* envs = frame.compartment()->debugEnvs;
     if (envs)
         envs->liveEnvs.remove(&frame.environmentChain()->as<WithEnvironmentObject>());
-}
-
-void
-DebugEnvironments::onPopStrictEval(AbstractFramePtr frame)
-{
-    DebugEnvironments* envs = frame.compartment()->debugEnvs;
-    if (!envs)
-        return;
-
-    /*
-     * The stack frame may be observed before the prologue has created the
-     * CallObject. See EnvironmentIter::settle.
-     */
-    if (frame.hasCallObj())
-        envs->liveEnvs.remove(&frame.environmentChain()->as<CallObject>());
 }
 
 void

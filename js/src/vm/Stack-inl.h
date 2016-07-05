@@ -183,10 +183,14 @@ InterpreterFrame::pushOnEnvironmentChain(EnvironmentObject& env)
     envChain_ = &env;
 }
 
+template <typename SpecificEnvironment>
 inline void
 InterpreterFrame::popOffEnvironmentChain()
 {
-    envChain_ = &envChain_->as<EnvironmentObject>().enclosingEnvironment();
+    MOZ_ASSERT(envChain_->is<SpecificEnvironment>());
+    envChain_ = &envChain_->as<SpecificEnvironment>().enclosingEnvironment();
+    if (mozilla::IsSame<SpecificEnvironment, CallObject>::value)
+        flags_ &= ~HAS_CALL_OBJ;
 }
 
 inline void
@@ -448,6 +452,17 @@ AbstractFramePtr::pushOnEnvironmentChain(EnvironmentObject& env)
     asBaselineFrame()->pushOnEnvironmentChain(env);
 }
 
+template <typename SpecificEnvironment>
+inline void
+AbstractFramePtr::popOffEnvironmentChain()
+{
+    if (isInterpreterFrame()) {
+        asInterpreterFrame()->popOffEnvironmentChain<SpecificEnvironment>();
+        return;
+    }
+    asBaselineFrame()->popOffEnvironmentChain<SpecificEnvironment>();
+}
+
 inline CallObject&
 AbstractFramePtr::callObj() const
 {
@@ -476,14 +491,6 @@ AbstractFramePtr::pushCallObject(JSContext* cx)
     if (isBaselineFrame())
         return asBaselineFrame()->pushCallObject(cx);
     return asRematerializedFrame()->pushCallObject(cx);
-}
-
-inline void
-AbstractFramePtr::popCallObject(JSContext* cx)
-{
-    if (isInterpreterFrame())
-        return asInterpreterFrame()->popCallObject(cx);
-    return asBaselineFrame()->popCallObject(cx);
 }
 
 inline JSCompartment*
@@ -818,36 +825,6 @@ AbstractFramePtr::newTarget() const
     if (isBaselineFrame())
         return asBaselineFrame()->newTarget();
     return asRematerializedFrame()->newTarget();
-}
-
-inline void
-AbstractFramePtr::popLexicalEnvironment(JSContext* cx, jsbytecode* pc) const
-{
-    if (isInterpreterFrame()) {
-        asInterpreterFrame()->popLexicalEnvironment(cx, pc);
-        return;
-    }
-    asBaselineFrame()->popLexicalEnvironment(cx, pc);
-}
-
-inline void
-AbstractFramePtr::popLexicalEnvironment(JSContext* cx, EnvironmentIter& ei) const
-{
-    if (isInterpreterFrame()) {
-        asInterpreterFrame()->popLexicalEnvironment(cx, ei);
-        return;
-    }
-    asBaselineFrame()->popLexicalEnvironment(cx, ei);
-}
-
-inline void
-AbstractFramePtr::popWith(JSContext* cx) const
-{
-    if (isInterpreterFrame()) {
-        asInterpreterFrame()->popWith(cx);
-        return;
-    }
-    asBaselineFrame()->popWith(cx);
 }
 
 inline bool

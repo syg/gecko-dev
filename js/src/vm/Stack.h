@@ -202,6 +202,8 @@ class AbstractFramePtr
     inline bool initExtraFunctionEnvironmentObjects(JSContext* cx);
     inline bool pushCallObject(JSContext* cx);
     inline void pushOnEnvironmentChain(EnvironmentObject& env);
+    template <typename SpecificEnvironment>
+    inline void popOffEnvironmentChain();
 
     inline JSCompartment* compartment() const;
 
@@ -252,11 +254,6 @@ class AbstractFramePtr
 
     inline HandleValue returnValue() const;
     inline void setReturnValue(const Value& rval) const;
-
-    inline void popLexicalEnvironment(JSContext* cx, jsbytecode* pc) const;
-    inline void popLexicalEnvironment(JSContext* cx, EnvironmentIter& ei) const;
-    inline void popWith(JSContext* cx) const;
-    inline void popCallObject(JSContext* cx);
 
     friend void GDBTestInitAbstractFramePtr(AbstractFramePtr&, void*);
     friend void GDBTestInitAbstractFramePtr(AbstractFramePtr&, InterpreterFrame*);
@@ -548,12 +545,12 @@ class InterpreterFrame
     inline LexicalEnvironmentObject& extensibleLexicalEnvironment() const;
 
     inline void pushOnEnvironmentChain(EnvironmentObject& env);
+    template <typename SpecificEnvironment>
     inline void popOffEnvironmentChain();
     inline void replaceInnermostEnvironment(EnvironmentObject& env);
 
     // Push a CallObject for function frames with closed over var bindings.
     bool pushCallObject(JSContext* cx);
-    void popCallObject(JSContext* cx);
 
     /*
      * For lexical envs with aliased locals, these interfaces push and pop
@@ -567,20 +564,8 @@ class InterpreterFrame
      */
 
     bool pushLexicalEnvironment(JSContext* cx, Handle<LexicalScope*> scope);
-    void popLexicalEnvironment(JSContext* cx, jsbytecode* pc);
-    void popLexicalEnvironment(JSContext* cx, EnvironmentIter& ei);
-    bool freshenLexicalEnvironment(JSContext* cx, jsbytecode* pc);
-    bool recreateLexicalEnvironment(JSContext* cx, jsbytecode* pc);
-
-    /*
-     * With
-     *
-     * Entering/leaving a |with| lexical env pushes/pops an object on the
-     * environment chain.  Pushing uses pushOnEnvironmentChain, popping should
-     * use popWith.
-     */
-
-    void popWith(JSContext* cx);
+    bool freshenLexicalEnvironment(JSContext* cx);
+    bool recreateLexicalEnvironment(JSContext* cx);
 
     /*
      * Script

@@ -984,20 +984,26 @@ PopEnvironment(JSContext* cx, EnvironmentIter& ei)
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
       case ScopeKind::ParameterDefaults:
-        if (ei.scope().as<LexicalScope>().hasEnvironment())
-            ei.initialFrame().popLexicalEnvironment(cx, ei);
+        if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
+            DebugEnvironments::onPopLexical(cx, ei);
+        if (ei.scope().hasEnvironment())
+            ei.initialFrame().popOffEnvironmentChain<LexicalEnvironmentObject>();
         break;
       case ScopeKind::With:
-        ei.initialFrame().popWith(cx);
+        if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
+            DebugEnvironments::onPopWith(ei.initialFrame());
+        ei.initialFrame().popOffEnvironmentChain<WithEnvironmentObject>();
         break;
       case ScopeKind::Function:
-        if (ei.scope().as<FunctionScope>().hasEnvironment())
-            ei.initialFrame().popCallObject(cx);
+      case ScopeKind::Eval:
+      case ScopeKind::StrictEval:
+        if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
+            DebugEnvironments::onPopCallObject(cx, ei.initialFrame());
+        if (ei.scope().hasEnvironment())
+            ei.initialFrame().popOffEnvironmentChain<CallObject>();
         break;
       case ScopeKind::NamedLambda:
       case ScopeKind::StrictNamedLambda:
-      case ScopeKind::Eval:
-      case ScopeKind::StrictEval:
       case ScopeKind::Global:
       case ScopeKind::NonSyntactic:
       case ScopeKind::Module:
@@ -1969,7 +1975,7 @@ CASE(JSOP_ENTERWITH)
 END_CASE(JSOP_ENTERWITH)
 
 CASE(JSOP_LEAVEWITH)
-    REGS.fp()->popWith(cx);
+    REGS.fp()->popOffEnvironmentChain<WithEnvironmentObject>();
 END_CASE(JSOP_LEAVEWITH)
 
 CASE(JSOP_RETURN)
@@ -3758,8 +3764,11 @@ CASE(JSOP_POPLEXICALENV)
     MOZ_ASSERT(scope && scope->is<LexicalScope>() && scope->as<LexicalScope>().hasEnvironment());
 #endif
 
+    if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
+        DebugEnvironments::onPopLexical(cx, REGS.fp(), REGS.pc);
+
     // Pop block from scope chain.
-    REGS.fp()->popLexicalEnvironment(cx, REGS.pc);
+    REGS.fp()->popOffEnvironmentChain<LexicalEnvironmentObject>();
 }
 END_CASE(JSOP_POPLEXICALENV)
 
@@ -3779,14 +3788,20 @@ END_CASE(JSOP_DEBUGLEAVELEXICALENV)
 
 CASE(JSOP_FRESHENLEXICALENV)
 {
-    if (!REGS.fp()->freshenLexicalEnvironment(cx, REGS.pc))
+    if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
+        DebugEnvironments::onPopLexical(cx, REGS.fp(), REGS.pc);
+
+    if (!REGS.fp()->freshenLexicalEnvironment(cx))
         goto error;
 }
 END_CASE(JSOP_FRESHENLEXICALENV)
 
 CASE(JSOP_RECREATELEXICALENV)
 {
-    if (!REGS.fp()->recreateLexicalEnvironment(cx, REGS.pc))
+    if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
+        DebugEnvironments::onPopLexical(cx, REGS.fp(), REGS.pc);
+
+    if (!REGS.fp()->recreateLexicalEnvironment(cx))
         goto error;
 }
 END_CASE(JSOP_RECREATELEXICALENV)

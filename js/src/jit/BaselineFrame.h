@@ -127,10 +127,9 @@ class BaselineFrame
     }
 
     inline void pushOnEnvironmentChain(EnvironmentObject& env);
+    template <typename SpecificEnvironment>
     inline void popOffEnvironmentChain();
     inline void replaceInnermostEnvironment(EnvironmentObject& env);
-
-    inline void popWith(JSContext* cx);
 
     CalleeToken calleeToken() const {
         uint8_t* pointer = (uint8_t*)this + Size() + offsetOfCalleeToken();
@@ -259,14 +258,11 @@ class BaselineFrame
     }
 
     inline MOZ_MUST_USE bool pushLexicalEnvironment(JSContext* cx, Handle<LexicalScope*> scope);
-    inline void popLexicalEnvironment(JSContext* cx, jsbytecode* pc);
-    inline void popLexicalEnvironment(JSContext* cx, EnvironmentIter& ei);
-    inline MOZ_MUST_USE bool freshenLexicalEnvironment(JSContext* cx, jsbytecode* pc);
-    inline MOZ_MUST_USE bool recreateLexicalEnvironment(JSContext* cx, jsbytecode* pc);
+    inline MOZ_MUST_USE bool freshenLexicalEnvironment(JSContext* cx);
+    inline MOZ_MUST_USE bool recreateLexicalEnvironment(JSContext* cx);
 
     MOZ_MUST_USE bool initExtraFunctionEnvironmentObjects(JSContext* cx);
     MOZ_MUST_USE bool pushCallObject(JSContext* cx);
-    void popCallObject(JSContext* cx);
 
     void initArgsObjUnchecked(ArgumentsObject& argsobj) {
         flags_ |= HAS_ARGS_OBJ;

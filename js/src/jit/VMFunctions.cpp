@@ -991,9 +991,9 @@ PushLexicalEnv(JSContext* cx, BaselineFrame* frame, Handle<LexicalScope*> scope)
 }
 
 bool
-PopLexicalEnv(JSContext* cx, BaselineFrame* frame, jsbytecode* pc)
+PopLexicalEnv(JSContext* cx, BaselineFrame* frame)
 {
-    frame->popLexicalEnvironment(cx, pc);
+    frame->popOffEnvironmentChain<LexicalEnvironmentObject>();
     return true;
 }
 
@@ -1001,34 +1001,34 @@ bool
 DebugLeaveThenPopLexicalEnv(JSContext* cx, BaselineFrame* frame, jsbytecode* pc)
 {
     MOZ_ALWAYS_TRUE(DebugLeaveLexicalEnv(cx, frame, pc));
-    frame->popLexicalEnvironment(cx, pc);
+    frame->popOffEnvironmentChain<LexicalEnvironmentObject>();
     return true;
 }
 
 bool
-FreshenLexicalEnv(JSContext* cx, BaselineFrame* frame, jsbytecode* pc)
+FreshenLexicalEnv(JSContext* cx, BaselineFrame* frame)
 {
-    return frame->freshenLexicalEnvironment(cx, pc);
+    return frame->freshenLexicalEnvironment(cx);
 }
 
 bool
 DebugLeaveThenFreshenLexicalEnv(JSContext* cx, BaselineFrame* frame, jsbytecode* pc)
 {
     MOZ_ALWAYS_TRUE(DebugLeaveLexicalEnv(cx, frame, pc));
-    return frame->freshenLexicalEnvironment(cx, pc);
+    return frame->freshenLexicalEnvironment(cx);
 }
 
 bool
-RecreateLexicalEnv(JSContext* cx, BaselineFrame* frame, jsbytecode* pc)
+RecreateLexicalEnv(JSContext* cx, BaselineFrame* frame)
 {
-    return frame->recreateLexicalEnvironment(cx, pc);
+    return frame->recreateLexicalEnvironment(cx);
 }
 
 bool
 DebugLeaveThenRecreateLexicalEnv(JSContext* cx, BaselineFrame* frame, jsbytecode* pc)
 {
     MOZ_ALWAYS_TRUE(DebugLeaveLexicalEnv(cx, frame, pc));
-    return frame->recreateLexicalEnvironment(cx, pc);
+    return frame->recreateLexicalEnvironment(cx);
 }
 
 bool
@@ -1055,7 +1055,9 @@ EnterWith(JSContext* cx, BaselineFrame* frame, HandleValue val, Handle<WithScope
 bool
 LeaveWith(JSContext* cx, BaselineFrame* frame)
 {
-    frame->popWith(cx);
+    if (MOZ_UNLIKELY(frame->isDebuggee()))
+        DebugEnvironments::onPopWith(frame);
+    frame->popOffEnvironmentChain<WithEnvironmentObject>();
     return true;
 }
 
