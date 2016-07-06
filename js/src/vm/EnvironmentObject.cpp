@@ -2188,11 +2188,12 @@ DebugEnvironments::sweep(JSRuntime* rt)
     for (MissingEnvironmentMap::Enum e(missingEnvs); !e.empty(); e.popFront()) {
         if (IsAboutToBeFinalized(&e.front().value())) {
             /*
-             * Note that onPopCall and onPopBlock rely on missingEnvs to find
-             * environment objects that we synthesized for the debugger's sake, and
-             * clean up the synthetic environment objects' entries in liveEnvs. So
-             * if we remove an entry frcom missingEnvs here, we must also
-             * remove the corresponding liveEnvs entry.
+             * Note that onPopCallOrEval and onPopLexical rely on missingEnvs
+             * to find environment objects that we synthesized for the
+             * debugger's sake, and clean up the synthetic environment
+             * objects' entries in liveEnvs. So if we remove an entry frcom
+             * missingEnvs here, we must also remove the corresponding
+             * liveEnvs entry.
              *
              * Since the DebugEnvironmentProxy is the only thing using its environment
              * object, and the DSO is about to be finalized, you might assume
@@ -2444,7 +2445,7 @@ DebugEnvironments::takeFrameSnapshot(JSContext* cx, Handle<DebugEnvironmentProxy
 }
 
 /* static */ void
-DebugEnvironments::onPopCallObject(JSContext* cx, AbstractFramePtr frame)
+DebugEnvironments::onPopCallOrEval(JSContext* cx, AbstractFramePtr frame)
 {
     assertSameCompartment(cx, frame);
 

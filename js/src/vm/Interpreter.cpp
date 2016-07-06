@@ -998,7 +998,7 @@ PopEnvironment(JSContext* cx, EnvironmentIter& ei)
       case ScopeKind::Eval:
       case ScopeKind::StrictEval:
         if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
-            DebugEnvironments::onPopCallObject(cx, ei.initialFrame());
+            DebugEnvironments::onPopCallOrEval(cx, ei.initialFrame());
         if (ei.scope().hasEnvironment())
             ei.initialFrame().popOffEnvironmentChain<CallObject>();
         break;
