@@ -392,6 +392,10 @@ ParseContext::removeInnerFunctionBoxesForAnnexB(JSAtom* name)
 void
 ParseContext::finishInnerFunctionBoxesForAnnexB()
 {
+    // Strict mode doesn't have wack Annex B function semantics.
+    if (sc()->strict())
+        return;
+
     for (uint32_t i = 0; i < innerFunctionBoxesForAnnexB_.length(); i++) {
         if (FunctionBox* funbox = innerFunctionBoxesForAnnexB_[i])
             funbox->isAnnexB = true;
@@ -419,6 +423,8 @@ ParseContext::~ParseContext()
         MOZ_CRASH("Must have found an enclosing function box scope that allows super.property");
     }
 #endif
+
+    finishInnerFunctionBoxesForAnnexB();
 
     if (namedLambdaScope_)
         namedLambdaScope_->release(this);
@@ -1596,8 +1602,8 @@ template <>
 ParseNode*
 Parser<FullParseHandler>::globalBody(GlobalSharedContext* globalsc)
 {
-    ParseContext evalpc(this, globalsc, /* newDirectives = */ nullptr);
-    if (!evalpc.init())
+    ParseContext globalpc(this, globalsc, /* newDirectives = */ nullptr);
+    if (!globalpc.init())
         return nullptr;
 
     ParseNode* body = statements(YieldIsName);
@@ -1783,9 +1789,6 @@ template <>
 bool
 Parser<FullParseHandler>::finishFunction()
 {
-    if (!pc->sc()->strict())
-        pc->finishInnerFunctionBoxesForAnnexB();
-
     if (!pc->finishExtraFunctionScopes())
         return null();
 

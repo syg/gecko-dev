@@ -3656,6 +3656,13 @@ JSScript::innermostScope(jsbytecode* pc)
 {
     if (Scope* scope = lookupScope(pc))
         return scope;
+
+    // There is no scope note for the body scope. At PUSHCALLOBJ, the
+    // CallObject is not yet pushed, so we need to return the bodyScope's
+    // enclosing scope.
+    if (*pc == JSOP_PUSHCALLOBJ)
+        return bodyScope()->enclosing();
+
     return bodyScope();
 }
 

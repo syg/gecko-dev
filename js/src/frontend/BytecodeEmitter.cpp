@@ -1071,13 +1071,12 @@ BytecodeEmitter::EmitterScope::enterEval(BytecodeEmitter* bce, EvalSharedContext
     if (hasEnvironment()) {
         if (!bce->emit1(JSOP_PUSHCALLOBJ))
             return false;
-    }
-
-    // As an optimization, if the eval does not have its own var environment
-    // and is directly enclosed in a global scope, then all free name
-    // lookups are global.
-    if (!hasEnvironment() && scope(bce)->enclosing()->is<GlobalScope>())
+    } else if (scope(bce)->enclosing()->is<GlobalScope>()) {
+        // As an optimization, if the eval does not have its own var environment
+        // and is directly enclosed in a global scope, then all free name
+        // lookups are global.
         fallbackFreeNameLocation_ = Some(NameLocation::Global(BindingKind::Var));
+    }
 
     return true;
 }
