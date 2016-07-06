@@ -638,12 +638,19 @@ BytecodeEmitter::EmitterScope::searchInEnclosingScope(JSAtom* name, Scope* scope
             }
             break;
 
+          case ScopeKind::Eval:
+          case ScopeKind::StrictEval:
+            // As an optimization, if the eval doesn't have its var own
+            // environment and its immediate enclosing scope is a global
+            // scope, all accesses are global.
+            if (!hasEnv && si.scope()->enclosing()->is<GlobalScope>())
+                return NameLocation::Global(BindingKind::Var);
+            return NameLocation::Dynamic();
+
           case ScopeKind::Global:
             return NameLocation::Global(BindingKind::Var);
 
           case ScopeKind::With:
-          case ScopeKind::Eval:
-          case ScopeKind::StrictEval:
           case ScopeKind::NonSyntactic:
             return NameLocation::Dynamic();
         }
@@ -1064,6 +1071,12 @@ BytecodeEmitter::EmitterScope::enterEval(BytecodeEmitter* bce, EvalSharedContext
         if (!bce->emit1(JSOP_PUSHCALLOBJ))
             return false;
     }
+
+    // As an optimization, if the eval does not have its own var environment
+    // and is directly enclosed in a global scope, then all free name
+    // lookups are global.
+    if (!hasEnvironment() && scope(bce)->enclosing()->is<GlobalScope>())
+        fallbackFreeNameLocation_ = Some(NameLocation::Global(BindingKind::Var));
 
     return true;
 }
