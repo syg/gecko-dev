@@ -640,7 +640,7 @@ BytecodeEmitter::EmitterScope::searchInEnclosingScope(JSAtom* name, Scope* scope
 
           case ScopeKind::Eval:
           case ScopeKind::StrictEval:
-            // As an optimization, if the eval doesn't have its var own
+            // As an optimization, if the eval doesn't have its own var
             // environment and its immediate enclosing scope is a global
             // scope, all accesses are global.
             if (!hasEnv && si.scope()->enclosing()->is<GlobalScope>())
