@@ -607,22 +607,17 @@ class MOZ_STACK_CLASS AutoInitializeSourceObject
 struct AutoTimer
 {
     const char* name;
-    timespec start;
-
-    static long elapsedNs(timespec* start, struct timespec* end) {
-        return (end->tv_sec - start->tv_sec) * 1000000000 + (end->tv_nsec - start->tv_nsec);
-    }
+    mozilla::TimeStamp start;
 
     AutoTimer(const char* name)
       : name(name)
     {
-        clock_gettime(CLOCK_MONOTONIC, &start);
+        start = mozilla::TimeStamp::Now();
     }
 
     ~AutoTimer() {
-        timespec end;
-        clock_gettime(CLOCK_MONOTONIC, &end);
-        fprintf(stderr, "%s took %ld ns\n", name, elapsedNs(&start, &end));
+        int64_t elapsed = (mozilla::TimeStamp::Now() - start).ToMicroseconds() * 1000.0;
+        fprintf(stderr, "%s took %lld ns\n", name, elapsed);
     }
 };
 
