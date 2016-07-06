@@ -3773,25 +3773,46 @@ BytecodeEmitter::emitScript(ParseNode* body)
     TDZCheckCache tdzCache(this);
     EmitterScope emitterScope(this);
     if (sc->isGlobalContext()) {
+        switchToPrologue();
         if (!emitterScope.enterGlobal(this, sc->asGlobalContext()))
             return false;
+        switchToMain();
     } else if (sc->isEvalContext()) {
+        switchToPrologue();
         if (!emitterScope.enterEval(this, sc->asEvalContext()))
             return false;
-    } else if (sc->isModuleContext()) {
+        switchToMain();
+    } else {
+        MOZ_ASSERT(sc->isModuleContext());
         if (!emitterScope.enterModule(this, sc->asModuleContext()))
             return false;
     }
 
     setFunctionBodyEndPos(body->pn_pos);
 
-    if (body->isKind(PNK_STATEMENTLIST) && body->pn_xflags & PNX_FUNCDEFS) {
-        if (!emitHoistedFunctionsInList(body))
+    if (sc->isEvalContext() && !sc->strict() &&
+        body->isKind(PNK_LEXICALSCOPE) && !body->isEmptyScope())
+    {
+        // Sloppy eval scripts may need to emit DEFFUNs in the prologue. If there is
+        // an immediately enclosed lexical scope, we need to enter the lexical
+        // scope in the prologue for the DEFFUNs to pick up the right
+        // environment chain.
+        EmitterScope lexicalEmitterScope(this);
+
+        switchToPrologue();
+        if (!lexicalEmitterScope.enterLexical(this, ScopeKind::Lexical, body->scopeBindings()))
+            return false;
+        switchToMain();
+
+        if (!emitLexicalScopeBody(body->scopeBody()))
+            return false;
+
+        if (!lexicalEmitterScope.leave(this))
+            return false;
+    } else {
+        if (!emitTree(body))
             return false;
     }
-
-    if (!emitTree(body))
-        return false;
 
     if (!emit1(JSOP_RETRVAL))
         return false;
@@ -6355,10 +6376,12 @@ BytecodeEmitter::emitFunction(ParseNode* pn, bool needsProto)
         } else {
             MOZ_ASSERT(sc->isGlobalContext() || sc->isEvalContext());
             MOZ_ASSERT(pn->getOp() == JSOP_NOP);
+            switchToPrologue();
             if (!emitIndex32(JSOP_DEFFUN, index))
                 return false;
             if (!updateSourceCoordNotes(pn->pn_pos.begin))
                 return false;
+            switchToMain();
         }
     } else {
         // For functions nested within functions and blocks, make a lambda and
@@ -8120,12 +8143,21 @@ BytecodeEmitter::emitFunctionFormalParametersAndBody(ParseNode *pn)
     }
 
     // No defaults. Enter the function body scope and emit everything.
+    //
+    // One caveat is that Debugger considers ops in the prologue to be
+    // unreachable (i.e. cannot set a breakpoint on it). If there are no
+    // defaults, any unobservable environment ops (like pushing the call
+    // object, setting '.this', etc) need to go in the prologue, else it
+    // messes up breakpoint tests.
     EmitterScope emitterScope(this);
+
+    switchToPrologue();
     if (!emitterScope.enterFunctionBody(this, funbox))
         return false;
 
     if (!emitInitializeFunctionSpecialNames())
         return false;
+    switchToMain();
 
     if (!emitFunctionFormalParameters(pn))
         return false;

@@ -677,6 +677,11 @@ class MissingEnvironmentKey
         scope_(ei.maybeScope())
     { }
 
+    MissingEnvironmentKey(AbstractFramePtr frame, Scope* scope)
+      : frame_(frame),
+        scope_(scope)
+    { }
+
     AbstractFramePtr frame() const { return frame_; }
     Scope* scope() const { return scope_; }
 

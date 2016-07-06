@@ -2472,8 +2472,10 @@ DebugEnvironments::onPopCallObject(JSContext* cx, AbstractFramePtr frame)
         if (JSObject* obj = envs->proxiedEnvs.lookup(&callobj))
             debugEnv = &obj->as<DebugEnvironmentProxy>();
     } else {
-        EnvironmentIter ei(cx, frame, frame.script()->main());
-        if (MissingEnvironmentMap::Ptr p = envs->missingEnvs.lookup(MissingEnvironmentKey(ei))) {
+        Scope* bodyScope = frame.script()->bodyScope();
+        MOZ_ASSERT(bodyScope->is<FunctionScope>() || bodyScope->is<EvalScope>());
+        MissingEnvironmentKey key(frame, bodyScope);
+        if (MissingEnvironmentMap::Ptr p = envs->missingEnvs.lookup(key)) {
             debugEnv = p->value();
             envs->liveEnvs.remove(&debugEnv->environment().as<CallObject>());
             envs->missingEnvs.remove(p);
