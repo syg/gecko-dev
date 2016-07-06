@@ -500,6 +500,8 @@ FunctionBox::initStandaloneFunction(Scope* enclosingScope)
     JSFunction* fun = function();
     length = fun->nargs() - fun->hasRest();
     enclosingScope_ = enclosingScope;
+    allowNewTarget_ = true;
+    thisBinding_ = ThisBinding::Function;
 }
 
 void
