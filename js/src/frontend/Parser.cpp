@@ -530,6 +530,7 @@ FunctionBox::initWithEnclosingContext(SharedContext* enclosing, FunctionSyntaxKi
         allowNewTarget_ = enclosing->allowNewTarget();
         allowSuperProperty_ = enclosing->allowSuperProperty();
         allowSuperCall_ = enclosing->allowSuperCall();
+        needsThisTDZChecks_ = enclosing->needsThisTDZChecks();
         thisBinding_ = enclosing->thisBinding();
     }
 
