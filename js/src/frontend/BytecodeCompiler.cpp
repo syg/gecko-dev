@@ -622,7 +622,7 @@ struct AutoTimer
     ~AutoTimer() {
         timespec end;
         clock_gettime(CLOCK_MONOTONIC, &end);
-        fprintf(stdout, "%s took %ld ns\n", name, elapsedNs(&start, &end));
+        fprintf(stderr, "%s took %ld ns\n", name, elapsedNs(&start, &end));
     }
 };
 
