@@ -81,14 +81,21 @@ struct CGScopeNote : public ScopeNote
     // The end offset. Used to compute the length; may need adjusting first if
     // in the prologue.
     uint32_t end;
+
+    // Is the start offset in the prologue?
+    bool startInPrologue;
+
+    // Is the end offset in the prologue?
+    bool endInPrologue;
 };
 
 struct CGScopeNoteList {
     Vector<CGScopeNote> list;
     explicit CGScopeNoteList(ExclusiveContext* cx) : list(cx) {}
 
-    MOZ_MUST_USE bool append(uint32_t scopeIndex, uint32_t offset, uint32_t parent);
-    void recordEnd(uint32_t index, uint32_t offset);
+    MOZ_MUST_USE bool append(uint32_t scopeIndex, uint32_t offset, bool inPrologue,
+                             uint32_t parent);
+    void recordEnd(uint32_t index, uint32_t offset, bool inPrologue);
     size_t length() const { return list.length(); }
     void finish(ScopeNoteArray* array, uint32_t prologueLength);
 };
@@ -348,6 +355,7 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     ptrdiff_t prologueOffset() const { return prologue.code.end() - prologue.code.begin(); }
     void switchToMain() { current = &main; }
     void switchToPrologue() { current = &prologue; }
+    bool inPrologue() const { return current == &prologue; }
 
     SrcNotesVector& notes() const { return current->notes; }
     ptrdiff_t lastNoteOffset() const { return current->lastNoteOffset; }

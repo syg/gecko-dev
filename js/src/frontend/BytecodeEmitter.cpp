@@ -595,7 +595,7 @@ BytecodeEmitter::EmitterScope::appendScopeNote(BytecodeEmitter* bce)
                scope(bce)->kind() == ScopeKind::ParameterDefaults,
                "Scope notes are not needed for body-level scopes.");
     noteIndex_ = bce->scopeNoteList.length();
-    return bce->scopeNoteList.append(index(), bce->offset(),
+    return bce->scopeNoteList.append(index(), bce->offset(), bce->inPrologue(),
                                      enclosingInFrame() ? enclosingInFrame()->noteIndex()
                                                         : ScopeNote::NoScopeNoteIndex);
 }
@@ -1186,7 +1186,7 @@ BytecodeEmitter::EmitterScope::leave(BytecodeEmitter* bce, bool nonLocal)
         // Also note that ParameterDefaults scopes are an exception. Their
         // notes are not finished here but in emitFunctionFormalParametersAndBody.
         if (ScopeKindIsInBody(kind) && kind != ScopeKind::ParameterDefaults)
-            bce->scopeNoteList.recordEnd(noteIndex_, bce->offset());
+            bce->scopeNoteList.recordEnd(noteIndex_, bce->offset(), bce->inPrologue());
 
         // Release the name cache.
         bce->cx->frontendMapPool().release(&nameCache_);
@@ -1766,7 +1766,7 @@ class NonLocalExitControl {
 
     ~NonLocalExitControl() {
         for (uint32_t n = savedScopeNoteIndex_; n < bce_->scopeNoteList.length(); n++)
-            bce_->scopeNoteList.recordEnd(n, bce_->offset());
+            bce_->scopeNoteList.recordEnd(n, bce_->offset(), bce_->inPrologue());
         bce_->stackDepth = savedDepth_;
     }
 
@@ -1849,7 +1849,8 @@ NonLocalExitControl::prepareForNonLocalJump(BytecodeEmitter::NestableControl* ta
         uint32_t enclosingScopeIndex = ScopeNote::NoScopeIndex;
         if (es->enclosingInFrame())
             enclosingScopeIndex = es->enclosingInFrame()->index();
-        if (!bce_->scopeNoteList.append(enclosingScopeIndex, bce_->offset(), openScopeNoteIndex_))
+        if (!bce_->scopeNoteList.append(enclosingScopeIndex, bce_->offset(), bce_->inPrologue(),
+                                        openScopeNoteIndex_))
             return false;
         openScopeNoteIndex_ = bce_->scopeNoteList.length() - 1;
     }
@@ -8076,7 +8077,7 @@ BytecodeEmitter::emitFunctionFormalParametersAndBody(ParseNode *pn)
         // values before the body of the function, which is used for direct
         // eval (direct evals in parameter defaults always get their own var
         // environment) and disassembly.
-        scopeNoteList.recordEnd(defaultsEmitterScope.noteIndex(), offset());
+        scopeNoteList.recordEnd(defaultsEmitterScope.noteIndex(), offset(), inPrologue());
 
         {
             EmitterScope varEmitterScope(this);
@@ -9170,7 +9171,8 @@ CGTryNoteList::finish(TryNoteArray* array)
 }
 
 bool
-CGScopeNoteList::append(uint32_t scopeIndex, uint32_t offset, uint32_t parent)
+CGScopeNoteList::append(uint32_t scopeIndex, uint32_t offset, bool inPrologue,
+                        uint32_t parent)
 {
     CGScopeNote note;
     mozilla::PodZero(&note);
@@ -9178,17 +9180,19 @@ CGScopeNoteList::append(uint32_t scopeIndex, uint32_t offset, uint32_t parent)
     note.index = scopeIndex;
     note.start = offset;
     note.parent = parent;
+    note.startInPrologue = inPrologue;
 
     return list.append(note);
 }
 
 void
-CGScopeNoteList::recordEnd(uint32_t index, uint32_t offset)
+CGScopeNoteList::recordEnd(uint32_t index, uint32_t offset, bool inPrologue)
 {
     MOZ_ASSERT(index < length());
     MOZ_ASSERT(offset >= list[index].start);
     MOZ_ASSERT(list[index].length == 0);
     list[index].end = offset;
+    list[index].endInPrologue = inPrologue;
 }
 
 void
@@ -9197,8 +9201,10 @@ CGScopeNoteList::finish(ScopeNoteArray* array, uint32_t prologueLength)
     MOZ_ASSERT(length() == array->length);
 
     for (unsigned i = 0; i < length(); i++) {
-        list[i].start += prologueLength;
-        list[i].end += prologueLength;
+        if (!list[i].startInPrologue)
+            list[i].start += prologueLength;
+        if (!list[i].endInPrologue)
+            list[i].end += prologueLength;
         list[i].length = list[i].end - list[i].start;
         array->vector[i] = list[i];
     }
