@@ -2902,15 +2902,13 @@ js::GetThisValueForDebuggerMaybeOptimizedOut(JSContext* cx, AbstractFramePtr fra
 
         RootedScript script(cx, ei.scope().as<FunctionScope>().script());
 
-        // Figure out if we executed JSOP_FUNCTIONTHIS.
+        // Figure out if we executed JSOP_FUNCTIONTHIS and set it.
         bool executedInitThisOp = false;
         if (script->functionHasThisBinding()) {
-            for (jsbytecode* iter = script->code();
-                 iter < script->codeEnd();
-                 iter = GetNextPc(iter))
-            {
-                if (*iter == JSOP_FUNCTIONTHIS) {
-                    executedInitThisOp = pc > iter;
+            for (jsbytecode* it = script->code(); it < script->codeEnd(); it = GetNextPc(it)) {
+                if (*it == JSOP_FUNCTIONTHIS) {
+                    // The next op after JSOP_FUNCTIONTHIS always sets it.
+                    executedInitThisOp = pc > GetNextPc(it);
                     break;
                 }
             }
