@@ -424,6 +424,9 @@ ParseContext::~ParseContext()
     }
 #endif
 
+    // Any funboxes still in the list at the end of parsing means no early
+    // error would have occurred for declaring a binding in the nearest var
+    // scope. Mark them as needing extra assignments to this var binding.
     finishInnerFunctionBoxesForAnnexB();
 
     if (namedLambdaScope_)
