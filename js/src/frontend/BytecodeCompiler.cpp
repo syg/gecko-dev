@@ -422,7 +422,8 @@ BytecodeCompiler::compileGlobalScript(ScopeKind scopeKind)
 JSScript*
 BytecodeCompiler::compileEvalScript(HandleObject environment, HandleScope enclosingScope)
 {
-    EvalSharedContext evalsc(cx, enclosingScope, directives, options.extraWarningsOption);
+    EvalSharedContext evalsc(cx, environment, enclosingScope,
+                             directives, options.extraWarningsOption);
     return compileScript(environment, &evalsc);
 }
 

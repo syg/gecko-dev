@@ -2894,21 +2894,32 @@ js::GetThisValueForDebuggerMaybeOptimizedOut(JSContext* cx, AbstractFramePtr fra
             return true;
         }
 
-        if (ei.scope().kind() != ScopeKind::Function)
-            continue;
-
-        RootedFunction callee(cx, &ei.environment().as<CallObject>().callee());
-        if (!callee->hasLexicalThis())
-            continue;
-
-        RootedScript script(cx, callee->nonLazyScript());
-
-        if (ei.withinInitialFrame() &&
-            (pc < script->main() || !script->functionHasThisBinding()))
+        if (!ei.scope().is<FunctionScope>() ||
+            ei.scope().as<FunctionScope>().canonicalFunction()->hasLexicalThis())
         {
-            // Either we're in the script prologue and we may still have to
-            // initialize the this-binding (JSOP_FUNCTIONTHIS), or the script
-            // does not have a this-binding (because it doesn't use |this|).
+            continue;
+        }
+
+        RootedScript script(cx, ei.scope().as<FunctionScope>().script());
+
+        // Figure out if we executed JSOP_FUNCTIONTHIS.
+        bool executedInitThisOp = false;
+        if (script->functionHasThisBinding()) {
+            for (jsbytecode* iter = script->code();
+                 iter < script->codeEnd();
+                 iter = GetNextPc(iter))
+            {
+                if (*iter == JSOP_FUNCTIONTHIS) {
+                    executedInitThisOp = pc > iter;
+                    break;
+                }
+            }
+        }
+
+        if (ei.withinInitialFrame() && !executedInitThisOp) {
+            // Either we're yet to initialize the this-binding
+            // (JSOP_FUNCTIONTHIS), or the script does not have a this-binding
+            // (because it doesn't use |this|).
 
             // If our this-argument is an object, or we're in strict mode,
             // the this-binding is always the same as our this-argument.
@@ -2917,25 +2928,14 @@ js::GetThisValueForDebuggerMaybeOptimizedOut(JSContext* cx, AbstractFramePtr fra
                 return true;
             }
 
-            // Figure out if we already executed JSOP_FUNCTIONTHIS.
-            bool executedInitThisOp = false;
-            if (script->functionHasThisBinding()) {
-                jsbytecode* initThisPc = script->code();
-                while (*initThisPc != JSOP_FUNCTIONTHIS && initThisPc < script->main())
-                    initThisPc = GetNextPc(initThisPc);
-                executedInitThisOp = (pc > initThisPc);
-            }
-
-            if (!executedInitThisOp) {
-                // We didn't initialize the this-binding yet. Determine the
-                // correct |this| value for this frame (box primitives if not
-                // in strict mode), and assign it to the this-argument slot so
-                // JSOP_FUNCTIONTHIS will use it and not box a second time.
-                if (!GetFunctionThis(cx, frame, res))
-                    return false;
-                frame.thisArgument() = res;
-                return true;
-            }
+            // We didn't initialize the this-binding yet. Determine the
+            // correct |this| value for this frame (box primitives if not
+            // in strict mode), and assign it to the this-argument slot so
+            // JSOP_FUNCTIONTHIS will use it and not box a second time.
+            if (!GetFunctionThis(cx, frame, res))
+                return false;
+            frame.thisArgument() = res;
+            return true;
         }
 
         if (!script->functionHasThisBinding()) {

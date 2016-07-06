@@ -23,7 +23,6 @@
 #include "jsatom.h"
 #include "jscntxt.h"
 #include "jsfun.h"
-#include "jsobj.h"
 #include "jsopcode.h"
 #include "jsscript.h"
 #include "jstypes.h"
@@ -39,6 +38,7 @@
 #include "jsscriptinlines.h"
 
 #include "frontend/ParseNode-inl.h"
+#include "vm/EnvironmentObject-inl.h"
 
 using namespace js;
 using namespace js::gc;
@@ -277,6 +277,36 @@ SharedContext::computeInWith(Scope* scope)
         if (si.kind() == ScopeKind::With) {
             inWith_ = true;
             break;
+        }
+    }
+}
+
+EvalSharedContext::EvalSharedContext(ExclusiveContext* cx, JSObject* enclosingEnv,
+                                     Scope* enclosingScope, Directives directives,
+                                     bool extraWarnings)
+  : SharedContext(cx, Kind::Eval, directives, extraWarnings),
+    enclosingScope_(cx, enclosingScope),
+    functionBindingEnd(0),
+    bindings(nullptr)
+{
+    computeAllowSyntax(enclosingScope);
+    computeInWith(enclosingScope);
+    computeThisBinding(enclosingScope);
+
+    // Like all things Debugger, Debugger.Frame.eval needs special
+    // handling. Since the environment chain of such evals are non-syntactic
+    // (DebuggerEnvironmentProxy is not an EnvironmentObject), computing the
+    // this binding with respect to enclosingScope is incorrect if the
+    // Debugger.Frame is a function frame. Recompute the this binding if we
+    // are such an eval.
+    if (enclosingEnv && enclosingEnv->is<DebugEnvironmentProxy>()) {
+        JSObject* env = &enclosingEnv->as<DebugEnvironmentProxy>().environment();
+        while (env) {
+            if (env->is<CallObject>() && !env->as<CallObject>().isForEval()) {
+                computeThisBinding(env->as<CallObject>().callee().nonLazyScript()->bodyScope());
+                break;
+            }
+            env = env->enclosingEnvironment();
         }
     }
 }

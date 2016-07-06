@@ -453,17 +453,8 @@ class MOZ_STACK_CLASS EvalSharedContext : public SharedContext
 
     EvalScope::BindingData* bindings;
 
-    EvalSharedContext(ExclusiveContext* cx, Scope* enclosingScope, Directives directives,
-                      bool extraWarnings)
-      : SharedContext(cx, Kind::Eval, directives, extraWarnings),
-        enclosingScope_(cx, enclosingScope),
-        functionBindingEnd(0),
-        bindings(nullptr)
-    {
-        computeAllowSyntax(enclosingScope);
-        computeInWith(enclosingScope);
-        computeThisBinding(enclosingScope);
-    }
+    EvalSharedContext(ExclusiveContext* cx, JSObject* enclosingEnv, Scope* enclosingScope,
+                      Directives directives, bool extraWarnings);
 
     Scope* compilationEnclosingScope() const override {
         return enclosingScope_;
