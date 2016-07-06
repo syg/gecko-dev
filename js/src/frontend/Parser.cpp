@@ -1265,11 +1265,11 @@ Parser<FullParseHandler>::newEvalScopeData(ParseContext::Scope& scope,
     Vector<BindingName> funs(context);
     Vector<BindingName> vars(context);
 
-    bool closeOverAllBindings = pc->sc()->closeOverAllBindings();
     for (BindingIter bi = scope.bindings(pc); bi; bi++) {
-        // Eval scopes only contain 'var' bindings.
+        // Eval scopes only contain 'var' bindings. Make all bindings aliased
+        // for now.
         MOZ_ASSERT(bi.kind() == BindingKind::Var);
-        BindingName binding(bi.name(), closeOverAllBindings || bi.closedOver());
+        BindingName binding(bi.name(), true);
         if (bi.declarationKind() == DeclarationKind::BodyLevelFunction) {
             if (!funs.append(binding))
                 return Nothing();
@@ -1280,7 +1280,7 @@ Parser<FullParseHandler>::newEvalScopeData(ParseContext::Scope& scope,
     }
 
     EvalScope::BindingData* bindings = nullptr;
-    uint32_t numBindings = vars.length();
+    uint32_t numBindings = funs.length() + vars.length();
 
     if (numBindings > 0) {
         bindings = NewEmptyBindingData<EvalScope>(context, alloc, numBindings);

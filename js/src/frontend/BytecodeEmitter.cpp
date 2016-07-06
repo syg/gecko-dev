@@ -916,26 +916,26 @@ BytecodeEmitter::EmitterScope::enterFunctionBody(BytecodeEmitter* bce, FunctionB
     return checkEnvironmentChainLength(bce);
 }
 
-class PrologueBindingIter : public BindingIter
+class DynamicBindingIter : public BindingIter
 {
     uint32_t functionEnd_;
 
   public:
-    PrologueBindingIter(GlobalScope::BindingData& data, uint32_t functionEnd)
+    DynamicBindingIter(GlobalScope::BindingData& data, uint32_t functionEnd)
       : BindingIter(data),
         functionEnd_(functionEnd)
     {
         MOZ_ASSERT(functionEnd_ >= varStart_ && functionEnd_ <= letStart_);
     }
 
-    PrologueBindingIter(EvalScope::BindingData& data, uint32_t functionEnd, bool strict)
+    DynamicBindingIter(EvalScope::BindingData& data, uint32_t functionEnd, bool strict)
       : BindingIter(data, strict),
         functionEnd_(functionEnd)
     {
         MOZ_ASSERT(functionEnd_ >= varStart_ && functionEnd_ <= letStart_);
     }
 
-    JSOp prologueOp() const {
+    JSOp bindingOp() const {
         switch (kind()) {
           case BindingKind::Var:
             return JSOP_DEFVAR;
@@ -981,9 +981,8 @@ BytecodeEmitter::EmitterScope::enterGlobal(BytecodeEmitter* bce, GlobalSharedCon
     }
 
     // Resolve binding names and emit DEF{VAR,LET,CONST} prologue ops.
-    bce->switchToPrologue();
     if (GlobalScope::BindingData* bindings = globalsc->bindings) {
-        for (PrologueBindingIter bi(*bindings, globalsc->functionBindingEnd); bi; bi++) {
+        for (DynamicBindingIter bi(*bindings, globalsc->functionBindingEnd); bi; bi++) {
             NameLocation loc = NameLocation::fromBinding(bi.kind(), bi.location());
             JSAtom* name = bi.name();
             if (!putNameInCache(bce, name, loc))
@@ -991,17 +990,16 @@ BytecodeEmitter::EmitterScope::enterGlobal(BytecodeEmitter* bce, GlobalSharedCon
 
             // Define the name in the prologue. Do not emit DEFVAR for
             // functions that we'll emit DEFFUN for.
-            if (!bi.isBodyLevelFunction()) {
-                uint32_t atomIndex;
-                if (!bce->makeAtomIndex(name, &atomIndex))
-                    return false;
-                if (!bce->emitIndexOp(bi.prologueOp(), atomIndex))
-                    return false;
-            }
+            if (bi.isBodyLevelFunction())
+                continue;
 
+            uint32_t atomIndex;
+            if (!bce->makeAtomIndex(name, &atomIndex))
+                return false;
+            if (!bce->emitIndexOp(bi.bindingOp(), atomIndex))
+                return false;
         }
     }
-    bce->switchToMain();
 
     // Note that to save space, we don't add free names to the cache for
     // global scopes. They are assumed to be global vars in the syntactic
@@ -1036,9 +1034,8 @@ BytecodeEmitter::EmitterScope::enterEval(BytecodeEmitter* bce, EvalSharedContext
         // the frame. For now, handle everything dynamically.
 
         if (!evalsc->strict()) {
-            bce->switchToPrologue();
-            for (PrologueBindingIter bi(*bindings, evalsc->functionBindingEnd, false); bi; bi++) {
-                MOZ_ASSERT(bi.prologueOp() == JSOP_DEFVAR);
+            for (DynamicBindingIter bi(*bindings, evalsc->functionBindingEnd, false); bi; bi++) {
+                MOZ_ASSERT(bi.bindingOp() == JSOP_DEFVAR);
 
                 if (bi.isBodyLevelFunction())
                     continue;
@@ -1049,7 +1046,6 @@ BytecodeEmitter::EmitterScope::enterEval(BytecodeEmitter* bce, EvalSharedContext
                 if (!bce->emitIndexOp(JSOP_DEFVAR, atomIndex))
                     return false;
             }
-            bce->switchToMain();
         }
     }
 
@@ -1064,12 +1060,9 @@ BytecodeEmitter::EmitterScope::enterEval(BytecodeEmitter* bce, EvalSharedContext
         return false;
 
     if (hasEnvironment()) {
-        // Unlike function scripts, eval emits PUSHCALLOBJ in the prologue
-        // because of presence of DEFFUNs.
-        bce->switchToPrologue();
+        MOZ_ASSERT(evalsc->strict());
         if (!bce->emit1(JSOP_PUSHCALLOBJ))
             return false;
-        bce->switchToMain();
     }
 
     return true;
@@ -3788,6 +3781,11 @@ BytecodeEmitter::emitScript(ParseNode* body)
 
     setFunctionBodyEndPos(body->pn_pos);
 
+    if (body->isKind(PNK_STATEMENTLIST) && body->pn_xflags & PNX_FUNCDEFS) {
+        if (!emitHoistedFunctionsInList(body))
+            return false;
+    }
+
     if (!emitTree(body))
         return false;
 
@@ -6330,11 +6328,11 @@ BytecodeEmitter::emitFunction(ParseNode* pn, bool needsProto)
     MOZ_ASSERT(!needsProto);
 
     bool topLevelFunction;
-    if (sc->isFunctionBox()) {
+    if (sc->isFunctionBox() || (sc->isEvalContext() && sc->strict())) {
         // No nested functions inside other functions are top-level.
         topLevelFunction = false;
     } else {
-        // In eval scripts, top-level functions in eval scripts are accessed
+        // In sloppy eval scripts, top-level functions in are accessed
         // dynamically. In global and module scripts, top-level functions are
         // those bound in the var scope.
         NameLocation loc = lookupName(name);
@@ -6351,18 +6349,12 @@ BytecodeEmitter::emitFunction(ParseNode* pn, bool needsProto)
             if (!module->noteFunctionDeclaration(cx, name, fun))
                 return false;
         } else {
-            // For global and eval scripts we put the bytecode for top-level
-            // functions in the prologue to predefine their names in the variable
-            // object before the main code is executed.
-
             MOZ_ASSERT(sc->isGlobalContext() || sc->isEvalContext());
             MOZ_ASSERT(pn->getOp() == JSOP_NOP);
-            switchToPrologue();
             if (!emitIndex32(JSOP_DEFFUN, index))
                 return false;
             if (!updateSourceCoordNotes(pn->pn_pos.begin))
                 return false;
-            switchToMain();
         }
     } else {
         // For functions nested within functions and blocks, make a lambda and
