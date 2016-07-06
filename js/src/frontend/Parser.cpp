@@ -2663,6 +2663,9 @@ Parser<FullParseHandler>::skipLazyInnerFunction(ParseNode* pn, bool tryAnnexB)
     if (!pc->innermostScope()->addClosedOverNames(pc, LazyScriptUsedNameIter(lazy)))
         return false;
 
+    if (lazy->needsHomeObject())
+        funbox->setNeedsHomeObject();
+
     PropagateTransitiveParseFlags(lazy, pc->sc());
 
     // The position passed to tokenStream.advance() is an offset of the sort
