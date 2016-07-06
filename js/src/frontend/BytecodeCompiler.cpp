@@ -617,7 +617,7 @@ struct AutoTimer
 
     ~AutoTimer() {
         int64_t elapsed = (mozilla::TimeStamp::Now() - start).ToMicroseconds() * 1000.0;
-        fprintf(stdout, "%s took %lld ns\n", name, elapsed);
+        fprintf(stderr, "%s took %lld ns\n", name, elapsed);
     }
 };
 
