@@ -1076,7 +1076,6 @@ static bool
 ForcedReturn(JSContext* cx, EnvironmentIter& ei, InterpreterRegs& regs, bool frameOk = true)
 {
     bool ok = Debugger::onLeaveFrame(cx, regs.fp(), regs.pc, frameOk);
-    UnwindAllEnvironmentsInFrame(cx, ei);
     // Point the frame to the end of the script, regardless of error. The
     // caller must jump to the correct continuation depending on 'ok'.
     regs.setToEndOfScript();
