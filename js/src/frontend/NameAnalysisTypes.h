@@ -13,9 +13,9 @@
 
 namespace js {
 
-// An "environment coordinate" describes how to get from head of the scope
-// chain to a given lexically-enclosing variable. An environment coordinate
-// has two dimensions:
+// An "environment coordinate" describes how to get from head of the
+// environment chain to a given lexically-enclosing variable. An environment
+// coordinate has two dimensions:
 //  - hops: the number of environment objects on the scope chain to skip
 //  - slot: the slot on the environment object holding the variable's value
 class EnvironmentCoordinate
@@ -173,7 +173,7 @@ class NameLocation
         // In a named lambda, the name is the callee itself.
         NamedLambdaCallee,
 
-        // The name is a simple formal parameter name and can be retrieved
+        // The name is a positional formal parameter name and can be retrieved
         // directly from the stack using slot_.
         ArgumentSlot,
 
