@@ -1503,6 +1503,21 @@ class DebugEnvironmentProxyHandler : public BaseProxyHandler
         return env.is<CallObject>() && !env.as<CallObject>().isForEval();
     }
 
+    static bool isNonExtensibleLexicalEnvironment(const JSObject& env)
+    {
+        return env.is<LexicalEnvironmentObject>() &&
+               !env.as<LexicalEnvironmentObject>().isExtensible();
+    }
+
+    static Scope* getEnvironmentScope(const JSObject& env)
+    {
+        if (isFunctionEnvironment(env))
+            return env.as<CallObject>().callee().nonLazyScript()->bodyScope();
+        if (isNonExtensibleLexicalEnvironment(env))
+            return &env.as<LexicalEnvironmentObject>().scope();
+        return nullptr;
+    }
+
     /*
      * In theory, every function scope contains an 'arguments' bindings.
      * However, the engine only adds a binding if 'arguments' is used in the
@@ -1982,12 +1997,11 @@ class DebugEnvironmentProxyHandler : public BaseProxyHandler
         }
 
         /*
-         * Function scopes are optimized to not contain unaliased variables so
-         * they must be manually appended here.
+         * Environments with Scopes are optimized to not contain unaliased
+         * variables so they must be manually appended here.
          */
-        if (isFunctionEnvironment(*env)) {
-            RootedScript script(cx, env->as<CallObject>().callee().nonLazyScript());
-            for (BindingIter bi(script); bi; bi++) {
+        if (Scope* scope = getEnvironmentScope(*env)) {
+            for (Rooted<BindingIter> bi(cx, BindingIter(scope)); bi; bi++) {
                 if (!bi.closedOver() && !props.append(NameToId(bi.name()->asPropertyName())))
                     return false;
             }
@@ -2018,12 +2032,13 @@ class DebugEnvironmentProxyHandler : public BaseProxyHandler
         if (!JS_HasPropertyById(cx, env, id, &found))
             return false;
 
-        if (!found && isFunctionEnvironment(*env)) {
-            RootedScript script(cx, env->as<CallObject>().callee().nonLazyScript());
-            for (BindingIter bi(script); bi; bi++) {
-                if (!bi.closedOver() && NameToId(bi.name()->asPropertyName()) == id) {
-                    found = true;
-                    break;
+        if (!found) {
+            if (Scope* scope = getEnvironmentScope(*env)) {
+                for (BindingIter bi(scope); bi; bi++) {
+                    if (!bi.closedOver() && NameToId(bi.name()->asPropertyName()) == id) {
+                        found = true;
+                        break;
+                    }
                 }
             }
         }
@@ -2085,7 +2100,6 @@ DebugEnvironmentProxy::enclosingEnvironment() const
 ArrayObject*
 DebugEnvironmentProxy::maybeSnapshot() const
 {
-    MOZ_ASSERT(!environment().as<CallObject>().isForEval());
     JSObject* obj = extra(SNAPSHOT_EXTRA).toObjectOrNull();
     return obj ? &obj->as<ArrayObject>() : nullptr;
 }
