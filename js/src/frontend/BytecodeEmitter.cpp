@@ -1052,6 +1052,8 @@ BytecodeEmitter::EmitterScope::enterEval(BytecodeEmitter* bce, EvalSharedContext
     // For simplicity, treat all free name lookups in eval scripts as dynamic.
     fallbackFreeNameLocation_ = Some(NameLocation::Dynamic());
 
+    // Create the `var` scope. Note that there is also a lexical scope, created
+    // separately in emitScript().
     auto createScope = [evalsc](ExclusiveContext* cx, HandleScope enclosing) {
         ScopeKind scopeKind = evalsc->strict() ? ScopeKind::StrictEval : ScopeKind::Eval;
         return EvalScope::create(cx, scopeKind, evalsc->bindings, enclosing);
@@ -1060,7 +1062,6 @@ BytecodeEmitter::EmitterScope::enterEval(BytecodeEmitter* bce, EvalSharedContext
         return false;
 
     if (hasEnvironment()) {
-        MOZ_ASSERT(evalsc->strict());
         if (!bce->emit1(JSOP_PUSHCALLOBJ))
             return false;
     }

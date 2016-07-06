@@ -608,12 +608,15 @@ class WithScope : public Scope
 //
 // Scope of an eval. Holds var bindings. There are 2 kinds of EvalScopes.
 //
-// Eval
-//   A sloppy eval. Never has its own environment. Its var bindings are bound
-//   on the nearest enclosing var environment at the time of eval.
-//
-// StrictEval
+// ScopeKind::StrictEval
 //   A strict eval. Corresponds to a CallObject, where its var bindings lives.
+//
+// ScopeKind::Eval
+//   A sloppy eval. If this is a direct `eval()` call inside a parameter
+//   default value expression, then this is like a StrictEval scope (per
+//   spec). Anywhere else, this is an empty scope, used only in the frontend,
+//   to detect redeclaration errors. It has no Environment. Any `var`s declared
+//   in the eval code are bound on the nearest enclosing var environment.
 //
 class EvalScope : public Scope
 {
