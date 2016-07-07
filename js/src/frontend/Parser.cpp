@@ -6188,12 +6188,12 @@ Parser<FullParseHandler>::classDefinition(YieldHandling yieldHandling,
         classScope.reset();
         classStmt.reset();
 
-        // The outer name is mutable.
-        if (!noteDeclaredName(name, DeclarationKind::Let))
-            return null();
-
         ParseNode* outerName = null();
         if (classContext == ClassStatement) {
+            // The outer name is mutable.
+            if (!noteDeclaredName(name, DeclarationKind::Let))
+                return null();
+
             outerName = newName(name, namePos);
             if (!outerName)
                 return null();
