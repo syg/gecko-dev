@@ -72,12 +72,14 @@ enum class DeclarationKind : uint8_t
     PositionalFormalParameter,
     FormalParameter,
     Var,
+    ForOfVar,
     Let,
     Const,
     Import,
     BodyLevelFunction,
     LexicalFunction,
     VarForAnnexB,
+    SimpleCatchParameter,
     CatchParameter
 };
 
@@ -92,10 +94,12 @@ DeclarationKindToBindingKind(DeclarationKind kind)
       case DeclarationKind::Var:
       case DeclarationKind::BodyLevelFunction:
       case DeclarationKind::VarForAnnexB:
+      case DeclarationKind::ForOfVar:
         return BindingKind::Var;
 
       case DeclarationKind::Let:
       case DeclarationKind::LexicalFunction:
+      case DeclarationKind::SimpleCatchParameter:
       case DeclarationKind::CatchParameter:
         return BindingKind::Let;
 

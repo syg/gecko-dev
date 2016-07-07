@@ -106,6 +106,9 @@ DeclarationKindString(DeclarationKind kind)
         return "function";
       case DeclarationKind::VarForAnnexB:
         return "annex b var";
+      case DeclarationKind::ForOfVar:
+        return "var in for-of";
+      case DeclarationKind::SimpleCatchParameter:
       case DeclarationKind::CatchParameter:
         return "catch parameter";
     }
@@ -196,6 +199,14 @@ ParseContext::Scope::removeVarForAnnexB(ParseContext* pc, JSAtom* name)
     // Annex B semantics no longer applies to any functions with this name, as
     // an early error would have occurred.
     pc->removeInnerFunctionBoxesForAnnexB(name);
+}
+
+void
+ParseContext::Scope::removeSimpleCatchParameter(JSAtom* name)
+{
+    DeclaredNamePtr p = declared().lookup(name);
+    MOZ_ASSERT(p && p->value()->kind() == DeclarationKind::SimpleCatchParameter);
+    declared().remove(p);
 }
 
 bool
@@ -928,7 +939,8 @@ DeclarationKindIsVar(DeclarationKind kind)
 {
     return kind == DeclarationKind::Var ||
            kind == DeclarationKind::BodyLevelFunction ||
-           kind == DeclarationKind::VarForAnnexB;
+           kind == DeclarationKind::VarForAnnexB ||
+           kind == DeclarationKind::ForOfVar;
 }
 
 template <typename ParseHandler>
@@ -956,16 +968,24 @@ Parser<ParseHandler>::tryDeclareVar(HandlePropertyName name, DeclarationKind kin
     {
         AddDeclaredNamePtr p = scope->lookupDeclaredNameForAdd(name);
         if (p) {
-            if (p->value()->kind() == DeclarationKind::PositionalFormalParameter) {
+            DeclarationKind declaredKind = p->value()->kind();
+            if (declaredKind == DeclarationKind::PositionalFormalParameter) {
                 // In sloppy mode, positional formal parameters may be
                 // redeclared.
                 if (pc->sc()->strict()) {
-                    *redeclaredKind = Some(p->value()->kind());
+                    *redeclaredKind = Some(declaredKind);
                     return true;
                 }
-            } else if (!DeclarationKindIsVar(p->value()->kind())) {
-                *redeclaredKind = Some(p->value()->kind());
-                return true;
+            } else if (!DeclarationKindIsVar(declaredKind)) {
+                // Annex B.3.5 allows redeclaring simple (non-destructured)
+                // catch parameters with var declarations, except when it
+                // appears in a for-of.
+                if (declaredKind != DeclarationKind::SimpleCatchParameter ||
+                    kind == DeclarationKind::ForOfVar)
+                {
+                    *redeclaredKind = Some(declaredKind);
+                    return true;
+                }
             }
         } else {
             if (!scope->addDeclaredName(pc, p, name, kind))
@@ -1010,7 +1030,8 @@ Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind 
 
     switch (kind) {
       case DeclarationKind::Var:
-      case DeclarationKind::BodyLevelFunction: {
+      case DeclarationKind::BodyLevelFunction:
+      case DeclarationKind::ForOfVar: {
         Maybe<DeclarationKind> redeclaredKind;
         if (!tryDeclareVar(name, kind, &redeclaredKind))
             return false;
@@ -1078,6 +1099,7 @@ Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind 
 
         MOZ_FALLTHROUGH;
 
+      case DeclarationKind::SimpleCatchParameter:
       case DeclarationKind::CatchParameter: {
         // It is an early error if there is another declaration with the same name
         // in the same scope.
@@ -1107,7 +1129,7 @@ Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind 
         break;
 
       case DeclarationKind::VarForAnnexB:
-        MOZ_CRASH("Synthesized Annex B vars should go through tryDeclareVar");
+        MOZ_CRASH("Synthesized Annex B vars should go through tryDeclareVarForAnnexB");
         break;
     }
 
@@ -3840,7 +3862,7 @@ Parser<ParseHandler>::declarationPattern(Node decl, DeclarationKind declKind, To
 
     if (initialDeclaration && forHeadKind) {
         bool isForIn, isForOf;
-        if (!matchInOrOf(&isForIn, &isForOf))
+        if (!matchInOrOf(&isForIn, &isForOf, &declKind))
             return null();
 
         if (isForIn) {
@@ -3912,7 +3934,7 @@ Parser<ParseHandler>::initializerInNameDeclaration(Node decl, Node binding,
     if (forHeadKind) {
         if (initialDeclaration) {
             bool isForIn, isForOf;
-            if (!matchInOrOf(&isForIn, &isForOf))
+            if (!matchInOrOf(&isForIn, &isForOf, &declKind))
                 return false;
 
             // An initialized declaration can't appear in a for-of:
@@ -3984,9 +4006,6 @@ Parser<ParseHandler>::declarationName(Node decl, DeclarationKind declKind, Token
     if (!binding)
         return null();
 
-    if (!noteDeclaredName(name, declKind, binding))
-        return null();
-
     // The '=' context after a variable name in a declaration is an opportunity
     // for ASI, and thus for the next token to start an ExpressionStatement:
     //
@@ -4009,7 +4028,7 @@ Parser<ParseHandler>::declarationName(Node decl, DeclarationKind declKind, Token
 
         if (initialDeclaration && forHeadKind) {
             bool isForIn, isForOf;
-            if (!matchInOrOf(&isForIn, &isForOf))
+            if (!matchInOrOf(&isForIn, &isForOf, &declKind))
                 return null();
 
             if (isForIn)
@@ -4033,6 +4052,11 @@ Parser<ParseHandler>::declarationName(Node decl, DeclarationKind declKind, Token
             }
         }
     }
+
+    // Note the declared name after knowing whether or not we are in a for-of
+    // loop, due to special early error semantics in Annex B.3.5.
+    if (!noteDeclaredName(name, declKind, binding))
+        return null();
 
     return binding;
 }
@@ -4788,7 +4812,7 @@ Parser<ParseHandler>::whileStatement(YieldHandling yieldHandling)
 
 template <typename ParseHandler>
 bool
-Parser<ParseHandler>::matchInOrOf(bool* isForInp, bool* isForOfp)
+Parser<ParseHandler>::matchInOrOf(bool* isForInp, bool* isForOfp, DeclarationKind* declKind)
 {
     TokenKind tt;
     if (!tokenStream.getToken(&tt))
@@ -4799,6 +4823,10 @@ Parser<ParseHandler>::matchInOrOf(bool* isForInp, bool* isForOfp)
     if (!*isForInp && !*isForOfp) {
         tokenStream.ungetToken();
     } else {
+        // Annex B.3.5 has different early errors for vars in for-of loops.
+        if (*isForOfp && declKind && *declKind == DeclarationKind::Var)
+            *declKind = DeclarationKind::ForOfVar;
+
         if (tt == TOK_NAME && !checkUnescapedName())
             return false;
     }
@@ -5732,6 +5760,8 @@ Parser<ParseHandler>::tryStatement(YieldHandling yieldHandling)
              */
             MUST_MATCH_TOKEN(TOK_LP, JSMSG_PAREN_BEFORE_CATCH);
 
+            RootedPropertyName simpleCatchParam(context);
+
             if (!tokenStream.getToken(&tt))
                 return null();
             Node catchName;
@@ -5755,15 +5785,16 @@ Parser<ParseHandler>::tryStatement(YieldHandling yieldHandling)
                     return null();
                 MOZ_FALLTHROUGH;
               case TOK_NAME:
-              {
-                RootedPropertyName label(context, tokenStream.currentName());
-                catchName = newName(label);
+                simpleCatchParam = tokenStream.currentName();
+                catchName = newName(simpleCatchParam);
                 if (!catchName)
                     return null();
-                if (!noteDeclaredName(label, DeclarationKind::CatchParameter, catchName))
+                if (!noteDeclaredName(simpleCatchParam, DeclarationKind::SimpleCatchParameter,
+                                      catchName))
+                {
                     return null();
+                }
                 break;
-              }
 
               default:
                 report(ParseError, false, null(), JSMSG_CATCH_IDENTIFIER);
@@ -5789,7 +5820,8 @@ Parser<ParseHandler>::tryStatement(YieldHandling yieldHandling)
             MUST_MATCH_TOKEN(TOK_RP, JSMSG_PAREN_AFTER_CATCH);
 
             MUST_MATCH_TOKEN(TOK_LC, JSMSG_CURLY_BEFORE_CATCH);
-            Node catchBody = blockStatement(yieldHandling, JSMSG_CURLY_AFTER_CATCH);
+
+            Node catchBody = catchBlockStatement(yieldHandling, simpleCatchParam);
             if (!catchBody)
                 return null();
 
@@ -5838,6 +5870,48 @@ Parser<ParseHandler>::tryStatement(YieldHandling yieldHandling)
     }
 
     return handler.newTryStatement(begin, innerBlock, catchList, finallyBlock);
+}
+
+template <typename ParseHandler>
+typename ParseHandler::Node
+Parser<ParseHandler>::catchBlockStatement(YieldHandling yieldHandling,
+                                          HandlePropertyName simpleCatchParam)
+{
+    ParseContext::Statement stmt(pc, StatementKind::Block);
+
+    // Annex B.3.5 requires that vars be allowed to redeclare a simple
+    // (non-destructured) catch parameter (including via a direct eval), so
+    // the catch parameter needs to live in its own scope. So if we have a
+    // simple catch parameter, make a new scope.
+    Node body;
+    if (simpleCatchParam) {
+        ParseContext::Scope scope(pc);
+        if (!scope.init(pc))
+            return null();
+
+        // The catch parameter name cannot be redeclared inside the catch
+        // block, so declare the name in the inner scope.
+        if (!noteDeclaredName(simpleCatchParam, DeclarationKind::SimpleCatchParameter))
+            return null();
+
+        Node list = statements(yieldHandling);
+        if (!list)
+            return null();
+
+        // The catch parameter name is not bound in this scope, so remove it
+        // before generating bindings.
+        scope.removeSimpleCatchParameter(simpleCatchParam);
+
+        body = finishLexicalScope(scope, list);
+    } else {
+        body = statements(yieldHandling);
+    }
+    if (!body)
+        return null();
+
+    MUST_MATCH_TOKEN_MOD(TOK_RC, TokenStream::Operand, JSMSG_CURLY_AFTER_CATCH);
+
+    return body;
 }
 
 template <typename ParseHandler>

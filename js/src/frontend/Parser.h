@@ -193,6 +193,10 @@ class ParseContext : public Nestable<ParseContext>
         // in pc's scope stack.
         static void removeVarForAnnexB(ParseContext* pc, JSAtom* name);
 
+        // Remove a simple catch parameter name. Used to implement the odd
+        // semantics of Annex B.3.5.
+        void removeSimpleCatchParameter(JSAtom* name);
+
         // An iterator for the set of used names in the current scope.
         class UsedNameIter
         {
@@ -957,6 +961,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     Node labeledStatement(YieldHandling yieldHandling);
     Node throwStatement(YieldHandling yieldHandling);
     Node tryStatement(YieldHandling yieldHandling);
+    Node catchBlockStatement(YieldHandling yieldHandling, HandlePropertyName simpleCatchParam);
     Node debuggerStatement();
 
     Node lexicalDeclaration(YieldHandling yieldHandling, bool isConst);
@@ -1128,7 +1133,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
 
     bool checkAndMarkAsAssignmentLhs(Node pn, AssignmentFlavor flavor,
                                      PossibleError* possibleError=nullptr);
-    bool matchInOrOf(bool* isForInp, bool* isForOfp);
+    bool matchInOrOf(bool* isForInp, bool* isForOfp, DeclarationKind* delcKind = nullptr);
 
     ParseContext::Scope& targetScopeForFunctionSpecialName(DeclarationKind* declKind);
     bool hasUsedFunctionSpecialName(HandlePropertyName name);
