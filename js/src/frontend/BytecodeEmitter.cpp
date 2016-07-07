@@ -3771,10 +3771,13 @@ BytecodeEmitter::emitSetThis(ParseNode* pn)
     NameLocation lexicalLoc;
     if (loc.kind() == NameLocation::Kind::FrameSlot) {
         lexicalLoc = NameLocation::FrameSlot(BindingKind::Let, loc.frameSlot());
-    } else {
+    } else if (loc.kind() == NameLocation::Kind::EnvironmentCoordinate) {
         EnvironmentCoordinate coord = loc.environmentCoordinate();
         uint8_t hops = AssertedCast<uint8_t>(coord.hops());
         lexicalLoc = NameLocation::EnvironmentCoordinate(BindingKind::Let, hops, coord.slot());
+    } else {
+        MOZ_ASSERT(loc.kind() == NameLocation::Kind::Dynamic);
+        lexicalLoc = loc;
     }
 
     return emitSetOrInitializeNameAtLocation(name, lexicalLoc, emitRhs, true);
