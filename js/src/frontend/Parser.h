@@ -1182,9 +1182,9 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
 
     bool checkAndMarkAsIncOperand(Node kid, AssignmentFlavor flavor);
     bool checkStrictAssignment(Node lhs);
-    bool checkStrictBinding(PropertyName* name, Node pn);
+    bool checkStrictBinding(PropertyName* name, TokenPos pos);
 
-    void reportRedeclaration(HandlePropertyName name, DeclarationKind kind);
+    void reportRedeclaration(HandlePropertyName name, DeclarationKind kind, TokenPos pos);
     bool notePositionalFormalParameter(Node fn, HandlePropertyName name,
                                        bool disallowDuplicateParams = false,
                                        bool* duplicatedParam = nullptr);
@@ -1192,8 +1192,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     bool tryDeclareVar(HandlePropertyName name, DeclarationKind kind,
                        mozilla::Maybe<DeclarationKind>* redeclaredKind);
     bool tryDeclareVarForAnnexB(HandlePropertyName name, bool* tryAnnexB);
-    bool noteDeclaredName(HandlePropertyName name, DeclarationKind kind,
-                          Node node = null());
+    bool noteDeclaredName(HandlePropertyName name, DeclarationKind kind, TokenPos pos);
     bool noteUsedName(HandlePropertyName name, UsedNameInfo info);
 
     mozilla::Maybe<GlobalScope::BindingData*> newGlobalScopeData(ParseContext::Scope& scope,

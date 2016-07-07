@@ -831,7 +831,7 @@ Parser<ParseHandler>::reportBadReturn(Node pn, ParseReportKind kind,
  */
 template <typename ParseHandler>
 bool
-Parser<ParseHandler>::checkStrictBinding(PropertyName* name, Node pn)
+Parser<ParseHandler>::checkStrictBinding(PropertyName* name, TokenPos pos)
 {
     if (!pc->sc()->needStrictChecks())
         return true;
@@ -840,8 +840,8 @@ Parser<ParseHandler>::checkStrictBinding(PropertyName* name, Node pn)
         JSAutoByteString bytes;
         if (!AtomToPrintableString(context, name, &bytes))
             return false;
-        return report(ParseStrictError, pc->sc()->strict(), pn,
-                      JSMSG_BAD_BINDING, bytes.ptr());
+        return reportWithOffset(ParseStrictError, pc->sc()->strict(), pos.begin,
+                                JSMSG_BAD_BINDING, bytes.ptr());
     }
 
     return true;
@@ -849,13 +849,14 @@ Parser<ParseHandler>::checkStrictBinding(PropertyName* name, Node pn)
 
 template <typename ParseHandler>
 void
-Parser<ParseHandler>::reportRedeclaration(HandlePropertyName name, DeclarationKind kind)
+Parser<ParseHandler>::reportRedeclaration(HandlePropertyName name, DeclarationKind kind,
+                                          TokenPos pos)
 {
     JSAutoByteString bytes;
     if (!AtomToPrintableString(context, name, &bytes))
         return;
-    report(ParseError, false, null(), JSMSG_REDECLARED_VAR,
-           DeclarationKindString(kind), bytes.ptr());
+    reportWithOffset(ParseError, false, pos.begin, JSMSG_REDECLARED_VAR,
+                     DeclarationKindString(kind), bytes.ptr());
 }
 
 // notePositionalFormalParameter is called for both the arguments of a regular
@@ -910,7 +911,7 @@ Parser<ParseHandler>::notePositionalFormalParameter(Node fn, HandlePropertyName 
     if (!paramNode)
         return false;
 
-    if (!checkStrictBinding(name, paramNode))
+    if (!checkStrictBinding(name, pos()))
         return false;
 
     handler.addFunctionFormalParameter(fn, paramNode);
@@ -1011,14 +1012,15 @@ Parser<ParseHandler>::tryDeclareVarForAnnexB(HandlePropertyName name, bool* tryA
 
 template <typename ParseHandler>
 bool
-Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind kind, Node node)
+Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind kind,
+                                       TokenPos pos)
 {
     // The asm.js validator does all its own symbol-table management so, as an
     // optimization, avoid doing any work here.
     if (pc->useAsmOrInsideUseAsm())
         return true;
 
-    if (!checkStrictBinding(name, node))
+    if (!checkStrictBinding(name, pos))
         return false;
 
     switch (kind) {
@@ -1030,7 +1032,7 @@ Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind 
             return false;
 
         if (redeclaredKind) {
-            reportRedeclaration(name, *redeclaredKind);
+            reportRedeclaration(name, *redeclaredKind, pos);
             return false;
         }
 
@@ -1064,7 +1066,7 @@ Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind 
                 (p->value()->kind() != DeclarationKind::LexicalFunction &&
                  p->value()->kind() != DeclarationKind::VarForAnnexB))
             {
-                reportRedeclaration(name, p->value()->kind());
+                reportRedeclaration(name, p->value()->kind(), pos);
                 return false;
             }
 
@@ -1086,7 +1088,7 @@ Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind 
         // contain 'let'. (CatchParameter is the only lexical binding form
         // without this restriction.)
         if (name == context->names().let) {
-            report(ParseError, false, node, JSMSG_LEXICAL_DECL_DEFINES_LET);
+            reportWithOffset(ParseError, false, pos.begin, JSMSG_LEXICAL_DECL_DEFINES_LET);
             return false;
         }
 
@@ -1102,7 +1104,7 @@ Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind 
             if (!StatementKindIsBraced(stmt->kind()) &&
                 stmt->kind() != StatementKind::ForLoopLexicalHead)
             {
-                reportWithOffset(ParseError, false, pos().begin,
+                reportWithOffset(ParseError, false, pos.begin,
                                  stmt->kind() == StatementKind::Label
                                  ? JSMSG_LEXICAL_DECL_LABEL
                                  : JSMSG_LEXICAL_DECL_NOT_IN_BLOCK,
@@ -1120,7 +1122,7 @@ Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind 
             if (p->value()->kind() == DeclarationKind::VarForAnnexB) {
                 ParseContext::Scope::removeVarForAnnexB(pc, name);
             } else {
-                reportRedeclaration(name, p->value()->kind());
+                reportRedeclaration(name, p->value()->kind(), pos);
                 return false;
             }
         } else {
@@ -1836,7 +1838,7 @@ template <typename ParseHandler>
 bool
 Parser<ParseHandler>::declareDotGeneratorName()
 {
-    return noteDeclaredName(context->names().dotGenerator, DeclarationKind::Var);
+    return noteDeclaredName(context->names().dotGenerator, DeclarationKind::Var, pos());
 }
 
 template <>
@@ -2586,8 +2588,11 @@ Parser<ParseHandler>::checkFunctionDefinition(HandleAtom funAtom, Node pn, Funct
         }
 
         if (bodyLevelFunction) {
-            if (!noteDeclaredName(funName, DeclarationKind::BodyLevelFunction, pn))
+            if (!noteDeclaredName(funName, DeclarationKind::BodyLevelFunction,
+                                  handler.getPosition(pn)))
+            {
                 return false;
+            }
 
             // Body-level functions in modules are always closed over.
             if (pc->atModuleLevel())
@@ -2604,8 +2609,11 @@ Parser<ParseHandler>::checkFunctionDefinition(HandleAtom funAtom, Node pn, Funct
                     return false;
             }
 
-            if (!noteDeclaredName(funName, DeclarationKind::LexicalFunction, pn))
+            if (!noteDeclaredName(funName, DeclarationKind::LexicalFunction,
+                                  handler.getPosition(pn)))
+            {
                 return false;
+            }
         }
     } else {
         // A function expression does not introduce any binding.
@@ -3110,7 +3118,7 @@ Parser<ParseHandler>::functionFormalParametersAndBody(InHandling inHandling,
 
     if ((kind != Method && !IsConstructorKind(kind)) && fun->name()) {
         RootedPropertyName propertyName(context, fun->name()->asPropertyName());
-        if (!checkStrictBinding(propertyName, pn))
+        if (!checkStrictBinding(propertyName, handler.getPosition(pn)))
             return false;
     }
 
@@ -3631,7 +3639,7 @@ Parser<FullParseHandler>::checkDestructuringName(ParseNode* expr, Maybe<Declarat
         }
 
         RootedPropertyName name(context, expr->name());
-        return noteDeclaredName(name, *maybeDecl, expr);
+        return noteDeclaredName(name, *maybeDecl, handler.getPosition(expr));
     }
 
     // Otherwise this is an expression in destructuring outside a declaration.
@@ -4030,6 +4038,8 @@ Parser<ParseHandler>::declarationName(Node decl, DeclarationKind declKind, Token
     if (!binding)
         return null();
 
+    TokenPos namePos = pos();
+
     // The '=' context after a variable name in a declaration is an opportunity
     // for ASI, and thus for the next token to start an ExpressionStatement:
     //
@@ -4079,7 +4089,7 @@ Parser<ParseHandler>::declarationName(Node decl, DeclarationKind declKind, Token
 
     // Note the declared name after knowing whether or not we are in a for-of
     // loop, due to special early error semantics in Annex B.3.5.
-    if (!noteDeclaredName(name, declKind, binding))
+    if (!noteDeclaredName(name, declKind, namePos))
         return null();
 
     return binding;
@@ -4229,7 +4239,7 @@ Parser<FullParseHandler>::namedImportsOrNamespaceImport(TokenKind tt, Node impor
             Node bindingName = newName(bindingAtom);
             if (!bindingName)
                 return false;
-            if (!noteDeclaredName(bindingAtom, DeclarationKind::Import, bindingName))
+            if (!noteDeclaredName(bindingAtom, DeclarationKind::Import, pos()))
                 return false;
 
             Node importSpec = handler.newBinary(PNK_IMPORT_SPEC, importName, bindingName);
@@ -4276,7 +4286,7 @@ Parser<FullParseHandler>::namedImportsOrNamespaceImport(TokenKind tt, Node impor
         Node bindingName = newName(bindingAtom);
         if (!bindingName)
             return false;
-        if (!noteDeclaredName(bindingAtom, DeclarationKind::Const, bindingName))
+        if (!noteDeclaredName(bindingAtom, DeclarationKind::Const, pos()))
             return false;
 
         // The namespace import name is currently required to live on the
@@ -4335,7 +4345,7 @@ Parser<FullParseHandler>::importDeclaration()
             Node bindingName = newName(bindingAtom);
             if (!bindingName)
                 return null();
-            if (!noteDeclaredName(bindingAtom, DeclarationKind::Import, bindingName))
+            if (!noteDeclaredName(bindingAtom, DeclarationKind::Import, pos()))
                 return null();
 
             Node importSpec = handler.newBinary(PNK_IMPORT_SPEC, importName, bindingName);
@@ -4673,7 +4683,7 @@ Parser<FullParseHandler>::exportDeclaration()
             nameNode = newName(name);
             if (!nameNode)
                 return null();
-            if (!noteDeclaredName(name, DeclarationKind::Const))
+            if (!noteDeclaredName(name, DeclarationKind::Const, pos()))
                 return null();
             kid = assignExpr(InAllowed, YieldIsKeyword, TripledotProhibited);
             if (!kid)
@@ -5819,7 +5829,7 @@ Parser<ParseHandler>::tryStatement(YieldHandling yieldHandling)
                 if (!catchName)
                     return null();
                 if (!noteDeclaredName(simpleCatchParam, DeclarationKind::SimpleCatchParameter,
-                                      catchName))
+                                      pos()))
                 {
                     return null();
                 }
@@ -5920,7 +5930,7 @@ Parser<ParseHandler>::catchBlockStatement(YieldHandling yieldHandling,
 
         // The catch parameter name cannot be redeclared inside the catch
         // block, so declare the name in the inner scope.
-        if (!noteDeclaredName(simpleCatchParam, DeclarationKind::SimpleCatchParameter))
+        if (!noteDeclaredName(simpleCatchParam, DeclarationKind::SimpleCatchParameter, pos()))
             return null();
 
         Node list = statements(yieldHandling);
@@ -6189,7 +6199,7 @@ Parser<FullParseHandler>::classDefinition(YieldHandling yieldHandling,
     ParseNode* methodsOrBlock = classMethods;
     if (name) {
         // The inner name is immutable.
-        if (!noteDeclaredName(name, DeclarationKind::Const))
+        if (!noteDeclaredName(name, DeclarationKind::Const, namePos))
             return null();
 
         ParseNode* innerName = newName(name, namePos);
@@ -6209,7 +6219,7 @@ Parser<FullParseHandler>::classDefinition(YieldHandling yieldHandling,
         ParseNode* outerName = null();
         if (classContext == ClassStatement) {
             // The outer name is mutable.
-            if (!noteDeclaredName(name, DeclarationKind::Let))
+            if (!noteDeclaredName(name, DeclarationKind::Let, namePos))
                 return null();
 
             outerName = newName(name, namePos);
@@ -7332,6 +7342,7 @@ Parser<ParseHandler>::comprehensionFor(GeneratorKind comprehensionKind)
         report(ParseError, false, null(), JSMSG_LET_COMP_BINDING);
         return null();
     }
+    TokenPos namePos = pos();
     Node assignLhs = newName(name);
     if (!assignLhs)
         return null();
@@ -7357,7 +7368,7 @@ Parser<ParseHandler>::comprehensionFor(GeneratorKind comprehensionKind)
     ParseContext::Scope scope(pc);
     if (!scope.init(pc))
         return null();
-    if (!noteDeclaredName(name, DeclarationKind::Let))
+    if (!noteDeclaredName(name, DeclarationKind::Let, namePos))
         return null();
 
     Node decls = handler.newComprehensionBinding(lhs);
