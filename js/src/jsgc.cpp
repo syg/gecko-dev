@@ -1796,6 +1796,7 @@ static const AllocKind AllocKindsToRelocate[] = {
     AllocKind::OBJECT16_BACKGROUND,
     AllocKind::SCRIPT,
     AllocKind::LAZY_SCRIPT,
+    AllocKind::SCOPE,
     AllocKind::SHAPE,
     AllocKind::ACCESSOR_SHAPE,
     AllocKind::BASE_SHAPE,
@@ -2179,6 +2180,14 @@ MovingTracer::onBaseShapeEdge(BaseShape** basep)
     BaseShape* base = *basep;
     if (IsForwarded(base))
         *basep = Forwarded(base);
+}
+
+void
+MovingTracer::onScopeEdge(Scope** scopep)
+{
+    Scope* scope = *scopep;
+    if (IsForwarded(scope))
+        *scopep = Forwarded(scope);
 }
 
 void

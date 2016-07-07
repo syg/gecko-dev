@@ -483,8 +483,6 @@ FunctionScope::create(ExclusiveContext* cx, BindingData* bindings, uint32_t firs
     if (!data)
         return nullptr;
 
-    data->canonicalFunction.init(fun);
-
     // The data that's passed in is from the frontend and is LifoAlloc'd or is
     // from Scope::copy. Copy it now that we're creating a permanent VM scope.
     RootedShape envShape(cx);
@@ -520,6 +518,7 @@ FunctionScope::create(ExclusiveContext* cx, BindingData* bindings, uint32_t firs
         return nullptr;
     }
 
+    data->canonicalFunction.init(fun);
     data->bindings->addRef();
     return &scope->as<FunctionScope>();
 }
@@ -535,7 +534,6 @@ FunctionScope::clone(JSContext* cx, Handle<FunctionScope*> scope, HandleFunction
     if (!dataClone)
         return nullptr;
 
-    dataClone->canonicalFunction.init(fun);
     dataClone->bindings = scope->data().bindings;
 
     RootedShape envShape(cx);
@@ -550,6 +548,7 @@ FunctionScope::clone(JSContext* cx, Handle<FunctionScope*> scope, HandleFunction
     if (!clone)
         return nullptr;
 
+    dataClone->canonicalFunction.init(fun);
     dataClone->bindings->addRef();
     return &clone->as<FunctionScope>();
 }
@@ -819,8 +818,6 @@ ModuleScope::create(ExclusiveContext* cx, BindingData* bindings, HandleModuleObj
     if (!data)
         return nullptr;
 
-    data->module.init(module);
-
     // The data that's passed in is from the frontend and is LifoAlloc'd or is
     // from Scope::copy. Copy it now that we're creating a permanent VM scope.
     RootedShape envShape(cx);
@@ -863,6 +860,7 @@ ModuleScope::create(ExclusiveContext* cx, BindingData* bindings, HandleModuleObj
         return nullptr;
     }
 
+    data->module.init(module);
     data->bindings->addRef();
     return &scope->as<ModuleScope>();
 }

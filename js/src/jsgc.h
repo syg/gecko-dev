@@ -1119,7 +1119,8 @@ struct MightBeForwarded
                               mozilla::IsBaseOf<BaseShape, T>::value ||
                               mozilla::IsBaseOf<JSString, T>::value ||
                               mozilla::IsBaseOf<JSScript, T>::value ||
-                              mozilla::IsBaseOf<js::LazyScript, T>::value;
+                              mozilla::IsBaseOf<js::LazyScript, T>::value ||
+                              mozilla::IsBaseOf<js::Scope, T>::value;
 };
 
 template <typename T>
