@@ -415,26 +415,6 @@ ParseContext::finishInnerFunctionBoxesForAnnexB()
 
 ParseContext::~ParseContext()
 {
-#ifdef DEBUG
-    if (superScopeNeedsHomeObject_ && sc_->compilationEnclosingScope()) {
-        // If superScopeNeedsHomeObject_ is set and we are an entry-point
-        // ParseContext, then we must be emitting an eval script, and the
-        // outer function must already be marked as needing a home object
-        // since it contains an eval.
-        for (ScopeIter si(sc_->compilationEnclosingScope()); si; si++) {
-            if (si.kind() == ScopeKind::Function) {
-                JSFunction* fun = si.scope()->as<FunctionScope>().canonicalFunction();
-                if (fun->isArrow())
-                    continue;
-                MOZ_ASSERT(fun->allowSuperProperty());
-                MOZ_ASSERT(fun->nonLazyScript()->needsHomeObject());
-                return;
-            }
-        }
-        MOZ_CRASH("Must have found an enclosing function box scope that allows super.property");
-    }
-#endif
-
     // Any funboxes still in the list at the end of parsing means no early
     // error would have occurred for declaring a binding in the nearest var
     // scope. Mark them as needing extra assignments to this var binding.
@@ -1610,6 +1590,28 @@ Parser<FullParseHandler>::evalBody(EvalSharedContext* evalsc)
             return nullptr;
         }
     }
+
+#ifdef DEBUG
+    if (evalpc.superScopeNeedsHomeObject() && evalsc->compilationEnclosingScope()) {
+        // If superScopeNeedsHomeObject_ is set and we are an entry-point
+        // ParseContext, then we must be emitting an eval script, and the
+        // outer function must already be marked as needing a home object
+        // since it contains an eval.
+        ScopeIter si(evalsc->compilationEnclosingScope());
+        for (; si; si++) {
+            if (si.kind() == ScopeKind::Function) {
+                JSFunction* fun = si.scope()->as<FunctionScope>().canonicalFunction();
+                if (fun->isArrow())
+                    continue;
+                MOZ_ASSERT(fun->allowSuperProperty());
+                MOZ_ASSERT(fun->nonLazyScript()->needsHomeObject());
+                break;
+            }
+        }
+        MOZ_ASSERT(!si.done(),
+                   "Eval must have found an enclosing function box scope that allows super.property");
+    }
+#endif
 
     if (!FoldConstants(context, &body, this))
         return nullptr;
