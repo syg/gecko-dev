@@ -549,7 +549,7 @@ class ParseContext : public Nestable<ParseContext>
     }
 
     void setSuperScopeNeedsHomeObject() {
-        MOZ_ASSERT(sc_->isFunctionBox());
+        MOZ_ASSERT(sc_->allowSuperProperty());
         superScopeNeedsHomeObject_ = true;
     }
 

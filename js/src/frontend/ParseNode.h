@@ -1410,6 +1410,13 @@ IsSetterKind(FunctionSyntaxKind kind)
     return kind == Setter || kind == SetterNoExpressionClosure;
 }
 
+static inline bool
+IsMethodDefinitionKind(FunctionSyntaxKind kind)
+{
+    return kind == Method || IsConstructorKind(kind) ||
+           IsGetterKind(kind) || IsSetterKind(kind);
+}
+
 static inline ParseNode*
 FunctionFormalParametersList(ParseNode* fn, unsigned* numFormals)
 {
