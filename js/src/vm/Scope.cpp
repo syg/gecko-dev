@@ -324,6 +324,9 @@ Scope::finalize(FreeOp* fop)
         if (is<FunctionScope>()) {
             as<FunctionScope>().bindingData().release(fop);
             fop->free_(reinterpret_cast<void*>(data_));
+        } else if (is<ModuleScope>()) {
+            as<ModuleScope>().bindingData().release(fop);
+            fop->free_(reinterpret_cast<void*>(data_));
         } else {
             reinterpret_cast<RefCountedData*>(data_)->release(fop);
         }
