@@ -2237,7 +2237,7 @@ Parser<ParseHandler>::leaveInnerFunction(ParseContext* outerpc)
     // the outer ParseContext.
     if (pc->superScopeNeedsHomeObject()) {
         if (!pc->isArrowFunction())
-            pc->functionBox()->setNeedsHomeObject();
+            MOZ_ASSERT(pc->functionBox()->needsHomeObject());
         else
             outerpc->setSuperScopeNeedsHomeObject();
     }
@@ -3117,6 +3117,9 @@ Parser<ParseHandler>::functionFormalParametersAndBody(InHandling inHandling,
         if (kind == Statement && !MatchOrInsertSemicolonAfterExpression(tokenStream))
             return false;
     }
+
+    if (IsMethodDefinitionKind(kind) && pc->superScopeNeedsHomeObject())
+        funbox->setNeedsHomeObject();
 
     if (!finishFunction())
         return false;
