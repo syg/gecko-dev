@@ -1211,7 +1211,7 @@ class ScopeIter
     bool hasSyntacticEnvironment() const;
 
     void trace(JSTracer* trc) {
-        TraceEdge(trc, &scope_, "scope iter scope");
+        TraceNullableEdge(trc, &scope_, "scope iter scope");
     }
 };
 
