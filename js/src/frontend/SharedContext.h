@@ -32,6 +32,7 @@ enum class StatementKind : uint8_t
     Catch,
     Try,
     Finally,
+    ForLoopLexicalHead,
     ForLoop,
     ForInLoop,
     ForOfLoop,

@@ -116,6 +116,16 @@ DeclarationKindString(DeclarationKind kind)
     MOZ_CRASH("Bad DeclarationKind");
 }
 
+static inline bool
+StatementKindIsBraced(StatementKind kind)
+{
+    return kind == StatementKind::Block ||
+           kind == StatementKind::Switch ||
+           kind == StatementKind::Try ||
+           kind == StatementKind::Catch ||
+           kind == StatementKind::Finally;
+}
+
 void
 ParseContext::Scope::dump(ParseContext* pc)
 {
@@ -1084,8 +1094,22 @@ Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind 
 
       case DeclarationKind::SimpleCatchParameter:
       case DeclarationKind::CatchParameter: {
-        // It is an early error if there is another declaration with the same name
-        // in the same scope.
+        // It is an early error to declare a lexical binding not directly
+        // within a block. It is an early error if there is another
+        // declaration with the same name in the same scope.
+
+        if (ParseContext::Statement* stmt = pc->innermostStatement()) {
+            if (!StatementKindIsBraced(stmt->kind()) &&
+                stmt->kind() != StatementKind::ForLoopLexicalHead)
+            {
+                reportWithOffset(ParseError, false, pos().begin,
+                                 stmt->kind() == StatementKind::Label
+                                 ? JSMSG_LEXICAL_DECL_LABEL
+                                 : JSMSG_LEXICAL_DECL_NOT_IN_BLOCK,
+                                 DeclarationKindString(kind));
+                return false;
+            }
+        }
 
         ParseContext::Scope* scope = pc->innermostScope();
         AddDeclaredNamePtr p = scope->lookupDeclaredNameForAdd(name);
@@ -2526,16 +2550,6 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
     return true;
 }
 
-static inline bool
-StatementKindIsBraced(StatementKind kind)
-{
-    return kind == StatementKind::Block ||
-           kind == StatementKind::Switch ||
-           kind == StatementKind::Try ||
-           kind == StatementKind::Catch ||
-           kind == StatementKind::Finally;
-}
-
 template <typename ParseHandler>
 bool
 Parser<ParseHandler>::checkFunctionDefinition(HandleAtom funAtom, Node pn, FunctionSyntaxKind kind,
@@ -3849,8 +3863,7 @@ template <typename ParseHandler>
 typename ParseHandler::Node
 Parser<ParseHandler>::declarationPattern(Node decl, DeclarationKind declKind, TokenKind tt,
                                          bool initialDeclaration, YieldHandling yieldHandling,
-                                         ParseNodeKind* forHeadKind,
-                                         Node* forInOrOfExpression)
+                                         ParseNodeKind* forHeadKind, Node* forInOrOfExpression)
 {
     MOZ_ASSERT(tokenStream.isCurrentTokenType(TOK_LB) ||
                tokenStream.isCurrentTokenType(TOK_LC));
@@ -4936,6 +4949,11 @@ Parser<ParseHandler>::forHeadStart(YieldHandling yieldHandling,
         forLoopLexicalScope.emplace(pc);
         if (!forLoopLexicalScope->init(pc))
             return null();
+
+        // Push a temporary ForLoopHead Statement that allows for lexical
+        // declarations, as they are usually disallowed only in braced
+        // contexts.
+        ParseContext::Statement forHeadStmt(pc, StatementKind::ForLoopLexicalHead);
 
         *forInitialPart = declarationList(yieldHandling, tt == TOK_CONST ? PNK_CONST : PNK_LET,
                                           forHeadKind, forInOrOfExpression);

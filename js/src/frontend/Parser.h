@@ -1192,7 +1192,8 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     bool tryDeclareVar(HandlePropertyName name, DeclarationKind kind,
                        mozilla::Maybe<DeclarationKind>* redeclaredKind);
     bool tryDeclareVarForAnnexB(HandlePropertyName name, bool* tryAnnexB);
-    bool noteDeclaredName(HandlePropertyName name, DeclarationKind kind, Node node = null());
+    bool noteDeclaredName(HandlePropertyName name, DeclarationKind kind,
+                          Node node = null());
     bool noteUsedName(HandlePropertyName name, UsedNameInfo info);
 
     mozilla::Maybe<GlobalScope::BindingData*> newGlobalScopeData(ParseContext::Scope& scope,
