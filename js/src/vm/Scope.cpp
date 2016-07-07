@@ -216,7 +216,7 @@ XDRBindingName(XDRState<XDR_DECODE>* xdr, BindingName* bindingName)
 template <typename ConcreteScope, XDRMode mode>
 /* static */ bool
 Scope::XDRSizedBindingData(XDRState<mode>* xdr, Handle<ConcreteScope*> scope,
-                           typename ConcreteScope::BindingData** data)
+                           MutableHandle<typename ConcreteScope::BindingData*> data)
 {
     JSContext* cx = xdr->cx();
 
@@ -227,17 +227,17 @@ Scope::XDRSizedBindingData(XDRState<mode>* xdr, Handle<ConcreteScope*> scope,
         return false;
 
     if (mode == XDR_ENCODE) {
-        *data = &scope->bindingData();
+        data.set(&scope->bindingData());
     } else {
         size_t size = ConcreteScope::sizeOfBindingData(length);
-        *data = NewEmptyScopeData<typename ConcreteScope::BindingData>(cx, size);
-        if (!*data)
+        data.set(NewEmptyScopeData<typename ConcreteScope::BindingData>(cx, size));
+        if (!data)
             return false;
-        (*data)->length = length;
+        data->length = length;
     }
 
     for (uint32_t i = 0; i < length; i++) {
-        if (!XDRBindingName(xdr, &(*data)->names[i]))
+        if (!XDRBindingName(xdr, &data->names[i]))
             return false;
     }
 
@@ -401,7 +401,7 @@ LexicalScope::create(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
     // The data that's passed in is from the frontend and is LifoAlloc'd or is
     // from Scope::copy. Copy it now that we're creating a permanent VM scope.
     RootedShape envShape(cx);
-    BindingData* copy;
+    Rooted<BindingData*> copy(cx);
     BindingIter bi(*data, firstFrameSlot, isNamedLambda);
     copy = CopyBindingData(cx, bi, data, sizeOfBindingData(data->length),
                            &LexicalEnvironmentObject::class_,
@@ -410,7 +410,8 @@ LexicalScope::create(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
     if (!copy)
         return nullptr;
 
-    Scope* scope = Scope::create(cx, kind, enclosing, envShape, reinterpret_cast<uintptr_t>(copy));
+    Scope* scope = Scope::create(cx, kind, enclosing, envShape,
+                                 reinterpret_cast<uintptr_t>(copy.get()));
     if (!scope) {
         js_free(copy);
         return nullptr;
@@ -434,7 +435,7 @@ LexicalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, HandleScope enclosing,
 {
     JSContext* cx = xdr->cx();
 
-    BindingData* data;
+    Rooted<BindingData*> data(cx);
     if (!XDRSizedBindingData<LexicalScope>(xdr, scope.as<LexicalScope>(), &data))
         return false;
 
@@ -479,7 +480,7 @@ FunctionScope::create(ExclusiveContext* cx, BindingData* bindings, uint32_t firs
     // parameter defaults scope could be in an enclosing function.
     MOZ_ASSERT_IF(hasDefaults, enclosing->kind() == ScopeKind::ParameterDefaults);
 
-    Data* data = NewEmptyScopeData<Data>(cx, sizeof(Data));
+    Rooted<Data*> data(cx, NewEmptyScopeData<Data>(cx, sizeof(Data)));
     if (!data)
         return nullptr;
 
@@ -511,7 +512,7 @@ FunctionScope::create(ExclusiveContext* cx, BindingData* bindings, uint32_t firs
     }
 
     Scope* scope = Scope::create(cx, ScopeKind::Function, enclosing, envShape,
-                                 reinterpret_cast<uintptr_t>(data));
+                                 reinterpret_cast<uintptr_t>(data.get()));
     if (!scope) {
         js_free(data->bindings);
         js_free(data);
@@ -530,7 +531,7 @@ FunctionScope::clone(JSContext* cx, Handle<FunctionScope*> scope, HandleFunction
     MOZ_ASSERT_IF(enclosing, scope->firstFrameSlot() == nextFrameSlot(enclosing));
     MOZ_ASSERT(fun != scope->canonicalFunction());
 
-    Data* dataClone = NewEmptyScopeData<Data>(cx, sizeof(Data));
+    Rooted<Data*> dataClone(cx, NewEmptyScopeData<Data>(cx, sizeof(Data)));
     if (!dataClone)
         return nullptr;
 
@@ -544,7 +545,7 @@ FunctionScope::clone(JSContext* cx, Handle<FunctionScope*> scope, HandleFunction
     }
 
     Scope* clone = Scope::create(cx, scope->kind(), enclosing, envShape,
-                                 reinterpret_cast<uintptr_t>(dataClone));
+                                 reinterpret_cast<uintptr_t>(dataClone.get()));
     if (!clone)
         return nullptr;
 
@@ -573,7 +574,7 @@ FunctionScope::XDR(XDRState<mode>* xdr, HandleFunction fun, HandleScope enclosin
 {
     JSContext* cx = xdr->cx();
 
-    BindingData* data;
+    Rooted<BindingData*> data(cx);
     if (!XDRSizedBindingData<FunctionScope>(xdr, scope.as<FunctionScope>(), &data))
         return false;
 
@@ -620,7 +621,7 @@ GlobalScope::create(ExclusiveContext* cx, ScopeKind kind, BindingData* data)
 {
     // The data that's passed in is from the frontend and is LifoAlloc'd or is
     // from Scope::copy. Copy it now that we're creating a permanent VM scope.
-    BindingData* copy;
+    Rooted<BindingData*> copy(cx);
     if (data) {
         // The global scope has no environment shape. Its environment is the
         // global lexical scope and the global object or non-syntactic objects
@@ -634,7 +635,8 @@ GlobalScope::create(ExclusiveContext* cx, ScopeKind kind, BindingData* data)
     if (!copy)
         return nullptr;
 
-    Scope* scope = Scope::create(cx, kind, nullptr, nullptr, reinterpret_cast<uintptr_t>(copy));
+    Scope* scope = Scope::create(cx, kind, nullptr, nullptr,
+                                 reinterpret_cast<uintptr_t>(copy.get()));
     if (!scope) {
         js_free(copy);
         return nullptr;
@@ -661,7 +663,7 @@ GlobalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, MutableHandleScope scope)
 {
     JSContext* cx = xdr->cx();
 
-    BindingData* data;
+    Rooted<BindingData*> data(cx);
     if (!XDRSizedBindingData<GlobalScope>(xdr, scope.as<GlobalScope>(), &data))
         return false;
 
@@ -705,7 +707,7 @@ EvalScope::create(ExclusiveContext* cx, ScopeKind scopeKind, BindingData* data,
     // The data that's passed in is from the frontend and is LifoAlloc'd or is
     // from Scope::copy. Copy it now that we're creating a permanent VM scope.
     RootedShape envShape(cx);
-    BindingData* copy;
+    Rooted<BindingData*> copy(cx);
     if (data) {
         if (scopeKind == ScopeKind::StrictEval) {
             BindingIter bi(*data, true);
@@ -733,7 +735,7 @@ EvalScope::create(ExclusiveContext* cx, ScopeKind scopeKind, BindingData* data,
     }
 
     Scope* scope = Scope::create(cx, scopeKind, enclosing, envShape,
-                                 reinterpret_cast<uintptr_t>(copy));
+                                 reinterpret_cast<uintptr_t>(copy.get()));
     if (!scope) {
         js_free(copy);
         return nullptr;
@@ -778,7 +780,7 @@ EvalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, HandleScope enclosing,
 {
     JSContext* cx = xdr->cx();
 
-    BindingData* data;
+    Rooted<BindingData*> data(cx);
     if (!XDRSizedBindingData<EvalScope>(xdr, scope.as<EvalScope>(), &data))
         return false;
 
@@ -814,7 +816,7 @@ ModuleScope::create(ExclusiveContext* cx, BindingData* bindings, HandleModuleObj
 {
     MOZ_ASSERT(enclosing->is<GlobalScope>());
 
-    Data* data = NewEmptyScopeData<Data>(cx, sizeof(Data));
+    Rooted<Data*> data(cx, NewEmptyScopeData<Data>(cx, sizeof(Data)));
     if (!data)
         return nullptr;
 
@@ -853,7 +855,7 @@ ModuleScope::create(ExclusiveContext* cx, BindingData* bindings, HandleModuleObj
     }
 
     Scope* scope = Scope::create(cx, ScopeKind::Module, enclosing, envShape,
-                                 reinterpret_cast<uintptr_t>(data));
+                                 reinterpret_cast<uintptr_t>(data.get()));
     if (!scope) {
         js_free(data->bindings);
         js_free(data);

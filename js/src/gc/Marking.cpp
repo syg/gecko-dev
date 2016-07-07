@@ -1202,22 +1202,49 @@ TraceBindingData(JSTracer* trc, Data* data)
 {
     TraceBindingNames(trc, data->names, data->length);
 }
-template <>
-void
-TraceBindingData<FunctionScope::BindingData>(JSTracer* trc, FunctionScope::BindingData* data)
-{
-    TraceNullableBindingNames(trc, data->names, data->length);
-}
-template <>
-void
-TraceBindingData<ModuleScope::BindingData>(JSTracer* trc, ModuleScope::BindingData* data)
-{
-    TraceNullableBindingNames(trc, data->names, data->length);
-}
 void
 BindingIter::trace(JSTracer* trc)
 {
     TraceBindingNames(trc, names_, length_);
+}
+void
+LexicalScope::BindingData::trace(JSTracer* trc)
+{
+    TraceBindingNames(trc, names, length);
+}
+void
+FunctionScope::BindingData::trace(JSTracer* trc)
+{
+    TraceNullableBindingNames(trc, names, length);
+}
+void
+FunctionScope::Data::trace(JSTracer* trc)
+{
+    TraceNullableEdge(trc, &canonicalFunction, "scope canonical function");
+    if (bindings)
+        bindings->trace(trc);
+}
+void
+GlobalScope::BindingData::trace(JSTracer* trc)
+{
+    TraceBindingNames(trc, names, length);
+}
+void
+EvalScope::BindingData::trace(JSTracer* trc)
+{
+    TraceBindingNames(trc, names, length);
+}
+void
+ModuleScope::BindingData::trace(JSTracer* trc)
+{
+    TraceBindingNames(trc, names, length);
+}
+void
+ModuleScope::Data::trace(JSTracer* trc)
+{
+    TraceNullableEdge(trc, &module, "scope module");
+    if (bindings)
+        bindings->trace(trc);
 }
 void
 Scope::traceChildren(JSTracer* trc)
@@ -1225,33 +1252,27 @@ Scope::traceChildren(JSTracer* trc)
     TraceNullableEdge(trc, &enclosing_, "scope enclosing");
     TraceNullableEdge(trc, &environmentShape_, "scope env shape");
     switch (kind_) {
-      case ScopeKind::Function: {
-        FunctionScope::Data* data = reinterpret_cast<FunctionScope::Data*>(data_);
-        TraceEdge(trc, &data->canonicalFunction, "scope canonical function");
-        TraceBindingData(trc, data->bindings);
+      case ScopeKind::Function:
+        reinterpret_cast<FunctionScope::Data*>(data_)->trace(trc);
         break;
-      }
       case ScopeKind::ParameterDefaults:
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
       case ScopeKind::NamedLambda:
       case ScopeKind::StrictNamedLambda:
-        TraceBindingData(trc, reinterpret_cast<LexicalScope::BindingData*>(data_));
+        reinterpret_cast<LexicalScope::BindingData*>(data_)->trace(trc);
         break;
       case ScopeKind::Global:
       case ScopeKind::NonSyntactic:
-        TraceBindingData(trc, reinterpret_cast<GlobalScope::BindingData*>(data_));
+        reinterpret_cast<GlobalScope::BindingData*>(data_)->trace(trc);
         break;
       case ScopeKind::Eval:
       case ScopeKind::StrictEval:
-        TraceBindingData(trc, reinterpret_cast<EvalScope::BindingData*>(data_));
+        reinterpret_cast<EvalScope::BindingData*>(data_)->trace(trc);
         break;
-      case ScopeKind::Module: {
-        ModuleScope::Data* data = reinterpret_cast<ModuleScope::Data*>(data_);
-        TraceEdge(trc, &data->module, "scope module");
-        TraceBindingData(trc, data->bindings);
+      case ScopeKind::Module:
+        reinterpret_cast<ModuleScope::Data*>(data_)->trace(trc);
         break;
-      }
       case ScopeKind::With:
         break;
     }

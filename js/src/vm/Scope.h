@@ -215,7 +215,7 @@ class Scope : public js::gc::TenuredCell
 
     template <typename ConcreteScope, XDRMode mode>
     static bool XDRSizedBindingData(XDRState<mode>* xdr, Handle<ConcreteScope*> scope,
-                                    typename ConcreteScope::BindingData** data);
+                                    MutableHandle<typename ConcreteScope::BindingData*> data);
 
     Shape* maybeCloneEnvironmentShape(JSContext* cx);
 
@@ -329,6 +329,8 @@ class LexicalScope : public Scope
         // The array of tagged JSAtom* names, allocated beyond the end of the
         // struct.
         BindingName names[1];
+
+        void trace(JSTracer* trc);
     };
 
     static size_t sizeOfBindingData(uint32_t length) {
@@ -422,6 +424,24 @@ class FunctionScope : public Scope
         // The array of tagged JSAtom* names, allocated beyond the end of the
         // struct.
         BindingName names[1];
+
+        void trace(JSTracer* trc);
+    };
+
+    // Because canonicalFunction is per-compartment and cannot be shared,
+    // FunctionScopes have two data pointers, one for shareable data and one
+    // for per-compartment data.
+    struct Data
+    {
+        // The canonical function of the scope, as during a scope walk we
+        // often query properties of the JSFunction (e.g., is the function an
+        // arrow).
+        GCPtrFunction canonicalFunction;
+
+        // Shareable bindings.
+        BindingData* bindings;
+
+        void trace(JSTracer* trc);
     };
 
     static size_t sizeOfBindingData(uint32_t length) {
@@ -438,20 +458,6 @@ class FunctionScope : public Scope
                     MutableHandleScope scope);
 
   private:
-    // Because canonicalFunction is per-compartment and cannot be shared,
-    // FunctionScopes have two data pointers, one for shareable data and one
-    // for per-compartment data.
-    struct Data
-    {
-        // The canonical function of the scope, as during a scope walk we
-        // often query properties of the JSFunction (e.g., is the function an
-        // arrow).
-        GCPtrFunction canonicalFunction;
-
-        // Shareable bindings.
-        BindingData* bindings;
-    };
-
     Data& data() {
         return *reinterpret_cast<Data*>(data_);
     }
@@ -546,6 +552,8 @@ class GlobalScope : public Scope
         // The array of tagged JSAtom* names, allocated beyond the end of the
         // struct.
         BindingName names[1];
+
+        void trace(JSTracer* trc);
     };
 
     static size_t sizeOfBindingData(uint32_t length) {
@@ -640,6 +648,8 @@ class EvalScope : public Scope
         // The array of tagged JSAtom* names, allocated beyond the end of the
         // struct.
         BindingName names[1];
+
+        void trace(JSTracer* trc);
     };
 
     static size_t sizeOfBindingData(uint32_t length) {
@@ -739,6 +749,22 @@ class ModuleScope : public Scope
         // The array of tagged JSAtom* names, allocated beyond the end of the
         // struct.
         BindingName names[1];
+
+        void trace(JSTracer* trc);
+    };
+
+    // Because module is per-compartment and cannot be shared, ModuleScopes
+    // have two data pointers, one for shareable data and one for
+    // per-compartment data.
+    struct Data
+    {
+        // The module of the scope.
+        GCPtr<ModuleObject*> module;
+
+        // Shareable bindings.
+        BindingData* bindings;
+
+        void trace(JSTracer* trc);
     };
 
     static size_t sizeOfBindingData(uint32_t length) {
@@ -750,18 +776,6 @@ class ModuleScope : public Scope
                                Handle<ModuleObject*> module, HandleScope enclosing);
 
   private:
-    // Because module is per-compartment and cannot be shared, ModuleScopes
-    // have two data pointers, one for shareable data and one for
-    // per-compartment data.
-    struct Data
-    {
-        // The module of the scope.
-        GCPtr<ModuleObject*> module;
-
-        // Shareable bindings.
-        BindingData* bindings;
-    };
-
     Data& data() {
         return *reinterpret_cast<Data*>(data_);
     }
@@ -1318,7 +1332,41 @@ class MutableHandleBase<Scope*> : public ScopeCastOperation<JS::MutableHandle<Sc
 
 namespace JS {
 
-template <> struct GCPolicy<js::ScopeKind> : public IgnoreGCPolicy<js::ScopeKind> {};
+template <>
+struct GCPolicy<js::ScopeKind> : public IgnoreGCPolicy<js::ScopeKind>
+{ };
+
+template <typename T>
+struct ScopeDataGCPolicy
+{
+    static T initial() {
+        return nullptr;
+    }
+
+    static void trace(JSTracer* trc, T* vp, const char* name) {
+        if (*vp)
+            (*vp)->trace(trc);
+    }
+};
+
+#define DEFINE_SCOPE_DATA_GCPOLICY(Data)                        \
+    template <>                                                 \
+    struct MapTypeToRootKind<Data*> {                           \
+        static const RootKind kind = RootKind::Traceable;       \
+    };                                                          \
+    template <>                                                 \
+    struct GCPolicy<Data*> : public ScopeDataGCPolicy<Data*>    \
+    { }
+
+DEFINE_SCOPE_DATA_GCPOLICY(js::LexicalScope::BindingData);
+DEFINE_SCOPE_DATA_GCPOLICY(js::FunctionScope::BindingData);
+DEFINE_SCOPE_DATA_GCPOLICY(js::FunctionScope::Data);
+DEFINE_SCOPE_DATA_GCPOLICY(js::GlobalScope::BindingData);
+DEFINE_SCOPE_DATA_GCPOLICY(js::EvalScope::BindingData);
+DEFINE_SCOPE_DATA_GCPOLICY(js::ModuleScope::BindingData);
+DEFINE_SCOPE_DATA_GCPOLICY(js::ModuleScope::Data);
+
+#undef DEFINE_SCOPE_DATA_GCPOLICY
 
 namespace ubi {
 
