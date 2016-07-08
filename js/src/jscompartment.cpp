@@ -144,7 +144,7 @@ JSCompartment::init(JSContext* maybecx)
     if (!enumerators)
         return false;
 
-    if (!savedStacks_.init()) {
+    if (!savedStacks_.init() || !varNames_.init()) {
         if (maybecx)
             ReportOutOfMemory(maybecx);
         return false;
@@ -567,6 +567,16 @@ JSCompartment::getNonSyntacticLexicalEnvironment(JSObject* enclosing) const
     return &lexicalEnv->as<LexicalEnvironmentObject>();
 }
 
+bool
+JSCompartment::addToVarNames(JSContext* cx, JS::Handle<JSAtom*> name)
+{
+    if (varNames_.put(name.get()))
+        return true;
+
+    ReportOutOfMemory(cx);
+    return false;
+}
+
 void
 JSCompartment::traceOutgoingCrossCompartmentWrappers(JSTracer* trc)
 {
@@ -602,6 +612,7 @@ void
 JSCompartment::trace(JSTracer* trc)
 {
     savedStacks_.trace(trc);
+    varNames_.trace(trc);
 }
 
 void
@@ -919,6 +930,8 @@ JSCompartment::clearTables()
         wasmInstances.clear();
     if (savedStacks_.initialized())
         savedStacks_.clear();
+    if (varNames_.initialized())
+        varNames_.clear();
 }
 
 void
@@ -1177,6 +1190,7 @@ JSCompartment::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
                                       size_t* crossCompartmentWrappersArg,
                                       size_t* regexpCompartment,
                                       size_t* savedStacksSet,
+                                      size_t* varNamesSet,
                                       size_t* nonSyntacticLexicalEnvironmentsArg,
                                       size_t* jitCompartment,
                                       size_t* privateData)
@@ -1196,6 +1210,7 @@ JSCompartment::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
     *crossCompartmentWrappersArg += crossCompartmentWrappers.sizeOfExcludingThis(mallocSizeOf);
     *regexpCompartment += regExps.sizeOfExcludingThis(mallocSizeOf);
     *savedStacksSet += savedStacks_.sizeOfExcludingThis(mallocSizeOf);
+    *varNamesSet += varNames_.sizeOfExcludingThis(mallocSizeOf);
     if (nonSyntacticLexicalEnvironments_)
         *nonSyntacticLexicalEnvironmentsArg +=
             nonSyntacticLexicalEnvironments_->sizeOfIncludingThis(mallocSizeOf);

@@ -4333,8 +4333,12 @@ js::DefFunOperation(JSContext* cx, HandleScript script, HandleObject envChain,
                      : JSPROP_ENUMERATE | JSPROP_PERMANENT;
 
     /* Steps 5d, 5f. */
-    if (!shape || pobj != parent)
-        return DefineProperty(cx, parent, name, rval, nullptr, nullptr, attrs);
+    if (!shape || pobj != parent) {
+        if (!DefineProperty(cx, parent, name, rval, nullptr, nullptr, attrs))
+            return false;
+
+        return parent->is<GlobalObject>() ? parent->compartment()->addToVarNames(cx, name) : true;
+    }
 
     /*
      * Step 5e.
@@ -4347,18 +4351,25 @@ js::DefFunOperation(JSContext* cx, HandleScript script, HandleObject envChain,
      */
     MOZ_ASSERT(parent->isNative() || parent->is<DebugEnvironmentProxy>());
     if (parent->is<GlobalObject>()) {
-        if (shape->configurable())
-            return DefineProperty(cx, parent, name, rval, nullptr, nullptr, attrs);
+        if (shape->configurable()) {
+            if (!DefineProperty(cx, parent, name, rval, nullptr, nullptr, attrs))
+                return false;
+        } else {
+            if (shape->isAccessorDescriptor() || !shape->writable() || !shape->enumerable()) {
+                JSAutoByteString bytes;
+                if (AtomToPrintableString(cx, name, &bytes)) {
+                    JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_CANT_REDEFINE_PROP,
+                                         bytes.ptr());
+                }
 
-        if (shape->isAccessorDescriptor() || !shape->writable() || !shape->enumerable()) {
-            JSAutoByteString bytes;
-            if (AtomToPrintableString(cx, name, &bytes)) {
-                JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_CANT_REDEFINE_PROP,
-                                     bytes.ptr());
+                return false;
             }
-
-            return false;
         }
+
+        // Careful: the presence of a shape, even one appearing to derive from
+        // a variable declaration, doesn't mean it's in [[VarNames]].
+        if (!parent->compartment()->addToVarNames(cx, name))
+            return false;
     }
 
     /*
@@ -4996,15 +5007,8 @@ js::ReportRuntimeRedeclaration(JSContext* cx, HandlePropertyName name, BindingKi
 {
     JSAutoByteString printable;
     if (AtomToPrintableString(cx, name, &printable)) {
-        // We cannot distinguish 'var' declarations from manually defined,
-        // non-configurable global properties.
-        const char* kindStr;
-        if (bindKind == BindingKind::Var)
-            kindStr = "non-configurable global property";
-        else
-            kindStr = BindingKindString(bindKind);
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_REDECLARED_VAR,
-                             kindStr, printable.ptr());
+                             BindingKindString(bindKind), printable.ptr());
     }
 }
 

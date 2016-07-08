@@ -2975,8 +2975,13 @@ js::CheckLexicalNameConflict(JSContext* cx, Handle<LexicalEnvironmentObject*> le
     RootedShape shape(cx);
     if ((shape = lexicalEnv->lookup(cx, name))) {
         redeclKind = Some(shape->writable() ? BindingKind::Let : BindingKind::Const);
-    } else if (varObj->isNative() && (shape = varObj->as<NativeObject>().lookup(cx, name))) {
-        redeclKind = Some(BindingKind::Var);
+    } else if (varObj->isNative()) {
+        if (varObj->is<GlobalObject>()) {
+            if (varObj->compartment()->isInVarNames(name))
+                redeclKind = Some(BindingKind::Var);
+        } else if (varObj->as<NativeObject>().lookup(cx, name)) {
+            redeclKind = Some(BindingKind::Var);
+        }
     } else {
         Rooted<PropertyDescriptor> desc(cx);
         if (!GetOwnPropertyDescriptor(cx, varObj, id, &desc))
