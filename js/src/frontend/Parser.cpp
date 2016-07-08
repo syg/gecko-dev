@@ -4960,9 +4960,9 @@ Parser<ParseHandler>::forHeadStart(YieldHandling yieldHandling,
         if (!forLoopLexicalScope->init(pc))
             return null();
 
-        // Push a temporary ForLoopHead Statement that allows for lexical
-        // declarations, as they are usually disallowed only in braced
-        // contexts.
+        // Push a temporary ForLoopLexicalHead Statement that allows for
+        // lexical declarations, as they are usually allowed only in braced
+        // statements.
         ParseContext::Statement forHeadStmt(pc, StatementKind::ForLoopLexicalHead);
 
         *forInitialPart = declarationList(yieldHandling, tt == TOK_CONST ? PNK_CONST : PNK_LET,
