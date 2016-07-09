@@ -73,9 +73,6 @@ ContainsHoistedDeclaration(ExclusiveContext* cx, ParseNode* node, bool* result)
         return true;
 
       // Non-global lexical declarations are block-scoped (ergo not hoistable).
-      // (Global lexical declarations, in addition to being irrelevant here as
-      // ContainsHoistedDeclaration is only used on the arms of an |if|
-      // statement, are handled by PNK_VAR.)
       case PNK_LET:
       case PNK_CONST:
         MOZ_ASSERT(node->isArity(PN_LIST));
@@ -89,12 +86,11 @@ ContainsHoistedDeclaration(ExclusiveContext* cx, ParseNode* node, bool* result)
         *result = false;
         return true;
 
-      // ContainsHoistedDeclaration is only called on nested nodes, so any
-      // instance of this can't be function statements at body level.  In
-      // SpiderMonkey, a binding induced by a function statement is added when
-      // the function statement is evaluated.  Thus any declaration introduced
-      // by a function statement, as observed by this function, isn't a hoisted
-      // declaration.
+      // Function declarations *can* be hoisted declarations.  But in the
+      // magical world of the rewritten frontend, the declaration necessitated
+      // by a nested function statement, not at body level, doesn't require
+      // that we preserve an unreachable function declaration node against
+      // dead-code removal.
       case PNK_FUNCTION:
         MOZ_ASSERT(node->isArity(PN_CODE));
         *result = false;
@@ -293,7 +289,7 @@ ContainsHoistedDeclaration(ExclusiveContext* cx, ParseNode* node, bool* result)
         MOZ_ASSERT(node->isArity(PN_SCOPE));
         ParseNode* expr = node->pn_expr;
 
-        if (expr->isKind(PNK_FOR))
+        if (expr->isKind(PNK_FOR) || expr->isKind(PNK_FUNCTION))
             return ContainsHoistedDeclaration(cx, expr, result);
 
         MOZ_ASSERT(expr->isKind(PNK_STATEMENTLIST));
