@@ -5,8 +5,6 @@
 //-----------------------------------------------------------------------------
 var BUGNUMBER = 671947;
 var summary = "Unqualified function invocation uses the global object of the called property as |this|";
-var actual = "------------------------";
-var expect = "";
 
 print(BUGNUMBER + ": " + summary);
 
@@ -82,10 +80,5 @@ assertEq(sb.evaluate('(function(){with(b){ return (1,h)(); }})();'), "o");
 assertEq(sb.evaluate('(function(){with(b){ return a.h(); }})();'), "a");
 assertEq(sb.evaluate('(function(){with(b){ return (function(){ return eval("h()");})(); }})();'), "b");
 
-sb.evaluate(
-       'var results = "";\n' +
-
-       ' parent.actual = results;\n' +
-       '');
-
-reportCompare(expect, actual, "ok");
+if (typeof reportCompare === "function");
+  reportCompare(true, true);
