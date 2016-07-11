@@ -6,7 +6,7 @@
 var BUGNUMBER = 671947;
 var summary = "Unqualified function invocation uses the global object of the called property as |this|";
 var actual = "------------------------";
-var expect = "uuaubuabooaoboab";
+var expect = "ooaoboab";
 
 print(BUGNUMBER + ": " + summary);
 
@@ -61,19 +61,19 @@ assertEq(sb.evaluate('(function(){with(b){ return (function(){ return (1,f)();})
 assertEq(sb.evaluate('(function(){with(b){ return (function(){ return a.f();})(); }})();'), "a");
 assertEq(sb.evaluate('(function(){with(b){ return (function(){ return eval("f()");})(); }})();'), "b");
 
+// Same tests as above, but with a strict callee.  We expect the same results,
+// except undefined this is not replaced with the global object.
+assertEq(sb.evaluate('(function(){return g();})();'), "u");
+assertEq(sb.evaluate('(function(){return (1,g)();})();'), "u");
+assertEq(sb.evaluate('(function(){return a.g();})();'), "a");
+assertEq(sb.evaluate('(function(){return eval("g()");})();'), "u");
+assertEq(sb.evaluate('(function(){with(b){ return g(); }})();'), "b");
+assertEq(sb.evaluate('(function(){with(b){ return (1,g)(); }})();'), "u");
+assertEq(sb.evaluate('(function(){with(b){ return a.g(); }})();'), "a");
+assertEq(sb.evaluate('(function(){with(b){ return (function(){ return eval("g()");})(); }})();'), "b");
+
 sb.evaluate(
        'var results = "";\n' +
-
-       ' /* Same tests as above, but with a strict callee. */\n' +
-       ' /* We expect the same results, except undefined this is not replaced with the global object. */\n' +
-       ' results += (function(){return g();})();\n' +
-       ' results += (function(){return (1,g)();})();\n' +
-       ' results += (function(){return a.g();})();\n' +
-       ' results += (function(){return eval("g()");})();\n' +
-       ' results += (function(){with(b){ return g(); }})();\n' +
-       ' results += (function(){with(b){ return (1,g)(); }})();\n' +
-       ' results += (function(){with(b){ return a.g(); }})();\n' +
-       ' results += (function(){with(b){ return (function(){ return eval("g()");})(); }})();\n' +
 
        ' /* Same as the first set, but h is a getter property. */\n' +
        ' results += (function(){return h();})();\n' +
