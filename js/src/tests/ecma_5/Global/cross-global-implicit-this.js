@@ -6,7 +6,7 @@
 var BUGNUMBER = 671947;
 var summary = "Unqualified function invocation uses the global object of the called property as |this|";
 var actual = "------------------------";
-var expect = "ooaoboabuuaubuabooaoboab";
+var expect = "boabuuaubuabooaoboab";
 
 print(BUGNUMBER + ": " + summary);
 
@@ -29,26 +29,31 @@ function h() {
 
 var sb = newGlobal();
 sb.parent = this;
+sb.name = "i";
+sb.f = f;
+sb.g = g;
 
 sb.evaluate(
        '\n' +
-       ' this.name="i";\n' +
-       ' this.f = parent.f;\n' +
-       ' this.g = parent.g;\n' +
-       ' this.a = { name:"a", f:parent.f, g:parent.g };\n' +
-       ' this.b = { name:"b", f:parent.f, g:parent.g };\n' +
+       ' this.a = { name: "a", f: f, g: g };\n' +
+       ' this.b = { name: "b", f: f, g: g };\n' +
        ' Object.defineProperty(this, "h", { get: (function(){ return parent.h; })});\n' +
        ' Object.defineProperty(a, "h", { get: (function(){ return parent.h; })});\n' +
        ' Object.defineProperty(b, "h", { get: (function(){ return parent.h; })});\n' +
+       '');
 
-       ' var results = "";\n' +
 
-       ' /* Three of the first four cases pass undefined (promoted inside the callee to the callee\'s global object). */\n' +
-       ' /* a.f() is the one exception, which passes the base, a, as the this object. */\n' +
-       ' results += (function(){return f();})();\n' +
-       ' results += (function(){return (1,f)();})();\n' +
-       ' results += (function(){return a.f();})();\n' +
-       ' results += (function(){return eval("f()");})();\n' +
+// Three of the first four cases pass undefined (promoted inside the callee to
+// the callee's global object).  a.f() is the one exception, which passes the
+// base, a, as the this object.
+assertEq(sb.evaluate('(function(){return f();})();'), "o");
+assertEq(sb.evaluate('(function(){return (1,f)();})();'), "o");
+assertEq(sb.evaluate('(function(){return a.f();})();'), "a");
+assertEq(sb.evaluate('(function(){return eval("f()");})();'), "o");
+
+sb.evaluate(
+       'var results = "";\n' +
+
        ' /* Same cases as above, but wrapped in a with. The first & last of these cases pass b, */\n' +
        ' /* the object scoped by the with, as the this value. */\n' +
        ' /* a.f() still passes the explicit base, a. (1,f)() is a little tricksier - this passes */\n' +
