@@ -6,7 +6,7 @@
 var BUGNUMBER = 671947;
 var summary = "Unqualified function invocation uses the global object of the called property as |this|";
 var actual = "------------------------";
-var expect = "ooaoboab";
+var expect = "";
 
 print(BUGNUMBER + ": " + summary);
 
@@ -72,18 +72,18 @@ assertEq(sb.evaluate('(function(){with(b){ return (1,g)(); }})();'), "u");
 assertEq(sb.evaluate('(function(){with(b){ return a.g(); }})();'), "a");
 assertEq(sb.evaluate('(function(){with(b){ return (function(){ return eval("g()");})(); }})();'), "b");
 
+/* Same as the first set, but h is a getter property. */
+assertEq(sb.evaluate('(function(){return h();})();'), "o");
+assertEq(sb.evaluate('(function(){return (1,h)();})();'), "o");
+assertEq(sb.evaluate('(function(){return a.h();})();'), "a");
+assertEq(sb.evaluate('(function(){return eval("h()");})();'), "o");
+assertEq(sb.evaluate('(function(){with(b){ return h(); }})();'), "b");
+assertEq(sb.evaluate('(function(){with(b){ return (1,h)(); }})();'), "o");
+assertEq(sb.evaluate('(function(){with(b){ return a.h(); }})();'), "a");
+assertEq(sb.evaluate('(function(){with(b){ return (function(){ return eval("h()");})(); }})();'), "b");
+
 sb.evaluate(
        'var results = "";\n' +
-
-       ' /* Same as the first set, but h is a getter property. */\n' +
-       ' results += (function(){return h();})();\n' +
-       ' results += (function(){return (1,h)();})();\n' +
-       ' results += (function(){return a.h();})();\n' +
-       ' results += (function(){return eval("h()");})();\n' +
-       ' results += (function(){with(b){ return h(); }})();\n' +
-       ' results += (function(){with(b){ return (1,h)(); }})();\n' +
-       ' results += (function(){with(b){ return a.h(); }})();\n' +
-       ' results += (function(){with(b){ return (function(){ return eval("h()");})(); }})();\n' +
 
        ' parent.actual = results;\n' +
        '');
