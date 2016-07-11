@@ -1,4 +1,4 @@
-// |reftest| skip-if(!xulRuntime.shell)
+// |reftest| skip-if(!xulRuntime.shell) -- needs evaluate()
 // Any copyright is dedicated to the Public Domain.
 // http://creativecommons.org/licenses/publicdomain/
 
@@ -27,10 +27,11 @@ function h() {
   return this ? this.name : "v";
 }
 
-var sb = newGlobal('same-compartment');
+var sb = newGlobal();
 sb.parent = this;
 
-evalcx('\n' +
+sb.evaluate(
+       '\n' +
        ' this.name="i";\n' +
        ' this.f = parent.f;\n' +
        ' this.g = parent.g;\n' +
@@ -80,7 +81,6 @@ evalcx('\n' +
        ' results += (function(){with(b){ return (function(){ return eval("h()");})(); }})();\n' +
 
        ' parent.actual = results;\n' +
-       '',
-       sb);
+       '');
 
 reportCompare(expect, actual, "ok");
