@@ -413,6 +413,16 @@ struct JSCompartment
 
     js::WrapperMap               crossCompartmentWrappers;
 
+    // The global environment record's [[VarNames]] list that contains all
+    // names declared using FunctionDeclaration, GeneratorDeclaration, and
+    // VariableDeclaration declarations in global code in this compartment.
+    // Names are only added to this list, never removed -- not even if the
+    // property was created as configurable by eval code, then subsequently
+    // deleted.
+    JS::GCHashSet<JSAtom*,
+                  js::DefaultHasher<JSAtom*>,
+                  js::SystemAllocPolicy> varNames_;
+
   public:
     /* Last time at which an animation was played for a global in this compartment. */
     int64_t                      lastAnimationTime;
@@ -468,6 +478,7 @@ struct JSCompartment
                                 size_t* crossCompartmentWrappers,
                                 size_t* regexpCompartment,
                                 size_t* savedStacksSet,
+                                size_t* varNamesSet,
                                 size_t* nonSyntacticLexicalScopes,
                                 size_t* jitCompartment,
                                 size_t* privateData);
@@ -651,6 +662,14 @@ struct JSCompartment
     }
 
     js::SavedStacks& savedStacks() { return savedStacks_; }
+
+    // Add a name to [[VarNames]].  Reports OOM on failure.
+    MOZ_MUST_USE bool addToVarNames(JSContext* cx, JS::Handle<JSAtom*> name);
+
+    // Whether the given name is in [[VarNames]].
+    bool isInVarNames(JS::Handle<JSAtom*> name) {
+        return varNames_.has(name);
+    }
 
     void findOutgoingEdges(js::gc::ZoneComponentFinder& finder);
 
