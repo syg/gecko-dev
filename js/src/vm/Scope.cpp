@@ -216,13 +216,6 @@ XDRBindingName(XDRState<XDR_DECODE>* xdr, BindingName* bindingName)
     return true;
 }
 
-template <typename ConversionScope>
-static Handle<ConversionScope*>
-XDRConvertHandleScope(HandleScope scope)
-{
-    return scope ? scope.as<ConversionScope>() : nullptr;
-}
-
 template <typename ConcreteScope, XDRMode mode>
 /* static */ bool
 Scope::XDRSizedBindingData(XDRState<mode>* xdr, Handle<ConcreteScope*> scope,
@@ -603,7 +596,7 @@ FunctionScope::XDR(XDRState<mode>* xdr, HandleFunction fun, HandleScope enclosin
     JSContext* cx = xdr->cx();
 
     Rooted<BindingData*> data(cx);
-    if (!XDRSizedBindingData<FunctionScope>(xdr, XDRConvertHandleScope<FunctionScope>(scope), &data))
+    if (!XDRSizedBindingData<FunctionScope>(xdr, scope.as<FunctionScope>(), &data))
         return false;
 
     uint8_t hasDefaults;
@@ -713,7 +706,7 @@ GlobalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, MutableHandleScope scope)
     JSContext* cx = xdr->cx();
 
     Rooted<BindingData*> data(cx);
-    if (!XDRSizedBindingData<GlobalScope>(xdr, XDRConvertHandleScope<GlobalScope>(scope), &data))
+    if (!XDRSizedBindingData<GlobalScope>(xdr, scope.as<GlobalScope>(), &data))
         return false;
 
     if (!xdr->codeUint32(&data->letStart))
@@ -849,7 +842,7 @@ EvalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, HandleScope enclosing,
     JSContext* cx = xdr->cx();
 
     Rooted<BindingData*> data(cx);
-    if (!XDRSizedBindingData<EvalScope>(xdr, XDRConvertHandleScope<EvalScope>(scope), &data))
+    if (!XDRSizedBindingData<EvalScope>(xdr, scope.as<EvalScope>(), &data))
         return false;
 
     if (!xdr->codeUint32(&data->nextFrameSlot))
