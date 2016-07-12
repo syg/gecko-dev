@@ -577,6 +577,9 @@ FunctionScope::clone(JSContext* cx, Handle<FunctionScope*> scope, HandleFunction
     if (!dataClone)
         return nullptr;
 
+    // The bindings are shared. Don't free them!
+    auto freeOnFailure = MakeScopeExit([&dataClone]() { js_free(dataClone); });
+
     dataClone->bindings = scope->data().bindings;
 
     RootedShape envShape(cx);
@@ -591,6 +594,7 @@ FunctionScope::clone(JSContext* cx, Handle<FunctionScope*> scope, HandleFunction
     if (!clone)
         return nullptr;
 
+    freeOnFailure.release();
     dataClone->canonicalFunction.init(fun);
     dataClone->bindings->addRef();
     return &clone->as<FunctionScope>();
