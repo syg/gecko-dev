@@ -6,6 +6,8 @@
 
 #include "vm/Scope.h"
 
+#include "mozilla/ScopeExit.h"
+
 #include "jsscript.h"
 #include "builtin/ModuleObject.h"
 #include "gc/Allocator.h"
@@ -17,6 +19,7 @@ using namespace js;
 using mozilla::Maybe;
 using mozilla::Some;
 using mozilla::Nothing;
+using mozilla::MakeScopeExit;
 
 const char*
 js::BindingKindString(BindingKind kind)
@@ -221,6 +224,14 @@ template <typename ConcreteScope, XDRMode mode>
 Scope::XDRSizedBindingData(XDRState<mode>* xdr, Handle<ConcreteScope*> scope,
                            MutableHandle<typename ConcreteScope::BindingData*> data)
 {
+    MOZ_ASSERT(!data);
+
+    auto freeOnFailure = MakeScopeExit([&data]() {
+        if (mode == XDR_DECODE)
+            js_free(data);
+        data.set(nullptr);
+    });
+
     JSContext* cx = xdr->cx();
 
     uint32_t length;
@@ -245,6 +256,7 @@ Scope::XDRSizedBindingData(XDRState<mode>* xdr, Handle<ConcreteScope*> scope,
             return false;
     }
 
+    freeOnFailure.release();
     return true;
 }
 
