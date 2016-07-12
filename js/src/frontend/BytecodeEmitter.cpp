@@ -615,6 +615,12 @@ BytecodeEmitter::EmitterScope::searchInEnclosingScope(JSAtom* name, Scope* scope
           case ScopeKind::Catch:
           case ScopeKind::Module:
             if (hasEnv) {
+                if (si.kind() == ScopeKind::Function &&
+                    si.scope()->as<FunctionScope>().script()->funHasExtensibleScope())
+                {
+                    return NameLocation::Dynamic();
+                }
+
                 for (BindingIter bi(si.scope()); bi; bi++) {
                     if (bi.name() != name)
                         continue;
