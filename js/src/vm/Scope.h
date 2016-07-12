@@ -277,6 +277,13 @@ class Scope : public js::gc::TenuredCell
         return false;
     }
 
+    // XXX: This isn't really public. Just here so that we can use it from
+    //      static functions in Scope.cpp
+    enum class DataGCState {
+        Unmarked = false,
+        Marked = true
+    };
+
     // GlobalScopes and FunctionScopes have extra data that's needed when
     // cloning and cannot use the generic clone.
     static Scope* clone(JSContext* cx, HandleScope scope, HandleScope enclosing);

@@ -126,11 +126,13 @@ CreateEnvironmentShape(ExclusiveContext* cx, BindingIter& bi, const Class* cls,
 
 template <typename ScopeData>
 static ScopeData*
-CopyBindingData(ExclusiveContext* cx, ScopeData* data, size_t dataSize)
+CopyBindingData(ExclusiveContext* cx, ScopeData* data, size_t dataSize,
+                Scope::DataGCState dataMarked = Scope::DataGCState::Unmarked)
 {
     // The copy itself copies JSAtom* bytes and is not GC safe unless in the
     // presence of an AutoKeepAtoms.
-    MOZ_ASSERT(cx->compartment()->runtimeFromAnyThread()->keepAtoms());
+    MOZ_ASSERT_IF(dataMarked == Scope::DataGCState::Unmarked,
+                  cx->compartment()->runtimeFromAnyThread()->keepAtoms());
 
     uint8_t* copyBytes = cx->zone()->pod_malloc<uint8_t>(dataSize);
     if (!copyBytes) {
@@ -145,7 +147,8 @@ CopyBindingData(ExclusiveContext* cx, ScopeData* data, size_t dataSize)
 template <typename ScopeData>
 static ScopeData*
 CopyBindingData(ExclusiveContext* cx, BindingIter& bi, ScopeData* data, size_t dataSize,
-                const Class* cls, uint32_t baseShapeFlags, MutableHandleShape envShape)
+                const Class* cls, uint32_t baseShapeFlags, MutableHandleShape envShape,
+                Scope::DataGCState dataMarked = Scope::DataGCState::Unmarked)
 {
     // Copy a fresh BindingIter for use below.
     BindingIter freshBi(bi);
@@ -166,7 +169,7 @@ CopyBindingData(ExclusiveContext* cx, BindingIter& bi, ScopeData* data, size_t d
             return nullptr;
     }
 
-    return CopyBindingData(cx, data, dataSize);
+    return CopyBindingData(cx, data, dataSize, dataMarked);
 }
 
 template <typename ScopeData>
