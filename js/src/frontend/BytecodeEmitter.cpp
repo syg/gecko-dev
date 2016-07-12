@@ -1942,13 +1942,6 @@ BytecodeEmitter::emitAtomOp(JSAtom* atom, JSOp op)
     MOZ_ASSERT(atom);
     MOZ_ASSERT(JOF_OPTYPE(op) == JOF_ATOM);
 
-    // .generator lookups should be emitted as JSOP_GETALIASEDVAR instead of
-    // JSOP_GETNAME etc, to bypass |with| objects on the scope chain.
-    // It's safe to emit .this lookups though because |with| objects skip
-    // those.
-    MOZ_ASSERT_IF(op == JSOP_GETNAME || op == JSOP_GETGNAME,
-                  !sc->isDotVariable(atom) || atom == cx->names().dotThis);
-
     if (op == JSOP_GETPROP && atom == cx->names().length) {
         /* Specialize length accesses for the interpreter. */
         op = JSOP_LENGTH;
