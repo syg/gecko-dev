@@ -459,6 +459,11 @@ LexicalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, HandleScope enclosing,
     JSContext* cx = xdr->cx();
 
     Rooted<BindingData*> data(cx);
+    auto freeOnLeave = MakeScopeExit([&data]() {
+        if (mode == XDR_DECODE)
+            js_free(data);
+    });
+
     if (!XDRSizedBindingData<LexicalScope>(xdr, scope.as<LexicalScope>(), &data))
         return false;
 
@@ -470,7 +475,6 @@ LexicalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, HandleScope enclosing,
     if (mode == XDR_DECODE) {
         scope.set(createHelper(cx, kind, data, DataGCState::Marked, nextFrameSlot(enclosing),
                                enclosing));
-        js_free(data);
         if (!scope)
             return false;
     }
@@ -608,6 +612,11 @@ FunctionScope::XDR(XDRState<mode>* xdr, HandleFunction fun, HandleScope enclosin
     JSContext* cx = xdr->cx();
 
     Rooted<BindingData*> data(cx);
+    auto freeOnLeave = MakeScopeExit([&data]() {
+        if (mode == XDR_DECODE)
+            js_free(data);
+    });
+
     if (!XDRSizedBindingData<FunctionScope>(xdr, scope.as<FunctionScope>(), &data))
         return false;
 
@@ -629,20 +638,17 @@ FunctionScope::XDR(XDRState<mode>* xdr, HandleFunction fun, HandleScope enclosin
         return false;
 
     if (mode == XDR_DECODE) {
-        BindingData *localData = data;
-
         if (!data->length) {
             MOZ_ASSERT(!data->nonPositionalFormalStart);
             MOZ_ASSERT(!data->varStart);
             MOZ_ASSERT(!data->nextFrameSlot);
+
+            js_free(data);
             data = nullptr;
         }
 
         scope.set(createHelper(cx, data, DataGCState::Marked, nextFrameSlot(enclosing), hasDefaults,
                                needsEnvironment, fun, enclosing));
-
-        // Free before error checking to avoid leak.
-        js_free(localData);
 
         if (!scope)
             return false;
@@ -718,6 +724,11 @@ GlobalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, MutableHandleScope scope)
     JSContext* cx = xdr->cx();
 
     Rooted<BindingData*> data(cx);
+    auto freeOnLeave = MakeScopeExit([&data]() {
+        if (mode == XDR_DECODE)
+            js_free(data);
+    });
+
     if (!XDRSizedBindingData<GlobalScope>(xdr, scope.as<GlobalScope>(), &data))
         return false;
 
@@ -727,17 +738,14 @@ GlobalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, MutableHandleScope scope)
         return false;
 
     if (mode == XDR_DECODE) {
-        BindingData* localData = data;
-
         if (!data->length) {
             MOZ_ASSERT(!data->letStart);
             MOZ_ASSERT(!data->constStart);
+            js_free(data);
             data = nullptr;
         }
 
         scope.set(createHelper(cx, kind, data, DataGCState::Marked));
-
-        js_free(localData);
 
         if (!scope)
             return false;
@@ -854,6 +862,11 @@ EvalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, HandleScope enclosing,
     JSContext* cx = xdr->cx();
 
     Rooted<BindingData*> data(cx);
+    auto freeOnLeave = MakeScopeExit([&data]() {
+        if (mode == XDR_DECODE)
+            js_free(data);
+    });
+
     if (!XDRSizedBindingData<EvalScope>(xdr, scope.as<EvalScope>(), &data))
         return false;
 
@@ -861,16 +874,13 @@ EvalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, HandleScope enclosing,
         return false;
 
     if (mode == XDR_DECODE) {
-        BindingData* localData = data;
-
         if (!data->length) {
             MOZ_ASSERT(!data->nextFrameSlot);
+            js_free(data);
             data = nullptr;
         }
 
         scope.set(createHelper(cx, kind, data, DataGCState::Marked, enclosing));
-
-        js_free(localData);
 
         if (!scope)
             return false;
