@@ -345,6 +345,12 @@ class LexicalScope : public Scope
         return sizeof(BindingData) + (length - 1) * sizeof(BindingName);
     }
 
+  private:
+    static LexicalScope* createHelper(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
+                                      DataGCState dataMarked, uint32_t firstFrameSlot,
+                                      HandleScope enclosing);
+
+  public:
     static LexicalScope* create(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
                                 uint32_t firstFrameSlot, HandleScope enclosing);
 

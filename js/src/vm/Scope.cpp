@@ -402,6 +402,13 @@ LexicalScope::nextFrameSlot(Scope* scope)
 LexicalScope::create(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
                      uint32_t firstFrameSlot, HandleScope enclosing)
 {
+    return createHelper(cx, kind, data, DataGCState::Unmarked, firstFrameSlot, enclosing);
+}
+
+/* static */ LexicalScope*
+LexicalScope::createHelper(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
+                           DataGCState dataMarked, uint32_t firstFrameSlot, HandleScope enclosing)
+{
     bool isNamedLambda = kind == ScopeKind::NamedLambda || kind == ScopeKind::StrictNamedLambda;
 
     MOZ_ASSERT(data, "LexicalScopes should not be created if there are no bindings.");
@@ -417,7 +424,7 @@ LexicalScope::create(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
     copy = CopyBindingData(cx, bi, data, sizeOfBindingData(data->length),
                            &LexicalEnvironmentObject::class_,
                            BaseShape::NOT_EXTENSIBLE | BaseShape::DELEGATE,
-                           &envShape);
+                           &envShape, dataMarked);
     if (!copy)
         return nullptr;
 
@@ -456,10 +463,11 @@ LexicalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, HandleScope enclosing,
         return false;
 
     if (mode == XDR_DECODE) {
-        scope.set(create(cx, kind, data, nextFrameSlot(enclosing), enclosing));
+        scope.set(createHelper(cx, kind, data, DataGCState::Marked, nextFrameSlot(enclosing),
+                               enclosing));
+        js_free(data);
         if (!scope)
             return false;
-        js_free(data);
     }
 
     return true;
