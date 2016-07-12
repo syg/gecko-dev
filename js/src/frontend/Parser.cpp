@@ -308,7 +308,7 @@ EvalSharedContext::EvalSharedContext(ExclusiveContext* cx, JSObject* enclosingEn
   : SharedContext(cx, Kind::Eval, directives, extraWarnings),
     enclosingScope_(cx, enclosingScope),
     functionBindingEnd(0),
-    bindings(nullptr)
+    bindings(cx)
 {
     computeAllowSyntax(enclosingScope);
     computeInWith(enclosingScope);
@@ -443,9 +443,9 @@ FunctionBox::FunctionBox(ExclusiveContext* cx, LifoAlloc& alloc, ObjectBox* trac
   : ObjectBox(fun, traceListHead),
     SharedContext(cx, Kind::ObjectBox, directives, extraWarnings),
     enclosingScope_(nullptr),
-    namedLambdaBindings(nullptr),
-    defaultsScopeBindings(nullptr),
-    funScopeBindings(nullptr),
+    namedLambdaBindings_(nullptr),
+    defaultsScopeBindings_(nullptr),
+    funScopeBindings_(nullptr),
     functionNode(nullptr),
     bufStart(0),
     bufEnd(0),
@@ -753,7 +753,7 @@ ModuleSharedContext::ModuleSharedContext(ExclusiveContext* cx, ModuleObject* mod
   : SharedContext(cx, Kind::Module, Directives(true), false),
     module_(cx, module),
     enclosingScope_(cx, enclosingScope),
-    bindings(nullptr),
+    bindings(cx),
     builder(builder)
 {
     thisBinding_ = ThisBinding::Module;
@@ -1856,21 +1856,21 @@ Parser<FullParseHandler>::finishFunction()
                                                                            hasDefaults);
         if (!bindings)
             return false;
-        funbox->funScopeBindings = *bindings;
+        funbox->funScopeBindings().set(*bindings);
     }
 
     if (hasDefaults) {
         Maybe<LexicalScope::BindingData*> bindings = newLexicalScopeData(pc->defaultsScope());
         if (!bindings)
             return false;
-        funbox->defaultsScopeBindings = *bindings;
+        funbox->defaultsScopeBindings().set(*bindings);
     }
 
     if (funbox->function()->isNamedLambda()) {
         Maybe<LexicalScope::BindingData*> bindings = newLexicalScopeData(pc->namedLambdaScope());
         if (!bindings)
             return false;
-        funbox->namedLambdaBindings = *bindings;
+        funbox->namedLambdaBindings().set(*bindings);
     }
 
     return true;

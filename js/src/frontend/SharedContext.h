@@ -416,14 +416,14 @@ class MOZ_STACK_CLASS GlobalSharedContext : public SharedContext
     // GlobalScope::BindingData.
     uint32_t functionBindingEnd;
 
-    GlobalScope::BindingData* bindings;
+    Rooted<GlobalScope::BindingData*> bindings;
 
     GlobalSharedContext(ExclusiveContext* cx, ScopeKind scopeKind, Directives directives,
                         bool extraWarnings)
       : SharedContext(cx, Kind::Global, directives, extraWarnings),
         scopeKind_(scopeKind),
         functionBindingEnd(0),
-        bindings(nullptr)
+        bindings(cx)
     {
         MOZ_ASSERT(scopeKind == ScopeKind::Global || scopeKind == ScopeKind::NonSyntactic);
         thisBinding_ = ThisBinding::Global;
@@ -452,7 +452,7 @@ class MOZ_STACK_CLASS EvalSharedContext : public SharedContext
     // EvalScope::BindingData.
     uint32_t functionBindingEnd;
 
-    EvalScope::BindingData* bindings;
+    Rooted<EvalScope::BindingData*> bindings;
 
     EvalSharedContext(ExclusiveContext* cx, JSObject* enclosingEnv, Scope* enclosingScope,
                       Directives directives, bool extraWarnings);
@@ -466,18 +466,18 @@ class FunctionBox : public ObjectBox, public SharedContext
 {
     Scope* enclosingScope_;
 
+    // Names from the named lambda scope, if a named lambda.
+    LexicalScope::BindingData* namedLambdaBindings_;
+
+    // Names from the scope for parameter default expressions, if any.
+    LexicalScope::BindingData* defaultsScopeBindings_;
+
+    // Names from the 'var' scope of the function.
+    FunctionScope::BindingData* funScopeBindings_;
+
     void initWithEnclosingScope(Scope* enclosingScope);
 
   public:
-    // Names from the named lambda scope, if a named lambda.
-    LexicalScope::BindingData* namedLambdaBindings;
-
-    // Names from the scope for parameter default expressions, if any.
-    LexicalScope::BindingData* defaultsScopeBindings;
-
-    // Names from the 'var' scope of the function.
-    FunctionScope::BindingData* funScopeBindings;
-
     ParseNode*      functionNode;           /* back pointer used by asm.js for error messages */
     uint32_t        bufStart;
     uint32_t        bufEnd;
@@ -503,6 +503,21 @@ class FunctionBox : public ObjectBox, public SharedContext
 
     FunctionBox(ExclusiveContext* cx, LifoAlloc& alloc, ObjectBox* traceListHead, JSFunction* fun,
                 Directives directives, bool extraWarnings, GeneratorKind generatorKind);
+
+    MutableHandle<LexicalScope::BindingData*> namedLambdaBindings() {
+        MOZ_ASSERT(context->compartment()->runtimeFromAnyThread()->keepAtoms());
+        return MutableHandle<LexicalScope::BindingData*>::fromMarkedLocation(&namedLambdaBindings_);
+    }
+
+    MutableHandle<LexicalScope::BindingData*> defaultsScopeBindings() {
+        MOZ_ASSERT(context->compartment()->runtimeFromAnyThread()->keepAtoms());
+        return MutableHandle<LexicalScope::BindingData*>::fromMarkedLocation(&defaultsScopeBindings_);
+    }
+
+    MutableHandle<FunctionScope::BindingData*> funScopeBindings() {
+        MOZ_ASSERT(context->compartment()->runtimeFromAnyThread()->keepAtoms());
+        return MutableHandle<FunctionScope::BindingData*>::fromMarkedLocation(&funScopeBindings_);
+    }
 
     void initFromLazyFunction();
     void initStandaloneFunction(Scope* enclosingScope);
@@ -599,7 +614,7 @@ class MOZ_STACK_CLASS ModuleSharedContext : public SharedContext
     RootedScope enclosingScope_;
 
   public:
-    ModuleScope::BindingData* bindings;
+    Rooted<ModuleScope::BindingData*> bindings;
     ModuleBuilder& builder;
 
     ModuleSharedContext(ExclusiveContext* cx, ModuleObject* module, Scope* enclosingScope,

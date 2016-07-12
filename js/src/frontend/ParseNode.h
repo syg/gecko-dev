@@ -608,9 +608,11 @@ class ParseNode
         return !pn_u.scope.bindings;
     }
 
-    LexicalScope::BindingData* scopeBindings() const {
+    Handle<LexicalScope::BindingData*> scopeBindings() const {
         MOZ_ASSERT(!isEmptyScope());
-        return pn_u.scope.bindings;
+        // Bindings' GC safety depend on the presence of an AutoKeepAtoms that
+        // the rest of the frontend also depends on.
+        return Handle<LexicalScope::BindingData*>::fromMarkedLocation(&pn_u.scope.bindings);
     }
 
     ParseNode* scopeBody() const {
@@ -1301,7 +1303,7 @@ struct ClassNode : public TernaryNode {
         MOZ_ASSERT(list->isKind(PNK_CLASSMETHODLIST));
         return list;
     }
-    LexicalScope::BindingData* scopeBindings() const {
+    Handle<LexicalScope::BindingData*> scopeBindings() const {
         MOZ_ASSERT(pn_kid3->is<LexicalScopeNode>());
         return pn_kid3->scopeBindings();
     }
