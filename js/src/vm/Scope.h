@@ -277,6 +277,13 @@ class Scope : public js::gc::TenuredCell
         return false;
     }
 
+    // XXX: This isn't really public. Just here so that we can use it from
+    //      static functions in Scope.cpp
+    enum class DataGCState {
+        Unmarked = false,
+        Marked = true
+    };
+
     // GlobalScopes and FunctionScopes have extra data that's needed when
     // cloning and cannot use the generic clone.
     static Scope* clone(JSContext* cx, HandleScope scope, HandleScope enclosing);
@@ -338,6 +345,12 @@ class LexicalScope : public Scope
         return sizeof(BindingData) + (length - 1) * sizeof(BindingName);
     }
 
+  private:
+    static LexicalScope* createHelper(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
+                                      DataGCState dataMarked, uint32_t firstFrameSlot,
+                                      HandleScope enclosing);
+
+  public:
     static LexicalScope* create(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
                                 uint32_t firstFrameSlot, HandleScope enclosing);
 
@@ -449,6 +462,13 @@ class FunctionScope : public Scope
         return sizeof(BindingData) + (length - 1) * sizeof(BindingName);
     }
 
+  private:
+    static FunctionScope* createHelper(ExclusiveContext* cx, BindingData* data,
+                                       DataGCState dataMarked, uint32_t firstFrameSlot,
+                                       bool hasDefaults, bool needsEnvironment, HandleFunction fun,
+                                       HandleScope enclosing);
+
+  public:
     static FunctionScope* create(ExclusiveContext* cx, BindingData* data, uint32_t firstFrameSlot,
                                  bool hasDefaults, bool needsEnvironment, HandleFunction fun,
                                  HandleScope enclosing);
@@ -561,6 +581,11 @@ class GlobalScope : public Scope
         return sizeof(BindingData) + (length - 1) * sizeof(BindingName);
     }
 
+  private:
+    static GlobalScope* createHelper(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
+                                     DataGCState dataMarked);
+  public:
+
     static GlobalScope* create(ExclusiveContext* cx, ScopeKind kind, BindingData* data);
 
     static GlobalScope* createEmpty(ExclusiveContext* cx, ScopeKind kind) {
@@ -657,9 +682,13 @@ class EvalScope : public Scope
         return sizeof(BindingData) + (length - 1) * sizeof(BindingName);
     }
 
+  private:
+    static EvalScope* createHelper(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
+                                   DataGCState dataMarked, HandleScope enclosing);
+  public:
+
     static EvalScope* create(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
                              HandleScope enclosing);
-
     template <XDRMode mode>
     static bool XDR(XDRState<mode>* xdr, ScopeKind kind, HandleScope enclosing,
                     MutableHandleScope scope);
@@ -1211,7 +1240,7 @@ class ScopeIter
     bool hasSyntacticEnvironment() const;
 
     void trace(JSTracer* trc) {
-        TraceEdge(trc, &scope_, "scope iter scope");
+        TraceNullableEdge(trc, &scope_, "scope iter scope");
     }
 };
 

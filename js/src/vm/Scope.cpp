@@ -126,11 +126,13 @@ CreateEnvironmentShape(ExclusiveContext* cx, BindingIter& bi, const Class* cls,
 
 template <typename ScopeData>
 static ScopeData*
-CopyBindingData(ExclusiveContext* cx, ScopeData* data, size_t dataSize)
+CopyBindingData(ExclusiveContext* cx, ScopeData* data, size_t dataSize,
+                Scope::DataGCState dataMarked = Scope::DataGCState::Unmarked)
 {
     // The copy itself copies JSAtom* bytes and is not GC safe unless in the
     // presence of an AutoKeepAtoms.
-    MOZ_ASSERT(cx->compartment()->runtimeFromAnyThread()->keepAtoms());
+    MOZ_ASSERT_IF(dataMarked == Scope::DataGCState::Unmarked,
+                  cx->compartment()->runtimeFromAnyThread()->keepAtoms());
 
     uint8_t* copyBytes = cx->zone()->pod_malloc<uint8_t>(dataSize);
     if (!copyBytes) {
@@ -145,7 +147,8 @@ CopyBindingData(ExclusiveContext* cx, ScopeData* data, size_t dataSize)
 template <typename ScopeData>
 static ScopeData*
 CopyBindingData(ExclusiveContext* cx, BindingIter& bi, ScopeData* data, size_t dataSize,
-                const Class* cls, uint32_t baseShapeFlags, MutableHandleShape envShape)
+                const Class* cls, uint32_t baseShapeFlags, MutableHandleShape envShape,
+                Scope::DataGCState dataMarked = Scope::DataGCState::Unmarked)
 {
     // Copy a fresh BindingIter for use below.
     BindingIter freshBi(bi);
@@ -166,7 +169,7 @@ CopyBindingData(ExclusiveContext* cx, BindingIter& bi, ScopeData* data, size_t d
             return nullptr;
     }
 
-    return CopyBindingData(cx, data, dataSize);
+    return CopyBindingData(cx, data, dataSize, dataMarked);
 }
 
 template <typename ScopeData>
@@ -213,6 +216,13 @@ XDRBindingName(XDRState<XDR_DECODE>* xdr, BindingName* bindingName)
     return true;
 }
 
+template <typename ConversionScope>
+static Handle<ConversionScope*>
+XDRConvertHandleScope(HandleScope scope)
+{
+    return scope ? scope.as<ConversionScope>() : nullptr;
+}
+
 template <typename ConcreteScope, XDRMode mode>
 /* static */ bool
 Scope::XDRSizedBindingData(XDRState<mode>* xdr, Handle<ConcreteScope*> scope,
@@ -229,7 +239,8 @@ Scope::XDRSizedBindingData(XDRState<mode>* xdr, Handle<ConcreteScope*> scope,
     if (mode == XDR_ENCODE) {
         data.set(&scope->bindingData());
     } else {
-        size_t size = ConcreteScope::sizeOfBindingData(length);
+        size_t lengthForSizeOf = length ? length : 1;
+        size_t size = ConcreteScope::sizeOfBindingData(lengthForSizeOf);
         data.set(NewEmptyScopeData<typename ConcreteScope::BindingData>(cx, size));
         if (!data)
             return false;
@@ -391,6 +402,13 @@ LexicalScope::nextFrameSlot(Scope* scope)
 LexicalScope::create(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
                      uint32_t firstFrameSlot, HandleScope enclosing)
 {
+    return createHelper(cx, kind, data, DataGCState::Unmarked, firstFrameSlot, enclosing);
+}
+
+/* static */ LexicalScope*
+LexicalScope::createHelper(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
+                           DataGCState dataMarked, uint32_t firstFrameSlot, HandleScope enclosing)
+{
     bool isNamedLambda = kind == ScopeKind::NamedLambda || kind == ScopeKind::StrictNamedLambda;
 
     MOZ_ASSERT(data, "LexicalScopes should not be created if there are no bindings.");
@@ -406,7 +424,7 @@ LexicalScope::create(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
     copy = CopyBindingData(cx, bi, data, sizeOfBindingData(data->length),
                            &LexicalEnvironmentObject::class_,
                            BaseShape::NOT_EXTENSIBLE | BaseShape::DELEGATE,
-                           &envShape);
+                           &envShape, dataMarked);
     if (!copy)
         return nullptr;
 
@@ -445,10 +463,11 @@ LexicalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, HandleScope enclosing,
         return false;
 
     if (mode == XDR_DECODE) {
-        scope.set(create(cx, kind, data, nextFrameSlot(enclosing), enclosing));
+        scope.set(createHelper(cx, kind, data, DataGCState::Marked, nextFrameSlot(enclosing),
+                               enclosing));
+        js_free(data);
         if (!scope)
             return false;
-        js_free(data);
     }
 
     return true;
@@ -472,6 +491,15 @@ FunctionScope::create(ExclusiveContext* cx, BindingData* bindings, uint32_t firs
                       bool hasDefaults, bool needsEnvironment, HandleFunction fun,
                       HandleScope enclosing)
 {
+    return createHelper(cx, bindings, DataGCState::Unmarked, firstFrameSlot, hasDefaults,
+                        needsEnvironment, fun, enclosing);
+}
+
+/* static */ FunctionScope*
+FunctionScope::createHelper(ExclusiveContext* cx, BindingData* bindings, DataGCState dataMarked,
+                            uint32_t firstFrameSlot, bool hasDefaults, bool needsEnvironment,
+                            HandleFunction fun, HandleScope enclosing)
+{
     MOZ_ASSERT_IF(firstFrameSlot != 0, firstFrameSlot == nextFrameSlot(enclosing));
     MOZ_ASSERT(fun->isTenured());
 
@@ -491,7 +519,7 @@ FunctionScope::create(ExclusiveContext* cx, BindingData* bindings, uint32_t firs
         BindingIter bi(*bindings, firstFrameSlot, hasDefaults);
         data->bindings = CopyBindingData(cx, bi, bindings, sizeOfBindingData(bindings->length),
                                          &CallObject::class_,
-                                         FunctionScopeEnvShapeFlags, &envShape);
+                                         FunctionScopeEnvShapeFlags, &envShape, dataMarked);
     } else {
         data->bindings = NewEmptyScopeData<BindingData>(cx, sizeOfBindingData(1));
     }
@@ -575,18 +603,18 @@ FunctionScope::XDR(XDRState<mode>* xdr, HandleFunction fun, HandleScope enclosin
     JSContext* cx = xdr->cx();
 
     Rooted<BindingData*> data(cx);
-    if (!XDRSizedBindingData<FunctionScope>(xdr, scope.as<FunctionScope>(), &data))
+    if (!XDRSizedBindingData<FunctionScope>(xdr, XDRConvertHandleScope<FunctionScope>(scope), &data))
         return false;
 
     uint8_t hasDefaults;
-    uint8_t isExtensible;
+    uint8_t needsEnvironment;
     if (mode == XDR_ENCODE) {
         hasDefaults = fun->nonLazyScript()->hasDefaults();
-        isExtensible = fun->nonLazyScript()->funHasExtensibleScope();
+        needsEnvironment = scope->hasEnvironment();
     }
     if (!xdr->codeUint8(&hasDefaults))
         return false;
-    if (!xdr->codeUint8(&isExtensible))
+    if (!xdr->codeUint8(&needsEnvironment))
         return false;
     if (!xdr->codeUint16(&data->nonPositionalFormalStart))
         return false;
@@ -596,11 +624,23 @@ FunctionScope::XDR(XDRState<mode>* xdr, HandleFunction fun, HandleScope enclosin
         return false;
 
     if (mode == XDR_DECODE) {
-        scope.set(create(cx, data, nextFrameSlot(enclosing), hasDefaults, isExtensible,
-                         fun, enclosing));
+        BindingData *localData = data;
+
+        if (!data->length) {
+            MOZ_ASSERT(!data->nonPositionalFormalStart);
+            MOZ_ASSERT(!data->varStart);
+            MOZ_ASSERT(!data->nextFrameSlot);
+            data = nullptr;
+        }
+
+        scope.set(createHelper(cx, data, DataGCState::Marked, nextFrameSlot(enclosing), hasDefaults,
+                               needsEnvironment, fun, enclosing));
+
+        // Free before error checking to avoid leak.
+        js_free(localData);
+
         if (!scope)
             return false;
-        js_free(data);
     }
 
     return true;
@@ -617,7 +657,8 @@ FunctionScope::XDR(XDRState<XDR_DECODE>* xdr, HandleFunction fun, HandleScope en
                    MutableHandleScope scope);
 
 /* static */ GlobalScope*
-GlobalScope::create(ExclusiveContext* cx, ScopeKind kind, BindingData* data)
+GlobalScope::createHelper(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
+                          DataGCState dataMarked)
 {
     // The data that's passed in is from the frontend and is LifoAlloc'd or is
     // from Scope::copy. Copy it now that we're creating a permanent VM scope.
@@ -627,7 +668,7 @@ GlobalScope::create(ExclusiveContext* cx, ScopeKind kind, BindingData* data)
         // global lexical scope and the global object or non-syntactic objects
         // created by embedding, all of which are not only extensible but may
         // have names on them deleted.
-        copy = CopyBindingData(cx, data, sizeOfBindingData(data->length));
+        copy = CopyBindingData(cx, data, sizeOfBindingData(data->length), dataMarked);
     } else {
         copy = NewEmptyScopeData<BindingData>(cx, sizeOfBindingData(1));
     }
@@ -647,6 +688,12 @@ GlobalScope::create(ExclusiveContext* cx, ScopeKind kind, BindingData* data)
 }
 
 /* static */ GlobalScope*
+GlobalScope::create(ExclusiveContext* cx, ScopeKind kind, BindingData* data)
+{
+    return createHelper(cx, kind, data, DataGCState::Unmarked);
+}
+
+/* static */ GlobalScope*
 GlobalScope::clone(JSContext* cx, Handle<GlobalScope*> scope, ScopeKind kind)
 {
     Scope* clone = Scope::create(cx, kind, nullptr, nullptr, scope->data_);
@@ -661,10 +708,12 @@ template <XDRMode mode>
 /* static */ bool
 GlobalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, MutableHandleScope scope)
 {
+    MOZ_ASSERT((mode == XDR_DECODE) == !scope);
+
     JSContext* cx = xdr->cx();
 
     Rooted<BindingData*> data(cx);
-    if (!XDRSizedBindingData<GlobalScope>(xdr, scope.as<GlobalScope>(), &data))
+    if (!XDRSizedBindingData<GlobalScope>(xdr, XDRConvertHandleScope<GlobalScope>(scope), &data))
         return false;
 
     if (!xdr->codeUint32(&data->letStart))
@@ -673,10 +722,20 @@ GlobalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, MutableHandleScope scope)
         return false;
 
     if (mode == XDR_DECODE) {
-        scope.set(create(cx, kind, data));
+        BindingData* localData = data;
+
+        if (!data->length) {
+            MOZ_ASSERT(!data->letStart);
+            MOZ_ASSERT(!data->constStart);
+            data = nullptr;
+        }
+
+        scope.set(createHelper(cx, kind, data, DataGCState::Marked));
+
+        js_free(localData);
+
         if (!scope)
             return false;
-        js_free(data);
     }
 
     return true;
@@ -704,6 +763,13 @@ static const uint32_t EvalScopeEnvShapeFlags =
 EvalScope::create(ExclusiveContext* cx, ScopeKind scopeKind, BindingData* data,
                   HandleScope enclosing)
 {
+    return createHelper(cx, scopeKind, data, DataGCState::Unmarked, enclosing);
+}
+
+/* static */ EvalScope*
+EvalScope::createHelper(ExclusiveContext* cx, ScopeKind scopeKind, BindingData* data,
+                        DataGCState dataMarked, HandleScope enclosing)
+{
     // The data that's passed in is from the frontend and is LifoAlloc'd or is
     // from Scope::copy. Copy it now that we're creating a permanent VM scope.
     RootedShape envShape(cx);
@@ -713,9 +779,11 @@ EvalScope::create(ExclusiveContext* cx, ScopeKind scopeKind, BindingData* data,
             BindingIter bi(*data, true);
             copy = CopyBindingData(cx, bi, data, sizeOfBindingData(data->length),
                                    &CallObject::class_,
-                                   EvalScopeEnvShapeFlags, &envShape);
+                                   EvalScopeEnvShapeFlags, &envShape,
+                                   dataMarked);
         } else {
-            copy = CopyBindingData(cx, data, sizeOfBindingData(data->length));
+            copy = CopyBindingData(cx, data, sizeOfBindingData(data->length),
+                                   dataMarked);
         }
     } else {
         copy = NewEmptyScopeData<BindingData>(cx, sizeOfBindingData(1));
@@ -781,17 +849,26 @@ EvalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, HandleScope enclosing,
     JSContext* cx = xdr->cx();
 
     Rooted<BindingData*> data(cx);
-    if (!XDRSizedBindingData<EvalScope>(xdr, scope.as<EvalScope>(), &data))
+    if (!XDRSizedBindingData<EvalScope>(xdr, XDRConvertHandleScope<EvalScope>(scope), &data))
         return false;
 
     if (!xdr->codeUint32(&data->nextFrameSlot))
         return false;
 
     if (mode == XDR_DECODE) {
-        scope.set(create(cx, kind, data, enclosing));
+        BindingData* localData = data;
+
+        if (!data->length) {
+            MOZ_ASSERT(!data->nextFrameSlot);
+            data = nullptr;
+        }
+
+        scope.set(createHelper(cx, kind, data, DataGCState::Marked, enclosing));
+
+        js_free(localData);
+
         if (!scope)
             return false;
-        js_free(data);
     }
 
     return true;
