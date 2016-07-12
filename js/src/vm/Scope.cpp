@@ -483,6 +483,15 @@ FunctionScope::create(ExclusiveContext* cx, BindingData* bindings, uint32_t firs
                       bool hasDefaults, bool needsEnvironment, HandleFunction fun,
                       HandleScope enclosing)
 {
+    return createHelper(cx, bindings, DataGCState::Unmarked, firstFrameSlot, hasDefaults,
+                        needsEnvironment, fun, enclosing);
+}
+
+/* static */ FunctionScope*
+FunctionScope::createHelper(ExclusiveContext* cx, BindingData* bindings, DataGCState dataMarked,
+                            uint32_t firstFrameSlot, bool hasDefaults, bool needsEnvironment,
+                            HandleFunction fun, HandleScope enclosing)
+{
     MOZ_ASSERT_IF(firstFrameSlot != 0, firstFrameSlot == nextFrameSlot(enclosing));
     MOZ_ASSERT(fun->isTenured());
 
@@ -502,7 +511,7 @@ FunctionScope::create(ExclusiveContext* cx, BindingData* bindings, uint32_t firs
         BindingIter bi(*bindings, firstFrameSlot, hasDefaults);
         data->bindings = CopyBindingData(cx, bi, bindings, sizeOfBindingData(bindings->length),
                                          &CallObject::class_,
-                                         FunctionScopeEnvShapeFlags, &envShape);
+                                         FunctionScopeEnvShapeFlags, &envShape, dataMarked);
     } else {
         data->bindings = NewEmptyScopeData<BindingData>(cx, sizeOfBindingData(1));
     }
@@ -586,7 +595,7 @@ FunctionScope::XDR(XDRState<mode>* xdr, HandleFunction fun, HandleScope enclosin
     JSContext* cx = xdr->cx();
 
     Rooted<BindingData*> data(cx);
-    if (!XDRSizedBindingData<FunctionScope>(xdr, scope.as<FunctionScope>(), &data))
+    if (!XDRSizedBindingData<FunctionScope>(xdr, XDRConvertHandleScope<FunctionScope>(scope), &data))
         return false;
 
     uint8_t hasDefaults;
@@ -607,11 +616,23 @@ FunctionScope::XDR(XDRState<mode>* xdr, HandleFunction fun, HandleScope enclosin
         return false;
 
     if (mode == XDR_DECODE) {
-        scope.set(create(cx, data, nextFrameSlot(enclosing), hasDefaults, isExtensible,
-                         fun, enclosing));
+        BindingData *localData = data;
+
+        if (!data->length) {
+            MOZ_ASSERT(!data->nonPositionalFormalStart);
+            MOZ_ASSERT(!data->varStart);
+            MOZ_ASSERT(!data->nextFrameSlot);
+            data = nullptr;
+        }
+
+        scope.set(createHelper(cx, data, DataGCState::Marked, nextFrameSlot(enclosing), hasDefaults,
+                               isExtensible, fun, enclosing));
+
+        // Free before error checking to avoid leak.
+        js_free(localData);
+
         if (!scope)
             return false;
-        js_free(data);
     }
 
     return true;

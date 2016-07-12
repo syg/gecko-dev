@@ -456,6 +456,13 @@ class FunctionScope : public Scope
         return sizeof(BindingData) + (length - 1) * sizeof(BindingName);
     }
 
+  private:
+    static FunctionScope* createHelper(ExclusiveContext* cx, BindingData* data,
+                                       DataGCState dataMarked, uint32_t firstFrameSlot,
+                                       bool hasDefaults, bool needsEnvironment, HandleFunction fun,
+                                       HandleScope enclosing);
+
+  public:
     static FunctionScope* create(ExclusiveContext* cx, BindingData* data, uint32_t firstFrameSlot,
                                  bool hasDefaults, bool needsEnvironment, HandleFunction fun,
                                  HandleScope enclosing);
