@@ -755,6 +755,13 @@ static const uint32_t EvalScopeEnvShapeFlags =
 EvalScope::create(ExclusiveContext* cx, ScopeKind scopeKind, BindingData* data,
                   HandleScope enclosing)
 {
+    return createHelper(cx, scopeKind, data, DataGCState::Unmarked, enclosing);
+}
+
+/* static */ EvalScope*
+EvalScope::createHelper(ExclusiveContext* cx, ScopeKind scopeKind, BindingData* data,
+                        DataGCState dataMarked, HandleScope enclosing)
+{
     // The data that's passed in is from the frontend and is LifoAlloc'd or is
     // from Scope::copy. Copy it now that we're creating a permanent VM scope.
     RootedShape envShape(cx);
@@ -764,9 +771,11 @@ EvalScope::create(ExclusiveContext* cx, ScopeKind scopeKind, BindingData* data,
             BindingIter bi(*data, true);
             copy = CopyBindingData(cx, bi, data, sizeOfBindingData(data->length),
                                    &CallObject::class_,
-                                   EvalScopeEnvShapeFlags, &envShape);
+                                   EvalScopeEnvShapeFlags, &envShape,
+                                   dataMarked);
         } else {
-            copy = CopyBindingData(cx, data, sizeOfBindingData(data->length));
+            copy = CopyBindingData(cx, data, sizeOfBindingData(data->length),
+                                   dataMarked);
         }
     } else {
         copy = NewEmptyScopeData<BindingData>(cx, sizeOfBindingData(1));
@@ -832,17 +841,26 @@ EvalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, HandleScope enclosing,
     JSContext* cx = xdr->cx();
 
     Rooted<BindingData*> data(cx);
-    if (!XDRSizedBindingData<EvalScope>(xdr, scope.as<EvalScope>(), &data))
+    if (!XDRSizedBindingData<EvalScope>(xdr, XDRConvertHandleScope<EvalScope>(scope), &data))
         return false;
 
     if (!xdr->codeUint32(&data->nextFrameSlot))
         return false;
 
     if (mode == XDR_DECODE) {
-        scope.set(create(cx, kind, data, enclosing));
+        BindingData* localData = data;
+
+        if (!data->length) {
+            MOZ_ASSERT(!data->nextFrameSlot);
+            data = nullptr;
+        }
+
+        scope.set(createHelper(cx, kind, data, DataGCState::Marked, enclosing));
+
+        js_free(localData);
+
         if (!scope)
             return false;
-        js_free(data);
     }
 
     return true;

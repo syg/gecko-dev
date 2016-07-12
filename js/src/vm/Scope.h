@@ -676,9 +676,13 @@ class EvalScope : public Scope
         return sizeof(BindingData) + (length - 1) * sizeof(BindingName);
     }
 
+  private:
+    static EvalScope* createHelper(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
+                                   DataGCState dataMarked, HandleScope enclosing);
+  public:
+
     static EvalScope* create(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
                              HandleScope enclosing);
-
     template <XDRMode mode>
     static bool XDR(XDRState<mode>* xdr, ScopeKind kind, HandleScope enclosing,
                     MutableHandleScope scope);
