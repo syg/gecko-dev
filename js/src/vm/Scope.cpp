@@ -628,7 +628,8 @@ FunctionScope::XDR(XDRState<XDR_DECODE>* xdr, HandleFunction fun, HandleScope en
                    MutableHandleScope scope);
 
 /* static */ GlobalScope*
-GlobalScope::create(ExclusiveContext* cx, ScopeKind kind, BindingData* data)
+GlobalScope::createHelper(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
+                          DataGCState dataMarked)
 {
     // The data that's passed in is from the frontend and is LifoAlloc'd or is
     // from Scope::copy. Copy it now that we're creating a permanent VM scope.
@@ -638,7 +639,7 @@ GlobalScope::create(ExclusiveContext* cx, ScopeKind kind, BindingData* data)
         // global lexical scope and the global object or non-syntactic objects
         // created by embedding, all of which are not only extensible but may
         // have names on them deleted.
-        copy = CopyBindingData(cx, data, sizeOfBindingData(data->length));
+        copy = CopyBindingData(cx, data, sizeOfBindingData(data->length), dataMarked);
     } else {
         copy = NewEmptyScopeData<BindingData>(cx, sizeOfBindingData(1));
     }
@@ -658,6 +659,12 @@ GlobalScope::create(ExclusiveContext* cx, ScopeKind kind, BindingData* data)
 }
 
 /* static */ GlobalScope*
+GlobalScope::create(ExclusiveContext* cx, ScopeKind kind, BindingData* data)
+{
+    return createHelper(cx, kind, data, DataGCState::Unmarked);
+}
+
+/* static */ GlobalScope*
 GlobalScope::clone(JSContext* cx, Handle<GlobalScope*> scope, ScopeKind kind)
 {
     Scope* clone = Scope::create(cx, kind, nullptr, nullptr, scope->data_);
@@ -672,10 +679,12 @@ template <XDRMode mode>
 /* static */ bool
 GlobalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, MutableHandleScope scope)
 {
+    MOZ_ASSERT((mode == XDR_DECODE) == !scope);
+
     JSContext* cx = xdr->cx();
 
     Rooted<BindingData*> data(cx);
-    if (!XDRSizedBindingData<GlobalScope>(xdr, scope.as<GlobalScope>(), &data))
+    if (!XDRSizedBindingData<GlobalScope>(xdr, XDRConvertHandleScope<GlobalScope>(scope), &data))
         return false;
 
     if (!xdr->codeUint32(&data->letStart))
@@ -684,10 +693,20 @@ GlobalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, MutableHandleScope scope)
         return false;
 
     if (mode == XDR_DECODE) {
-        scope.set(create(cx, kind, data));
+        BindingData* localData = data;
+
+        if (!data->length) {
+            MOZ_ASSERT(!data->letStart);
+            MOZ_ASSERT(!data->constStart);
+            data = nullptr;
+        }
+
+        scope.set(createHelper(cx, kind, data, DataGCState::Marked));
+
+        js_free(localData);
+
         if (!scope)
             return false;
-        js_free(data);
     }
 
     return true;

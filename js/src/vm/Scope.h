@@ -568,6 +568,11 @@ class GlobalScope : public Scope
         return sizeof(BindingData) + (length - 1) * sizeof(BindingName);
     }
 
+  private:
+    static GlobalScope* createHelper(ExclusiveContext* cx, ScopeKind kind, BindingData* data,
+                                     DataGCState dataMarked);
+  public:
+
     static GlobalScope* create(ExclusiveContext* cx, ScopeKind kind, BindingData* data);
 
     static GlobalScope* createEmpty(ExclusiveContext* cx, ScopeKind kind) {
