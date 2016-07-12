@@ -425,6 +425,8 @@ LexicalScope::createHelper(ExclusiveContext* cx, ScopeKind kind, BindingData* da
     // from Scope::copy. Copy it now that we're creating a permanent VM scope.
     RootedShape envShape(cx);
     Rooted<BindingData*> copy(cx);
+    auto freeOnFailure = MakeScopeExit([&copy]() { js_free(copy); });
+
     BindingIter bi(*data, firstFrameSlot, isNamedLambda);
     copy = CopyBindingData(cx, bi, data, sizeOfBindingData(data->length),
                            &LexicalEnvironmentObject::class_,
@@ -435,11 +437,10 @@ LexicalScope::createHelper(ExclusiveContext* cx, ScopeKind kind, BindingData* da
 
     Scope* scope = Scope::create(cx, kind, enclosing, envShape,
                                  reinterpret_cast<uintptr_t>(copy.get()));
-    if (!scope) {
-        js_free(copy);
+    if (!scope)
         return nullptr;
-    }
 
+    freeOnFailure.release();
     copy->addRef();
     return &scope->as<LexicalScope>();
 }
@@ -521,6 +522,12 @@ FunctionScope::createHelper(ExclusiveContext* cx, BindingData* bindings, DataGCS
     if (!data)
         return nullptr;
 
+    MOZ_ASSERT(!data->bindings);
+    auto freeOnFailure = MakeScopeExit([&data]() {
+        js_free(data->bindings);
+        js_free(data);
+    });
+
     // The data that's passed in is from the frontend and is LifoAlloc'd or is
     // from Scope::copy. Copy it now that we're creating a permanent VM scope.
     RootedShape envShape(cx);
@@ -550,12 +557,10 @@ FunctionScope::createHelper(ExclusiveContext* cx, BindingData* bindings, DataGCS
 
     Scope* scope = Scope::create(cx, ScopeKind::Function, enclosing, envShape,
                                  reinterpret_cast<uintptr_t>(data.get()));
-    if (!scope) {
-        js_free(data->bindings);
-        js_free(data);
+    if (!scope)
         return nullptr;
-    }
 
+    freeOnFailure.release();
     data->canonicalFunction.init(fun);
     data->bindings->addRef();
     return &scope->as<FunctionScope>();
@@ -674,6 +679,8 @@ GlobalScope::createHelper(ExclusiveContext* cx, ScopeKind kind, BindingData* dat
     // The data that's passed in is from the frontend and is LifoAlloc'd or is
     // from Scope::copy. Copy it now that we're creating a permanent VM scope.
     Rooted<BindingData*> copy(cx);
+    auto freeOnFailure = MakeScopeExit([&copy]() { js_free(copy); });
+
     if (data) {
         // The global scope has no environment shape. Its environment is the
         // global lexical scope and the global object or non-syntactic objects
@@ -689,11 +696,10 @@ GlobalScope::createHelper(ExclusiveContext* cx, ScopeKind kind, BindingData* dat
 
     Scope* scope = Scope::create(cx, kind, nullptr, nullptr,
                                  reinterpret_cast<uintptr_t>(copy.get()));
-    if (!scope) {
-        js_free(copy);
+    if (!scope)
         return nullptr;
-    }
 
+    freeOnFailure.release();
     copy->addRef();
     return &scope->as<GlobalScope>();
 }
@@ -787,6 +793,8 @@ EvalScope::createHelper(ExclusiveContext* cx, ScopeKind scopeKind, BindingData* 
     // from Scope::copy. Copy it now that we're creating a permanent VM scope.
     RootedShape envShape(cx);
     Rooted<BindingData*> copy(cx);
+    auto freeOnFailure = MakeScopeExit([&copy]() { js_free(copy); });
+
     if (data) {
         if (scopeKind == ScopeKind::StrictEval) {
             BindingIter bi(*data, true);
@@ -817,11 +825,10 @@ EvalScope::createHelper(ExclusiveContext* cx, ScopeKind scopeKind, BindingData* 
 
     Scope* scope = Scope::create(cx, scopeKind, enclosing, envShape,
                                  reinterpret_cast<uintptr_t>(copy.get()));
-    if (!scope) {
-        js_free(copy);
+    if (!scope)
         return nullptr;
-    }
 
+    freeOnFailure.release();
     copy->addRef();
     return &scope->as<EvalScope>();
 }
@@ -912,6 +919,12 @@ ModuleScope::create(ExclusiveContext* cx, BindingData* bindings, HandleModuleObj
     if (!data)
         return nullptr;
 
+    MOZ_ASSERT(!data->bindings);
+    auto freeOnFailure = MakeScopeExit([&data]() {
+        js_free(data->bindings);
+        js_free(data);
+    });
+
     // The data that's passed in is from the frontend and is LifoAlloc'd or is
     // from Scope::copy. Copy it now that we're creating a permanent VM scope.
     RootedShape envShape(cx);
@@ -948,12 +961,10 @@ ModuleScope::create(ExclusiveContext* cx, BindingData* bindings, HandleModuleObj
 
     Scope* scope = Scope::create(cx, ScopeKind::Module, enclosing, envShape,
                                  reinterpret_cast<uintptr_t>(data.get()));
-    if (!scope) {
-        js_free(data->bindings);
-        js_free(data);
+    if (!scope)
         return nullptr;
-    }
 
+    freeOnFailure.release();
     data->module.init(module);
     data->bindings->addRef();
     return &scope->as<ModuleScope>();
