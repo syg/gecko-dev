@@ -410,6 +410,8 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
         return Nothing();
     }
 
+    friend bool BytecodeEmitter::needsImplicitThis();
+
     EmitterScope* enclosing(BytecodeEmitter** bce) const {
         // There is an enclosing scope with access to the same frame.
         if (enclosingInFrame())
@@ -2533,8 +2535,9 @@ BytecodeEmitter::needsImplicitThis()
         return true;
 
     // Otherwise see if the current point is under a 'with'.
-    for (EmitterScope* es = innermostEmitterScope; es; es = es->enclosingInFrame()) {
-        if (es->scope(this)->kind() == ScopeKind::With)
+    BytecodeEmitter* bce = this;
+    for (EmitterScope* es = innermostEmitterScope; es; es = es->enclosing(&bce)) {
+        if (es->scope(bce)->kind() == ScopeKind::With)
             return true;
     }
 
