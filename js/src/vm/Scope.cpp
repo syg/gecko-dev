@@ -6,6 +6,8 @@
 
 #include "vm/Scope.h"
 
+#include "mozilla/ScopeExit.h"
+
 #include "jsscript.h"
 #include "builtin/ModuleObject.h"
 #include "gc/Allocator.h"
@@ -17,6 +19,7 @@ using namespace js;
 using mozilla::Maybe;
 using mozilla::Some;
 using mozilla::Nothing;
+using mozilla::MakeScopeExit;
 
 const char*
 js::BindingKindString(BindingKind kind)
@@ -216,18 +219,19 @@ XDRBindingName(XDRState<XDR_DECODE>* xdr, BindingName* bindingName)
     return true;
 }
 
-template <typename ConversionScope>
-static Handle<ConversionScope*>
-XDRConvertHandleScope(HandleScope scope)
-{
-    return scope ? scope.as<ConversionScope>() : nullptr;
-}
-
 template <typename ConcreteScope, XDRMode mode>
 /* static */ bool
 Scope::XDRSizedBindingData(XDRState<mode>* xdr, Handle<ConcreteScope*> scope,
                            MutableHandle<typename ConcreteScope::BindingData*> data)
 {
+    MOZ_ASSERT(!data);
+
+    auto freeOnFailure = MakeScopeExit([&data]() {
+        if (mode == XDR_DECODE)
+            js_free(data);
+        data.set(nullptr);
+    });
+
     JSContext* cx = xdr->cx();
 
     uint32_t length;
@@ -252,6 +256,7 @@ Scope::XDRSizedBindingData(XDRState<mode>* xdr, Handle<ConcreteScope*> scope,
             return false;
     }
 
+    freeOnFailure.release();
     return true;
 }
 
@@ -420,6 +425,8 @@ LexicalScope::createHelper(ExclusiveContext* cx, ScopeKind kind, BindingData* da
     // from Scope::copy. Copy it now that we're creating a permanent VM scope.
     RootedShape envShape(cx);
     Rooted<BindingData*> copy(cx);
+    auto freeOnFailure = MakeScopeExit([&copy]() { js_free(copy); });
+
     BindingIter bi(*data, firstFrameSlot, isNamedLambda);
     copy = CopyBindingData(cx, bi, data, sizeOfBindingData(data->length),
                            &LexicalEnvironmentObject::class_,
@@ -430,11 +437,10 @@ LexicalScope::createHelper(ExclusiveContext* cx, ScopeKind kind, BindingData* da
 
     Scope* scope = Scope::create(cx, kind, enclosing, envShape,
                                  reinterpret_cast<uintptr_t>(copy.get()));
-    if (!scope) {
-        js_free(copy);
+    if (!scope)
         return nullptr;
-    }
 
+    freeOnFailure.release();
     copy->addRef();
     return &scope->as<LexicalScope>();
 }
@@ -454,6 +460,11 @@ LexicalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, HandleScope enclosing,
     JSContext* cx = xdr->cx();
 
     Rooted<BindingData*> data(cx);
+    auto freeOnLeave = MakeScopeExit([&data]() {
+        if (mode == XDR_DECODE)
+            js_free(data);
+    });
+
     if (!XDRSizedBindingData<LexicalScope>(xdr, scope.as<LexicalScope>(), &data))
         return false;
 
@@ -465,7 +476,6 @@ LexicalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, HandleScope enclosing,
     if (mode == XDR_DECODE) {
         scope.set(createHelper(cx, kind, data, DataGCState::Marked, nextFrameSlot(enclosing),
                                enclosing));
-        js_free(data);
         if (!scope)
             return false;
     }
@@ -512,6 +522,12 @@ FunctionScope::createHelper(ExclusiveContext* cx, BindingData* bindings, DataGCS
     if (!data)
         return nullptr;
 
+    MOZ_ASSERT(!data->bindings);
+    auto freeOnFailure = MakeScopeExit([&data]() {
+        js_free(data->bindings);
+        js_free(data);
+    });
+
     // The data that's passed in is from the frontend and is LifoAlloc'd or is
     // from Scope::copy. Copy it now that we're creating a permanent VM scope.
     RootedShape envShape(cx);
@@ -541,12 +557,10 @@ FunctionScope::createHelper(ExclusiveContext* cx, BindingData* bindings, DataGCS
 
     Scope* scope = Scope::create(cx, ScopeKind::Function, enclosing, envShape,
                                  reinterpret_cast<uintptr_t>(data.get()));
-    if (!scope) {
-        js_free(data->bindings);
-        js_free(data);
+    if (!scope)
         return nullptr;
-    }
 
+    freeOnFailure.release();
     data->canonicalFunction.init(fun);
     data->bindings->addRef();
     return &scope->as<FunctionScope>();
@@ -563,6 +577,9 @@ FunctionScope::clone(JSContext* cx, Handle<FunctionScope*> scope, HandleFunction
     if (!dataClone)
         return nullptr;
 
+    // The bindings are shared. Don't free them!
+    auto freeOnFailure = MakeScopeExit([&dataClone]() { js_free(dataClone); });
+
     dataClone->bindings = scope->data().bindings;
 
     RootedShape envShape(cx);
@@ -577,6 +594,7 @@ FunctionScope::clone(JSContext* cx, Handle<FunctionScope*> scope, HandleFunction
     if (!clone)
         return nullptr;
 
+    freeOnFailure.release();
     dataClone->canonicalFunction.init(fun);
     dataClone->bindings->addRef();
     return &clone->as<FunctionScope>();
@@ -603,7 +621,12 @@ FunctionScope::XDR(XDRState<mode>* xdr, HandleFunction fun, HandleScope enclosin
     JSContext* cx = xdr->cx();
 
     Rooted<BindingData*> data(cx);
-    if (!XDRSizedBindingData<FunctionScope>(xdr, XDRConvertHandleScope<FunctionScope>(scope), &data))
+    auto freeOnLeave = MakeScopeExit([&data]() {
+        if (mode == XDR_DECODE)
+            js_free(data);
+    });
+
+    if (!XDRSizedBindingData<FunctionScope>(xdr, scope.as<FunctionScope>(), &data))
         return false;
 
     uint8_t hasDefaults;
@@ -624,20 +647,17 @@ FunctionScope::XDR(XDRState<mode>* xdr, HandleFunction fun, HandleScope enclosin
         return false;
 
     if (mode == XDR_DECODE) {
-        BindingData *localData = data;
-
         if (!data->length) {
             MOZ_ASSERT(!data->nonPositionalFormalStart);
             MOZ_ASSERT(!data->varStart);
             MOZ_ASSERT(!data->nextFrameSlot);
+
+            js_free(data);
             data = nullptr;
         }
 
         scope.set(createHelper(cx, data, DataGCState::Marked, nextFrameSlot(enclosing), hasDefaults,
                                needsEnvironment, fun, enclosing));
-
-        // Free before error checking to avoid leak.
-        js_free(localData);
 
         if (!scope)
             return false;
@@ -663,6 +683,8 @@ GlobalScope::createHelper(ExclusiveContext* cx, ScopeKind kind, BindingData* dat
     // The data that's passed in is from the frontend and is LifoAlloc'd or is
     // from Scope::copy. Copy it now that we're creating a permanent VM scope.
     Rooted<BindingData*> copy(cx);
+    auto freeOnFailure = MakeScopeExit([&copy]() { js_free(copy); });
+
     if (data) {
         // The global scope has no environment shape. Its environment is the
         // global lexical scope and the global object or non-syntactic objects
@@ -678,11 +700,10 @@ GlobalScope::createHelper(ExclusiveContext* cx, ScopeKind kind, BindingData* dat
 
     Scope* scope = Scope::create(cx, kind, nullptr, nullptr,
                                  reinterpret_cast<uintptr_t>(copy.get()));
-    if (!scope) {
-        js_free(copy);
+    if (!scope)
         return nullptr;
-    }
 
+    freeOnFailure.release();
     copy->addRef();
     return &scope->as<GlobalScope>();
 }
@@ -713,7 +734,12 @@ GlobalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, MutableHandleScope scope)
     JSContext* cx = xdr->cx();
 
     Rooted<BindingData*> data(cx);
-    if (!XDRSizedBindingData<GlobalScope>(xdr, XDRConvertHandleScope<GlobalScope>(scope), &data))
+    auto freeOnLeave = MakeScopeExit([&data]() {
+        if (mode == XDR_DECODE)
+            js_free(data);
+    });
+
+    if (!XDRSizedBindingData<GlobalScope>(xdr, scope.as<GlobalScope>(), &data))
         return false;
 
     if (!xdr->codeUint32(&data->letStart))
@@ -722,17 +748,14 @@ GlobalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, MutableHandleScope scope)
         return false;
 
     if (mode == XDR_DECODE) {
-        BindingData* localData = data;
-
         if (!data->length) {
             MOZ_ASSERT(!data->letStart);
             MOZ_ASSERT(!data->constStart);
+            js_free(data);
             data = nullptr;
         }
 
         scope.set(createHelper(cx, kind, data, DataGCState::Marked));
-
-        js_free(localData);
 
         if (!scope)
             return false;
@@ -774,6 +797,8 @@ EvalScope::createHelper(ExclusiveContext* cx, ScopeKind scopeKind, BindingData* 
     // from Scope::copy. Copy it now that we're creating a permanent VM scope.
     RootedShape envShape(cx);
     Rooted<BindingData*> copy(cx);
+    auto freeOnFailure = MakeScopeExit([&copy]() { js_free(copy); });
+
     if (data) {
         if (scopeKind == ScopeKind::StrictEval) {
             BindingIter bi(*data, true);
@@ -804,11 +829,10 @@ EvalScope::createHelper(ExclusiveContext* cx, ScopeKind scopeKind, BindingData* 
 
     Scope* scope = Scope::create(cx, scopeKind, enclosing, envShape,
                                  reinterpret_cast<uintptr_t>(copy.get()));
-    if (!scope) {
-        js_free(copy);
+    if (!scope)
         return nullptr;
-    }
 
+    freeOnFailure.release();
     copy->addRef();
     return &scope->as<EvalScope>();
 }
@@ -849,23 +873,25 @@ EvalScope::XDR(XDRState<mode>* xdr, ScopeKind kind, HandleScope enclosing,
     JSContext* cx = xdr->cx();
 
     Rooted<BindingData*> data(cx);
-    if (!XDRSizedBindingData<EvalScope>(xdr, XDRConvertHandleScope<EvalScope>(scope), &data))
+    auto freeOnLeave = MakeScopeExit([&data]() {
+        if (mode == XDR_DECODE)
+            js_free(data);
+    });
+
+    if (!XDRSizedBindingData<EvalScope>(xdr, scope.as<EvalScope>(), &data))
         return false;
 
     if (!xdr->codeUint32(&data->nextFrameSlot))
         return false;
 
     if (mode == XDR_DECODE) {
-        BindingData* localData = data;
-
         if (!data->length) {
             MOZ_ASSERT(!data->nextFrameSlot);
+            js_free(data);
             data = nullptr;
         }
 
         scope.set(createHelper(cx, kind, data, DataGCState::Marked, enclosing));
-
-        js_free(localData);
 
         if (!scope)
             return false;
@@ -896,6 +922,12 @@ ModuleScope::create(ExclusiveContext* cx, BindingData* bindings, HandleModuleObj
     Rooted<Data*> data(cx, NewEmptyScopeData<Data>(cx, sizeof(Data)));
     if (!data)
         return nullptr;
+
+    MOZ_ASSERT(!data->bindings);
+    auto freeOnFailure = MakeScopeExit([&data]() {
+        js_free(data->bindings);
+        js_free(data);
+    });
 
     // The data that's passed in is from the frontend and is LifoAlloc'd or is
     // from Scope::copy. Copy it now that we're creating a permanent VM scope.
@@ -933,12 +965,10 @@ ModuleScope::create(ExclusiveContext* cx, BindingData* bindings, HandleModuleObj
 
     Scope* scope = Scope::create(cx, ScopeKind::Module, enclosing, envShape,
                                  reinterpret_cast<uintptr_t>(data.get()));
-    if (!scope) {
-        js_free(data->bindings);
-        js_free(data);
+    if (!scope)
         return nullptr;
-    }
 
+    freeOnFailure.release();
     data->module.init(module);
     data->bindings->addRef();
     return &scope->as<ModuleScope>();
