@@ -325,11 +325,9 @@ class SharedContext
     bool allowNewTarget_;
     bool allowSuperProperty_;
     bool allowSuperCall_;
-    bool inWith_;
     bool needsThisTDZChecks_;
 
     void computeAllowSyntax(Scope* scope);
-    void computeInWith(Scope* scope);
     void computeThisBinding(Scope* scope);
 
   public:
@@ -344,7 +342,6 @@ class SharedContext
         allowNewTarget_(false),
         allowSuperProperty_(false),
         allowSuperCall_(false),
-        inWith_(false),
         needsThisTDZChecks_(false)
     { }
 
@@ -368,7 +365,6 @@ class SharedContext
     bool allowNewTarget()              const { return allowNewTarget_; }
     bool allowSuperProperty()          const { return allowSuperProperty_; }
     bool allowSuperCall()              const { return allowSuperCall_; }
-    bool inWith()                      const { return inWith_; }
     bool needsThisTDZChecks()          const { return needsThisTDZChecks_; }
 
     bool hasExplicitUseStrict()        const { return anyCxFlags.hasExplicitUseStrict; }

@@ -410,8 +410,6 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
         return Nothing();
     }
 
-    friend bool BytecodeEmitter::needsImplicitThis();
-
     EmitterScope* enclosing(BytecodeEmitter** bce) const {
         // There is an enclosing scope with access to the same frame.
         if (enclosingInFrame())
@@ -2528,23 +2526,6 @@ BytecodeEmitter::checkRunOnceContext()
     return checkSingletonContext() || (!isInLoop() && isRunOnceLambda());
 }
 
-bool
-BytecodeEmitter::needsImplicitThis()
-{
-    // Short-circuit if there is an enclosing 'with' scope.
-    if (sc->inWith())
-        return true;
-
-    // Otherwise see if the current point is under a 'with'.
-    BytecodeEmitter* bce = this;
-    for (EmitterScope* es = innermostEmitterScope; es; es = es->enclosing(&bce)) {
-        if (es->scope(bce)->kind() == ScopeKind::With)
-            return true;
-    }
-
-    return false;
-}
-
 void
 BytecodeEmitter::tellDebuggerAboutCompiledScript(ExclusiveContext* cx)
 {
@@ -2736,12 +2717,14 @@ BytecodeEmitter::emitGetNameAtLocation(JSAtom* name, const NameLocation& loc, bo
     if (callContext) {
         switch (loc.kind()) {
           case NameLocation::Kind::Dynamic:
-          case NameLocation::Kind::Global: {
-            JSOp thisOp = needsImplicitThis() ? JSOP_IMPLICITTHIS : JSOP_GIMPLICITTHIS;
-            if (!emitAtomOp(name, thisOp))
+            if (!emitAtomOp(name, JSOP_IMPLICITTHIS))
                 return false;
             break;
-          }
+
+          case NameLocation::Kind::Global:
+            if (!emitAtomOp(name, JSOP_GIMPLICITTHIS))
+                return false;
+            break;
 
           case NameLocation::Kind::Intrinsic:
           case NameLocation::Kind::NamedLambdaCallee:
