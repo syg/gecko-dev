@@ -324,7 +324,7 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope, HandleScrip
         IsDefaultClassConstructor,
     };
 
-    uint32_t length, lineno, column, nslots;
+    uint32_t length, lineno, column, nfixed, nslots;
     uint32_t natoms, nsrcnotes, i;
     uint32_t nconsts, nobjects, nscopes, nregexps, ntrynotes, nscopenotes, nyieldoffsets;
     uint32_t prologueLength, version;
@@ -372,7 +372,9 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope, HandleScrip
         version = script->getVersion();
         lineno = script->lineno();
         column = script->column();
+        nfixed = script->nfixed();
         nslots = script->nslots();
+
         bodyScopeIndex = script->bodyScopeIndex();
         natoms = script->natoms();
 
@@ -586,6 +588,7 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope, HandleScrip
 
     if (!xdr->codeUint32(&lineno) ||
         !xdr->codeUint32(&column) ||
+        !xdr->codeUint32(&nfixed) ||
         !xdr->codeUint32(&nslots))
     {
         return false;
@@ -597,6 +600,7 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope, HandleScrip
     if (mode == XDR_DECODE) {
         script->lineno_ = lineno;
         script->column_ = column;
+        script->nfixed_ = nfixed;
         script->nslots_ = nslots;
         script->bodyScopeIndex_ = bodyScopeIndex;
     }
