@@ -1138,7 +1138,8 @@ EnvironmentIter::settle()
                 &env_->as<LexicalEnvironmentObject>().scope() == si_.scope())
             {
                 MOZ_ASSERT(si_.kind() == ScopeKind::ParameterDefaults ||
-                           si_.kind() == ScopeKind::NamedLambda);
+                           si_.kind() == ScopeKind::NamedLambda ||
+                           si_.kind() == ScopeKind::StrictNamedLambda);
                 env_ = &env_->as<EnvironmentObject>().enclosingEnvironment();
             }
             incrementScopeIter();
