@@ -216,6 +216,13 @@ XDRBindingName(XDRState<XDR_DECODE>* xdr, BindingName* bindingName)
     return true;
 }
 
+template <typename ConversionScope>
+static Handle<ConversionScope*>
+XDRConvertHandleScope(HandleScope scope)
+{
+    return scope ? scope.as<ConversionScope>() : nullptr;
+}
+
 template <typename ConcreteScope, XDRMode mode>
 /* static */ bool
 Scope::XDRSizedBindingData(XDRState<mode>* xdr, Handle<ConcreteScope*> scope,
