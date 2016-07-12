@@ -1234,7 +1234,7 @@ IonBuilder::initEnvironmentChain(MDefinition* callee)
         // this for analyses, as the script might not have a baseline script
         // with template objects yet.
         if (fun->needsSomeEnvironmentObject() && !info().isAnalysis()) {
-            if (fun->isNamedLambda()) {
+            if (fun->needsNamedLambdaEnvironment()) {
                 env = createNamedLambdaObject(callee, env);
                 if (!env)
                     return false;
