@@ -599,14 +599,14 @@ FunctionScope::XDR(XDRState<mode>* xdr, HandleFunction fun, HandleScope enclosin
         return false;
 
     uint8_t hasDefaults;
-    uint8_t isExtensible;
+    uint8_t needsEnvironment;
     if (mode == XDR_ENCODE) {
         hasDefaults = fun->nonLazyScript()->hasDefaults();
-        isExtensible = fun->nonLazyScript()->funHasExtensibleScope();
+        needsEnvironment = scope->hasEnvironment();
     }
     if (!xdr->codeUint8(&hasDefaults))
         return false;
-    if (!xdr->codeUint8(&isExtensible))
+    if (!xdr->codeUint8(&needsEnvironment))
         return false;
     if (!xdr->codeUint16(&data->nonPositionalFormalStart))
         return false;
@@ -626,7 +626,7 @@ FunctionScope::XDR(XDRState<mode>* xdr, HandleFunction fun, HandleScope enclosin
         }
 
         scope.set(createHelper(cx, data, DataGCState::Marked, nextFrameSlot(enclosing), hasDefaults,
-                               isExtensible, fun, enclosing));
+                               needsEnvironment, fun, enclosing));
 
         // Free before error checking to avoid leak.
         js_free(localData);
