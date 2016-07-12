@@ -239,7 +239,8 @@ Scope::XDRSizedBindingData(XDRState<mode>* xdr, Handle<ConcreteScope*> scope,
     if (mode == XDR_ENCODE) {
         data.set(&scope->bindingData());
     } else {
-        size_t size = ConcreteScope::sizeOfBindingData(length);
+        size_t lengthForSizeOf = length ? length : 1;
+        size_t size = ConcreteScope::sizeOfBindingData(lengthForSizeOf);
         data.set(NewEmptyScopeData<typename ConcreteScope::BindingData>(cx, size));
         if (!data)
             return false;
