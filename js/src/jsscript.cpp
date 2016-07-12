@@ -704,6 +704,11 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope, HandleScrip
                     return false;
                 break;
               case ScopeKind::With:
+                if (mode == XDR_DECODE) {
+                    scope = WithScope::create(cx, enclosing);
+                    if (!scope)
+                        return false;
+                }
                 break;
               case ScopeKind::Eval:
               case ScopeKind::StrictEval:
