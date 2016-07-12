@@ -1311,7 +1311,7 @@ struct ScopeCastOperation
     template <class U>
     JS::Handle<U*> as() const {
         const Outer& self = *static_cast<const Outer*>(this);
-        MOZ_ASSERT(self->template is<U>());
+        MOZ_ASSERT_IF(self, self->template is<U>());
         return Handle<U*>::fromMarkedLocation(reinterpret_cast<U* const*>(self.address()));
     }
 };
