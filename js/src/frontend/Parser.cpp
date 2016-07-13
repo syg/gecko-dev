@@ -1185,9 +1185,9 @@ Parser<FullParseHandler>::newGlobalScopeData(ParseContext::Scope& scope,
     Vector<BindingName> lets(context);
     Vector<BindingName> consts(context);
 
-    bool closeOverAllBindings = pc->sc()->closeOverAllBindings();
+    bool allBindingsClosedOver = pc->sc()->allBindingsClosedOver();
     for (BindingIter bi = scope.bindings(pc); bi; bi++) {
-        BindingName binding(bi.name(), closeOverAllBindings || bi.closedOver());
+        BindingName binding(bi.name(), allBindingsClosedOver || bi.closedOver());
         switch (bi.kind()) {
           case BindingKind::Var:
             if (bi.declarationKind() == DeclarationKind::BodyLevelFunction) {
@@ -1253,10 +1253,10 @@ Parser<FullParseHandler>::newModuleScopeData(ParseContext::Scope& scope)
     Vector<BindingName> lets(context);
     Vector<BindingName> consts(context);
 
-    bool closeOverAllBindings = pc->sc()->closeOverAllBindings();
+    bool allBindingsClosedOver = pc->sc()->allBindingsClosedOver();
     for (BindingIter bi = scope.bindings(pc); bi; bi++) {
         // Imports are indirect bindings and must not be given known slots.
-        BindingName binding(bi.name(), (closeOverAllBindings || bi.closedOver()) &&
+        BindingName binding(bi.name(), (allBindingsClosedOver || bi.closedOver()) &&
                                        bi.kind() != BindingKind::Import);
         switch (bi.kind()) {
           case BindingKind::Import:
@@ -1365,7 +1365,7 @@ Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope, bool 
     Vector<BindingName> formals(context);
     Vector<BindingName> vars(context);
 
-    bool closeOverAllBindings = pc->sc()->closeOverAllBindings();
+    bool allBindingsClosedOver = pc->sc()->allBindingsClosedOver();
 
     // Positional parameter names must be added in order of appearance as they are
     // referenced using argument slots.
@@ -1386,10 +1386,8 @@ Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope, bool 
             // Do not consider any positional formal parameters closed over if
             // there are parameter defaults. It is the binding in the defaults
             // scope that is closed over instead.
-            bool closedOver = closeOverAllBindings || (p && p->value()->closedOver());
-            if (hasDefaults)
-                closedOver = false;
-            bindName = BindingName(name, closedOver);
+            bindName = BindingName(name, !hasDefaults && (allBindingsClosedOver ||
+                                                          (p && p->value()->closedOver())));
         }
 
         if (!positionalFormals.append(bindName))
@@ -1397,7 +1395,7 @@ Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope, bool 
     }
 
     for (BindingIter bi = scope.bindings(pc); bi; bi++) {
-        BindingName binding(bi.name(), closeOverAllBindings || bi.closedOver());
+        BindingName binding(bi.name(), allBindingsClosedOver || bi.closedOver());
         switch (bi.kind()) {
           case BindingKind::FormalParameter:
             // Positional parameter names are already handled above.
@@ -1449,9 +1447,14 @@ Parser<FullParseHandler>::newLexicalScopeData(ParseContext::Scope& scope)
     Vector<BindingName> lets(context);
     Vector<BindingName> consts(context);
 
-    bool closeOverAllBindings = pc->sc()->closeOverAllBindings();
+    // Unlike other scopes with bindings which are body-level, it is unknown
+    // if pc->sc()->allBindingsClosedOver() is correct at the time of
+    // finishing parsing a lexical scope.
+    //
+    // Instead, pc->sc()->allBindingsClosedOver() is checked in
+    // EmitterScope::enterLexical. Also see comment there.
     for (BindingIter bi = scope.bindings(pc); bi; bi++) {
-        BindingName binding(bi.name(), closeOverAllBindings || bi.closedOver());
+        BindingName binding(bi.name(), bi.closedOver());
         switch (bi.kind()) {
           case BindingKind::Let:
             if (!lets.append(binding))

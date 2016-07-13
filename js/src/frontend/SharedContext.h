@@ -377,7 +377,7 @@ class SharedContext
     void setHasDebuggerStatement()        { anyCxFlags.hasDebuggerStatement        = true; }
     void setHasDirectEval()               { anyCxFlags.hasDirectEval               = true; }
 
-    inline bool closeOverAllBindings();
+    inline bool allBindingsClosedOver();
 
     bool strict() const {
         return strictScript || localStrict;
@@ -655,7 +655,7 @@ SharedContext::asEvalContext()
 // frame, as the generator frame will be copied out to the heap and released
 // only by GC.
 inline bool
-SharedContext::closeOverAllBindings()
+SharedContext::allBindingsClosedOver()
 {
     return bindingsAccessedDynamically() || (isFunctionBox() && asFunctionBox()->isGenerator());
 }
