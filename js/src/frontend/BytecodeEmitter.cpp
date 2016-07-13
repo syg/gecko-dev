@@ -2807,7 +2807,7 @@ BytecodeEmitter::emitSetOrInitializeNameAtLocation(JSAtom* name, const NameLocat
         if (loc.isLexical() && initialize) {
             // INITGLEXICAL always gets the global lexical scope. It doesn't
             // need a BINDGNAME.
-            MOZ_ASSERT(innermostScope()->kind() == ScopeKind::Global);
+            MOZ_ASSERT(innermostScope()->is<GlobalScope>());
             op = JSOP_INITGLEXICAL;
         } else {
             if (!emitIndexOp(JSOP_BINDGNAME, atomIndex))

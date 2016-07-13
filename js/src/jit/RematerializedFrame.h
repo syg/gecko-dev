@@ -128,7 +128,6 @@ class RematerializedFrame
     MOZ_MUST_USE bool pushCallObject(JSContext* cx);
 
     bool hasCallObj() const {
-        MOZ_ASSERT(callee()->needsCallObject());
         return hasCallObj_;
     }
     CallObject& callObj() const;

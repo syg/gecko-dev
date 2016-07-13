@@ -3497,45 +3497,27 @@ IsFunctionCloneable(HandleFunction fun)
     if (!fun->isInterpreted())
         return true;
 
-    // If a function was compiled to be lexically nested inside some other
-    // script, we cannot clone it without breaking the compiler's assumptions.
-    if (Scope* scope = fun->nonLazyScript()->enclosingScope()) {
-        // If the script is directly under the global scope or a non-syntactic
-        // scope, we can clone it.
-        if (scope->is<GlobalScope>())
+    // If a function was compiled with non-global syntactic environments on
+    // the environment chain, we could have baked in EnvironmentCoordinates
+    // into the script. We cannot clone it without breaking the compiler's
+    // assumptions.
+    for (ScopeIter si(fun->nonLazyScript()->enclosingScope()); si; si++) {
+        if (si.scope()->is<GlobalScope>())
             return true;
-
-        // 'eval' scopes are always scoped immediately under a non-extensible
-        // lexical scope.
-        if (scope->is<LexicalScope>()) {
-            LexicalScope& lexicalScope = scope->as<LexicalScope>();
-            if (lexicalScope.hasEnvironment())
-                return false;
-
-            Scope* enclosing = lexicalScope.enclosing();
-
-            // If the script is an indirect eval that is immediately scoped
-            // under the global, we can clone it.
-            if (enclosing->is<EvalScope>())
-                return !enclosing->as<EvalScope>().isNonGlobal();
-        }
-
-        // Any other enclosing scope (e.g., function, block) cannot be
-        // cloned.
-        return false;
+        if (si.hasSyntacticEnvironment())
+            return false;
     }
 
     return true;
 }
 
 static JSObject*
-CloneFunctionObject(JSContext* cx, HandleObject funobj, HandleObject dynamicScope,
-                    HandleScope scope)
+CloneFunctionObject(JSContext* cx, HandleObject funobj, HandleObject env, HandleScope scope)
 {
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
-    assertSameCompartment(cx, dynamicScope);
-    MOZ_ASSERT(dynamicScope);
+    assertSameCompartment(cx, env);
+    MOZ_ASSERT(env);
     // Note that funobj can be in a different compartment.
 
     if (!funobj->is<JSFunction>()) {
@@ -3567,7 +3549,7 @@ CloneFunctionObject(JSContext* cx, HandleObject funobj, HandleObject dynamicScop
         return nullptr;
     }
 
-    if (CanReuseScriptForClone(cx->compartment(), fun, dynamicScope)) {
+    if (CanReuseScriptForClone(cx->compartment(), fun, env)) {
         // If the script is to be reused, either the script can already handle
         // non-syntactic scopes, or there is only the standard global lexical
         // scope.
@@ -3580,10 +3562,10 @@ CloneFunctionObject(JSContext* cx, HandleObject funobj, HandleObject dynamicScop
         MOZ_ASSERT(scope->as<GlobalScope>().isSyntactic() ||
                    fun->nonLazyScript()->hasNonSyntacticScope());
 #endif
-        return CloneFunctionReuseScript(cx, fun, dynamicScope, fun->getAllocKind());
+        return CloneFunctionReuseScript(cx, fun, env, fun->getAllocKind());
     }
 
-    JSFunction* clone = CloneFunctionAndScript(cx, fun, dynamicScope, scope, fun->getAllocKind());
+    JSFunction* clone = CloneFunctionAndScript(cx, fun, env, scope, fun->getAllocKind());
 
 #ifdef DEBUG
     // The cloned function should itself be cloneable.
