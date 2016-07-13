@@ -7359,18 +7359,18 @@ Parser<ParseHandler>::comprehensionFor(GeneratorKind comprehensionKind)
     Node decls = handler.newComprehensionBinding(lhs);
     if (!decls)
         return null();
+
+    Node tail = comprehensionTail(comprehensionKind);
+    if (!tail)
+        return null();
+
+    // Finish the lexical scope after parsing the tail.
     Node lexicalScope = finishLexicalScope(scope, decls);
     if (!lexicalScope)
         return null();
 
-    handler.setOp(assignLhs, JSOP_SETNAME);
-
     Node head = handler.newForHead(PNK_FOROF, lexicalScope, assignLhs, rhs, headPos);
     if (!head)
-        return null();
-
-    Node tail = comprehensionTail(comprehensionKind);
-    if (!tail)
         return null();
 
     return handler.newComprehensionFor(begin, head, tail);
