@@ -1910,11 +1910,10 @@ NonLocalExitControl::prepareForNonLocalJump(BytecodeEmitter::NestableControl* ta
         }
     }
 
-    if (!target) {
-        for (; es != bce_->bodyEmitterScope; es = es->enclosingInFrame()) {
-            if (!leaveScope(es))
-                return false;
-        }
+    EmitterScope* targetEmitterScope = target ? target->emitterScope() : bce_->bodyEmitterScope;
+    for (; es != targetEmitterScope; es = es->enclosingInFrame()) {
+        if (!leaveScope(es))
+            return false;
     }
 
     FLUSH_POPS();
