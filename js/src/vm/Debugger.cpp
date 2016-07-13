@@ -8922,13 +8922,10 @@ DebuggerObject::parameterNames(JSContext* cx, Handle<DebuggerObject*> object,
         MOZ_ASSERT(referent->nargs() == script->numArgs());
 
         if (referent->nargs() > 0) {
-            BindingIter bi(script);
-            for (size_t i = 0; i < referent->nargs(); i++, bi++) {
-                MOZ_ASSERT(bi.argumentSlot() == i);
-                if (bi.name()->length() == 0)
-                    result[i].set(nullptr);
-                else
-                    result[i].set(bi.name());
+            PositionalFormalParameterIter fi(script);
+            for (size_t i = 0; i < referent->nargs(); i++, fi++) {
+                MOZ_ASSERT(fi.argumentSlot() == i);
+                result[i].set(fi.name());
             }
         }
     } else {
