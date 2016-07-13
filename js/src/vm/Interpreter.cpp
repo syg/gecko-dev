@@ -5003,12 +5003,18 @@ js::ReportRuntimeLexicalError(JSContext* cx, unsigned errorNumber,
 }
 
 void
-js::ReportRuntimeRedeclaration(JSContext* cx, HandlePropertyName name, BindingKind bindKind)
+js::ReportRuntimeRedeclaration(JSContext* cx, HandlePropertyName name, BindingKind redeclKind)
+{
+    return ReportRuntimeRedeclaration(cx, name, BindingKindString(redeclKind));
+}
+
+void
+js::ReportRuntimeRedeclaration(JSContext* cx, HandlePropertyName name, const char* redeclKind)
 {
     JSAutoByteString printable;
     if (AtomToPrintableString(cx, name, &printable)) {
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_REDECLARED_VAR,
-                             BindingKindString(bindKind), printable.ptr());
+                             redeclKind, printable.ptr());
     }
 }
 

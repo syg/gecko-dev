@@ -2980,28 +2980,31 @@ bool
 js::CheckLexicalNameConflict(JSContext* cx, Handle<LexicalEnvironmentObject*> lexicalEnv,
                              HandleObject varObj, HandlePropertyName name)
 {
-    Maybe<BindingKind> redeclKind;
+    const char* redeclKind = nullptr;
     RootedId id(cx, NameToId(name));
     RootedShape shape(cx);
-    if ((shape = lexicalEnv->lookup(cx, name))) {
-        redeclKind = Some(shape->writable() ? BindingKind::Let : BindingKind::Const);
-    } else if (varObj->isNative()) {
-        if (varObj->is<GlobalObject>()) {
-            if (varObj->compartment()->isInVarNames(name))
-                redeclKind = Some(BindingKind::Var);
-        } else if (varObj->as<NativeObject>().lookup(cx, name)) {
-            redeclKind = Some(BindingKind::Var);
-        }
+    if (varObj->is<GlobalObject>() && varObj->compartment()->isInVarNames(name)) {
+        // ES 15.1.11 step 5.a
+        redeclKind = BindingKindString(BindingKind::Var);
+    } else if ((shape = lexicalEnv->lookup(cx, name))) {
+        // ES 15.1.11 step 5.b
+        redeclKind = BindingKindString(shape->writable() ? BindingKind::Let : BindingKind::Const);
+    } else if (varObj->isNative() && (shape = varObj->as<NativeObject>().lookup(cx, name))) {
+        // Faster path for ES 15.1.11 step 5.c-d when the shape can be found
+        // without going through a resolve hook.
+        if (!shape->configurable())
+            redeclKind = "non-configurable global property";
     } else {
+        // ES 15.1.11 step 5.c-d
         Rooted<PropertyDescriptor> desc(cx);
         if (!GetOwnPropertyDescriptor(cx, varObj, id, &desc))
             return false;
         if (desc.object() && desc.hasConfigurable() && !desc.configurable())
-            redeclKind = Some(BindingKind::Var);
+            redeclKind = "non-configurable global property";
     }
 
     if (redeclKind) {
-        ReportRuntimeRedeclaration(cx, name, *redeclKind);
+        ReportRuntimeRedeclaration(cx, name, redeclKind);
         return false;
     }
 
