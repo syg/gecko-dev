@@ -1836,6 +1836,28 @@ NonLocalExitControl::prepareForNonLocalJump(BytecodeEmitter::NestableControl* ta
     using NestableControl = BytecodeEmitter::NestableControl;
     using EmitterScope = BytecodeEmitter::EmitterScope;
 
+    // Walk the scope stack and leave the scopes we popped. Leaving a scope
+    // may emit administrative ops like JSOP_POPLEXICALENV but never anything
+    // that manipulates the stack.
+    for (EmitterScope* es = bce_->innermostEmitterScope;
+         es != (target ? target->emitterScope() : bce_->bodyEmitterScope);
+         es = es->enclosingInFrame())
+    {
+        if (!es->leave(bce_, /* nonLocal = */ true))
+            return false;
+
+        // As we pop each scope due to the non-local jump, emit notes that
+        // record the extent of the enclosing scope. These notes will have
+        // their ends recorded in ~NonLocalExitControl().
+        uint32_t enclosingScopeIndex = ScopeNote::NoScopeIndex;
+        if (es->enclosingInFrame())
+            enclosingScopeIndex = es->enclosingInFrame()->index();
+        if (!bce_->scopeNoteList.append(enclosingScopeIndex, bce_->offset(), bce_->inPrologue(),
+                                        openScopeNoteIndex_))
+            return false;
+        openScopeNoteIndex_ = bce_->scopeNoteList.length() - 1;
+    }
+
     int npops = 0;
 
 #define FLUSH_POPS() if (npops && !bce_->flushPops(&npops)) return false
@@ -1880,32 +1902,9 @@ NonLocalExitControl::prepareForNonLocalJump(BytecodeEmitter::NestableControl* ta
     }
 
     FLUSH_POPS();
+    return true;
 
 #undef FLUSH_POPS
-
-    // Walk the scope stack and leave the scopes we popped. Leaving a scope
-    // may emit administrative ops like JSOP_POPLEXICALENV but never anything
-    // that manipulates the stack.
-    for (EmitterScope* es = bce_->innermostEmitterScope;
-         es != (target ? target->emitterScope() : bce_->bodyEmitterScope);
-         es = es->enclosingInFrame())
-    {
-        if (!es->leave(bce_, /* nonLocal = */ true))
-            return false;
-
-        // As we pop each scope due to the non-local jump, emit notes that
-        // record the extent of the enclosing scope. These notes will have
-        // their ends recorded in ~NonLocalExitContrl().
-        uint32_t enclosingScopeIndex = ScopeNote::NoScopeIndex;
-        if (es->enclosingInFrame())
-            enclosingScopeIndex = es->enclosingInFrame()->index();
-        if (!bce_->scopeNoteList.append(enclosingScopeIndex, bce_->offset(), bce_->inPrologue(),
-                                        openScopeNoteIndex_))
-            return false;
-        openScopeNoteIndex_ = bce_->scopeNoteList.length() - 1;
-    }
-
-    return true;
 }
 
 }  // anonymous namespace
@@ -6704,7 +6703,10 @@ BytecodeEmitter::emitReturn(ParseNode* pn)
         return false;
 
     if (isGenerator) {
-        if (!emitGetName(cx->names().dotGenerator))
+        // We know that .generator is on the body scope, as we just exited all
+        // nested scopes.
+        NameLocation loc = bodyEmitterScope->lookup(this, cx->names().dotGenerator);
+        if (!emitGetNameAtLocation(cx->names().dotGenerator, loc))
             return false;
         if (!emitYieldOp(JSOP_FINALYIELDRVAL))
             return false;
