@@ -1806,6 +1806,8 @@ class NonLocalExitControl {
 
     NonLocalExitControl(const NonLocalExitControl&) = delete;
 
+    MOZ_MUST_USE bool leaveScope(BytecodeEmitter::EmitterScope* scope);
+
   public:
     explicit NonLocalExitControl(BytecodeEmitter* bce)
       : bce_(bce),
@@ -1820,12 +1822,32 @@ class NonLocalExitControl {
         bce_->stackDepth = savedDepth_;
     }
 
-    bool prepareForNonLocalJump(BytecodeEmitter::NestableControl* target);
+    MOZ_MUST_USE bool prepareForNonLocalJump(BytecodeEmitter::NestableControl* target);
 
-    bool prepareForNonLocalJumpToOutermost() {
+    MOZ_MUST_USE bool prepareForNonLocalJumpToOutermost() {
         return prepareForNonLocalJump(nullptr);
     }
 };
+
+bool
+NonLocalExitControl::leaveScope(BytecodeEmitter::EmitterScope* es)
+{
+    if (!es->leave(bce_, /* nonLocal = */ true))
+        return false;
+
+    // As we pop each scope due to the non-local jump, emit notes that
+    // record the extent of the enclosing scope. These notes will have
+    // their ends recorded in ~NonLocalExitControl().
+    uint32_t enclosingScopeIndex = ScopeNote::NoScopeIndex;
+    if (es->enclosingInFrame())
+        enclosingScopeIndex = es->enclosingInFrame()->index();
+    if (!bce_->scopeNoteList.append(enclosingScopeIndex, bce_->offset(), bce_->inPrologue(),
+                                    openScopeNoteIndex_))
+        return false;
+    openScopeNoteIndex_ = bce_->scopeNoteList.length() - 1;
+
+    return true;
+}
 
 /*
  * Emit additional bytecode(s) for non-local jumps.
@@ -1836,28 +1858,7 @@ NonLocalExitControl::prepareForNonLocalJump(BytecodeEmitter::NestableControl* ta
     using NestableControl = BytecodeEmitter::NestableControl;
     using EmitterScope = BytecodeEmitter::EmitterScope;
 
-    // Walk the scope stack and leave the scopes we popped. Leaving a scope
-    // may emit administrative ops like JSOP_POPLEXICALENV but never anything
-    // that manipulates the stack.
-    for (EmitterScope* es = bce_->innermostEmitterScope;
-         es != (target ? target->emitterScope() : bce_->bodyEmitterScope);
-         es = es->enclosingInFrame())
-    {
-        if (!es->leave(bce_, /* nonLocal = */ true))
-            return false;
-
-        // As we pop each scope due to the non-local jump, emit notes that
-        // record the extent of the enclosing scope. These notes will have
-        // their ends recorded in ~NonLocalExitControl().
-        uint32_t enclosingScopeIndex = ScopeNote::NoScopeIndex;
-        if (es->enclosingInFrame())
-            enclosingScopeIndex = es->enclosingInFrame()->index();
-        if (!bce_->scopeNoteList.append(enclosingScopeIndex, bce_->offset(), bce_->inPrologue(),
-                                        openScopeNoteIndex_))
-            return false;
-        openScopeNoteIndex_ = bce_->scopeNoteList.length() - 1;
-    }
-
+    EmitterScope* es = bce_->innermostEmitterScope;
     int npops = 0;
 
 #define FLUSH_POPS() if (npops && !bce_->flushPops(&npops)) return false
@@ -1867,6 +1868,14 @@ NonLocalExitControl::prepareForNonLocalJump(BytecodeEmitter::NestableControl* ta
          control != target;
          control = control->enclosing())
     {
+        // Walk the scope stack and leave the scopes we entered. Leaving a scope
+        // may emit administrative ops like JSOP_POPLEXICALENV but never anything
+        // that manipulates the stack.
+        for (; es != control->emitterScope(); es = es->enclosingInFrame()) {
+            if (!leaveScope(es))
+                return false;
+        }
+
         switch (control->kind()) {
           case StatementKind::Finally: {
             TryFinallyControl& finallyControl = control->as<TryFinallyControl>();
@@ -1898,6 +1907,13 @@ NonLocalExitControl::prepareForNonLocalJump(BytecodeEmitter::NestableControl* ta
 
           default:
             break;
+        }
+    }
+
+    if (!target) {
+        for (; es != bce_->bodyEmitterScope; es = es->enclosingInFrame()) {
+            if (!leaveScope(es))
+                return false;
         }
     }
 
