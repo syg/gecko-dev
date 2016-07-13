@@ -647,7 +647,10 @@ Parser<FullParseHandler>::cloneParseTree(ParseNode* opn)
                                                  Directives(/* strict = */ opn->pn_funbox->strict()),
                                                  opn->pn_funbox->generatorKind(),
                                                  /* tryAnnexB = */ false));
-        NULLCHECK(pn->pn_body = cloneParseTree(opn->pn_body));
+        if (opn->pn_body)
+            NULLCHECK(pn->pn_body = cloneParseTree(opn->pn_body));
+        else
+            MOZ_ASSERT(fun->isInterpretedLazy());
         break;
       }
 

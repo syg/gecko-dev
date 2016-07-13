@@ -4410,22 +4410,6 @@ BytecodeEmitter::emitDeclarationList(ParseNode* declList)
              */
             MOZ_ASSERT(decl->isOp(JSOP_NOP));
 
-            // To allow the front end to rewrite |var f = x;| as |f = x;| when a
-            // |function f(){}| precedes the var, detect simple name assignment
-            // here and initialize the name.
-            //
-            // There is a corner case where a function declaration synthesizes
-            // an Annex B declaration, which in turn gets rewritten later as a
-            // simple assignment due to hoisted function declaration of the
-            // same name. For example,
-            //
-            // {
-            //   // Synthesizes an Annex B declaration because no 'f' binding
-            //   // yet exists. This later gets rewritten as an assignment when
-            //   // the outer function 'f' gets hoisted.
-            //   function f() {}
-            // }
-            // function f() {}
             if (decl->pn_left->isKind(PNK_NAME)) {
                 if (!emitSingleDeclaration(declList, decl->pn_left, decl->pn_right))
                     return false;
