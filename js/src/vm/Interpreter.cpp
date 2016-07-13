@@ -4572,13 +4572,6 @@ js::DeleteNameOperation(JSContext* cx, HandlePropertyName name, HandleObject sco
         return true;
     }
 
-    // NAME operations are the slow paths already, so unconditionally check
-    // for uninitialized lets.
-    if (pobj == scope && IsUninitializedLexicalSlot(scope, shape)) {
-        ReportUninitializedLexical(cx, name);
-        return false;
-    }
-
     ObjectOpResult result;
     RootedId id(cx, NameToId(name));
     if (!DeleteProperty(cx, scope, id, result))
