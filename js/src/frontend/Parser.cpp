@@ -3205,15 +3205,13 @@ Parser<ParseHandler>::functionStmt(YieldHandling yieldHandling, DefaultHandling 
     if (!fun)
         return null();
 
-    // Note that we may have synthesized a block for Annex B.3.4 without
-    // having synthesized an assignment for Annex B.3.3, e.g.,
-    //
-    //   let f = 1;
-    //   {
-    //     if (1) function f() {}
-    //   }
-    if (synthesizedScopeForAnnexB)
-        return finishLexicalScope(*synthesizedScopeForAnnexB, fun);
+    if (synthesizedStmtForAnnexB) {
+        Node synthesizedStmtList = handler.newStatementList(handler.getPosition(fun));
+        if (!synthesizedStmtList)
+            return null();
+        handler.addStatementToList(synthesizedStmtList, fun);
+        return finishLexicalScope(*synthesizedScopeForAnnexB, synthesizedStmtList);
+    }
 
     return fun;
 }
