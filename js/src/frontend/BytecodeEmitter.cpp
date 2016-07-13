@@ -608,19 +608,52 @@ BytecodeEmitter::EmitterScope::searchInEnclosingScope(JSAtom* name, Scope* scope
 
         switch (si.kind()) {
           case ScopeKind::Function:
+            if (hasEnv) {
+                JSScript* script = si.scope()->as<FunctionScope>().script();
+                if (script->funHasExtensibleScope())
+                    return NameLocation::Dynamic();
+
+                for (BindingIter bi(si.scope()); bi; bi++) {
+                    if (bi.name() != name)
+                        continue;
+
+                    BindingLocation bindLoc = bi.location();
+                    if (bi.hasArgumentSlot() && !script->strict() && !script->hasDefaults()) {
+                        // Check for duplicate positional formal parameters.
+                        for (BindingIter bi2(bi); bi2 && bi2.hasArgumentSlot(); bi2++) {
+                            if (bi2.name() == name)
+                                bindLoc = bi2.location();
+                        }
+                    }
+
+                    MOZ_ASSERT(bindLoc.kind() == BindingLocation::Kind::Environment);
+                    return NameLocation::EnvironmentCoordinate(bi.kind(), hops, bindLoc.slot());
+                }
+            }
+            break;
+
           case ScopeKind::ParameterDefaults:
           case ScopeKind::Lexical:
           case ScopeKind::NamedLambda:
           case ScopeKind::StrictNamedLambda:
           case ScopeKind::Catch:
+            if (hasEnv) {
+                for (BindingIter bi(si.scope()); bi; bi++) {
+                    if (bi.name() != name)
+                        continue;
+
+                    // The name must already have been marked as closed
+                    // over. If this assertion is hit, there is a bug in the
+                    // name analysis.
+                    BindingLocation bindLoc = bi.location();
+                    MOZ_ASSERT(bindLoc.kind() == BindingLocation::Kind::Environment);
+                    return NameLocation::EnvironmentCoordinate(bi.kind(), hops, bindLoc.slot());
+                }
+            }
+            break;
+
           case ScopeKind::Module:
             if (hasEnv) {
-                if (si.kind() == ScopeKind::Function &&
-                    si.scope()->as<FunctionScope>().script()->funHasExtensibleScope())
-                {
-                    return NameLocation::Dynamic();
-                }
-
                 for (BindingIter bi(si.scope()); bi; bi++) {
                     if (bi.name() != name)
                         continue;
@@ -635,9 +668,6 @@ BytecodeEmitter::EmitterScope::searchInEnclosingScope(JSAtom* name, Scope* scope
                         return NameLocation::Import();
                     }
 
-                    // The name must already have been marked as closed
-                    // over. If this assertion is hit, there is a bug in the
-                    // name analysis.
                     MOZ_ASSERT(bindLoc.kind() == BindingLocation::Kind::Environment);
                     return NameLocation::EnvironmentCoordinate(bi.kind(), hops, bindLoc.slot());
                 }
