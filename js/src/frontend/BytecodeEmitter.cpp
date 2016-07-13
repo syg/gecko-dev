@@ -6265,7 +6265,8 @@ BytecodeEmitter::emitFunction(ParseNode* pn, bool needsProto)
             // name must be found, else there is a bug in the Annex B handling
             // in Parser.
             Maybe<NameLocation> lhsLoc = locationOfNameBoundInScope(name, bodyEmitterScope);
-            MOZ_ASSERT(lhsLoc && lhsLoc->bindingKind() == BindingKind::Var);
+            MOZ_ASSERT(lhsLoc && (lhsLoc->bindingKind() == BindingKind::Var ||
+                                  lhsLoc->bindingKind() == BindingKind::FormalParameter));
             if (!emitSetOrInitializeNameAtLocation(name, *lhsLoc, emitRhs, false))
                 return false;
             if (!emit1(JSOP_POP))
