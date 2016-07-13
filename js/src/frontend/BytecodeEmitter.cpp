@@ -316,6 +316,34 @@ ScopeKindIsInBody(ScopeKind kind)
            kind == ScopeKind::With;
 }
 
+template <typename BindingData>
+static void
+CheckAllBindingsClosedOver(BytecodeEmitter* bce, BindingData& data)
+{
+    // Marks all names as closed over if the the context requires it. This
+    // cannot be done in the Parser as we may not know if the context requires
+    // all bindings to be closed over until after parsing is finished. For
+    // example, legacy generators require all bindings to be closed over but
+    // it is unknown if a function is a legacy generator until the first
+    // 'yield' expression is parsed.
+    if (bce->sc->allBindingsClosedOver()) {
+        for (uint32_t i = 0; i < data.length; i++)
+            data.names[i] = BindingName(data.names[i].name(), true);
+    }
+}
+
+template <>
+void
+CheckAllBindingsClosedOver(BytecodeEmitter* bce, ModuleScope::BindingData& data)
+{
+    // As above, but ignores imports for module bindings, as imports are
+    // indirect and must not be given known slots.
+    if (bce->sc->allBindingsClosedOver()) {
+        for (uint32_t i = data.varStart; i < data.length; i++)
+            data.names[i] = BindingName(data.names[i].name(), true);
+    }
+}
+
 // A scope that that introduces bindings.
 class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterScope>
 {
@@ -795,34 +823,6 @@ BytecodeEmitter::EmitterScope::deadZoneFrameSlotRange(BytecodeEmitter* bce, uint
     }
 
     return true;
-}
-
-template <typename BindingData>
-static void
-CheckAllBindingsClosedOver(BytecodeEmitter* bce, BindingData& data)
-{
-    // Marks all names as closed over if the the context requires it. This
-    // cannot be done in the Parser as we may not know if the context requires
-    // all bindings to be closed over until after parsing is finished. For
-    // example, legacy generators require all bindings to be closed over but
-    // it is unknown if a function is a legacy generator until the first
-    // 'yield' expression is parsed.
-    if (bce->sc->allBindingsClosedOver()) {
-        for (uint32_t i = 0; i < data.length; i++)
-            data.names[i] = BindingName(data.names[i].name(), true);
-    }
-}
-
-template <>
-void
-CheckAllBindingsClosedOver(BytecodeEmitter* bce, ModuleScope::BindingData& data)
-{
-    // As above, but ignores imports for module bindings, as imports are
-    // indirect and must not be given known slots.
-    if (bce->sc->allBindingsClosedOver()) {
-        for (uint32_t i = data.varStart; i < data.length; i++)
-            data.names[i] = BindingName(data.names[i].name(), true);
-    }
 }
 
 bool

@@ -657,9 +657,9 @@ BaselineInspector::templateNamedLambdaObject()
     if (!hasBaselineScript())
         return nullptr;
 
-    JSObject* res = &templateCallObject()->enclosingEnvironment();
-    MOZ_ASSERT(res);
-
+    JSObject* res = baselineScript()->templateEnvironment();
+    if (script->bodyScope()->hasEnvironment())
+        res = res->enclosingEnvironment();
     if (script->hasDefaults() && script->defaultsScope()->hasEnvironment())
         res = res->enclosingEnvironment();
     MOZ_ASSERT(res);
