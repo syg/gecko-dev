@@ -840,7 +840,7 @@ CheckGlobalOrEvalDeclarationConflicts(JSContext* cx, BaselineFrame* frame)
         //
         // Non-strict eval may introduce 'var' bindings that conflict with
         // lexical bindings in an enclosing lexical scope.
-        if (script->callObjScope()->hasEnvironment()) {
+        if (!script->callObjScope()->hasEnvironment()) {
             MOZ_ASSERT(!script->strict() &&
                        script->enclosingScope()->kind() != ScopeKind::ParameterDefaults);
             if (!CheckEvalDeclarationConflicts(cx, script, envChain, varObj))
