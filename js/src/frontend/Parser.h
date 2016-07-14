@@ -189,9 +189,9 @@ class ParseContext : public Nestable<ParseContext>
         // expression scope.
         static MOZ_MUST_USE bool moveFormalParameterDeclaredNamesForDefaults(ParseContext* pc);
 
-        // Remove all VarForAnnexB declarations of a certain name from all scopes
-        // in pc's scope stack.
-        static void removeVarForAnnexB(ParseContext* pc, JSAtom* name);
+        // Remove all VarForAnnexBLexicalFunction declarations of a certain
+        // name from all scopes in pc's scope stack.
+        static void removeVarForAnnexBLexicalFunction(ParseContext* pc, JSAtom* name);
 
         // Remove a simple catch parameter name. Used to implement the odd
         // semantics of Annex B.3.5.
@@ -1191,7 +1191,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     bool noteDestructuredPositionalFormalParameter();
     bool tryDeclareVar(HandlePropertyName name, DeclarationKind kind,
                        mozilla::Maybe<DeclarationKind>* redeclaredKind);
-    bool tryDeclareVarForAnnexB(HandlePropertyName name, bool* tryAnnexB);
+    bool tryDeclareVarForAnnexBLexicalFunction(HandlePropertyName name, bool* tryAnnexB);
     bool checkLexicalDeclarationDirectlyWithinBlock(ParseContext::Statement& stmt,
                                                     DeclarationKind kind, TokenPos pos);
     bool noteDeclaredName(HandlePropertyName name, DeclarationKind kind, TokenPos pos);

@@ -104,7 +104,7 @@ DeclarationKindString(DeclarationKind kind)
         return "function";
       case DeclarationKind::LexicalFunction:
         return "function";
-      case DeclarationKind::VarForAnnexB:
+      case DeclarationKind::VarForAnnexBLexicalFunction:
         return "annex b var";
       case DeclarationKind::ForOfVar:
         return "var in for-of";
@@ -192,7 +192,7 @@ ParseContext::Scope::moveFormalParameterDeclaredNamesForDefaults(ParseContext* p
 }
 
 /* static */ void
-ParseContext::Scope::removeVarForAnnexB(ParseContext* pc, JSAtom* name)
+ParseContext::Scope::removeVarForAnnexBLexicalFunction(ParseContext* pc, JSAtom* name)
 {
     MOZ_ASSERT(!pc->sc()->strict());
 
@@ -201,7 +201,7 @@ ParseContext::Scope::removeVarForAnnexB(ParseContext* pc, JSAtom* name)
          scope = scope->enclosing())
     {
         if (DeclaredNamePtr p = scope->declared().lookup(name)) {
-            if (p->value()->kind() == DeclarationKind::VarForAnnexB)
+            if (p->value()->kind() == DeclarationKind::VarForAnnexBLexicalFunction)
                 scope->declared().remove(p);
         }
     }
@@ -917,7 +917,7 @@ DeclarationKindIsVar(DeclarationKind kind)
 {
     return kind == DeclarationKind::Var ||
            kind == DeclarationKind::BodyLevelFunction ||
-           kind == DeclarationKind::VarForAnnexB ||
+           kind == DeclarationKind::VarForAnnexBLexicalFunction ||
            kind == DeclarationKind::ForOfVar;
 }
 
@@ -958,9 +958,14 @@ Parser<ParseHandler>::tryDeclareVar(HandlePropertyName name, DeclarationKind kin
                 // Annex B.3.5 allows redeclaring simple (non-destructured)
                 // catch parameters with var declarations, except when it
                 // appears in a for-of.
-                if (declaredKind != DeclarationKind::SimpleCatchParameter ||
-                    kind == DeclarationKind::ForOfVar)
-                {
+                bool annexB35Allowance = declaredKind == DeclarationKind::SimpleCatchParameter &&
+                                         kind != DeclarationKind::ForOfVar;
+
+                // Annex B.3.3 allows redeclaring functions in block.
+                bool annexB33Allowance = declaredKind == DeclarationKind::LexicalFunction &&
+                                         kind == DeclarationKind::VarForAnnexBLexicalFunction;
+
+                if (!annexB35Allowance && !annexB33Allowance) {
                     *redeclaredKind = Some(declaredKind);
                     return true;
                 }
@@ -976,17 +981,18 @@ Parser<ParseHandler>::tryDeclareVar(HandlePropertyName name, DeclarationKind kin
 
 template <typename ParseHandler>
 bool
-Parser<ParseHandler>::tryDeclareVarForAnnexB(HandlePropertyName name, bool* tryAnnexB)
+Parser<ParseHandler>::tryDeclareVarForAnnexBLexicalFunction(HandlePropertyName name,
+                                                            bool* tryAnnexB)
 {
     Maybe<DeclarationKind> redeclaredKind;
-    if (!tryDeclareVar(name, DeclarationKind::VarForAnnexB, &redeclaredKind))
+    if (!tryDeclareVar(name, DeclarationKind::VarForAnnexBLexicalFunction, &redeclaredKind))
         return false;
 
     if (redeclaredKind) {
-        // If an early error would have occurred, undo all the VarForAnnexB
-        // declarations.
+        // If an early error would have occurred, undo all the
+        // VarForAnnexBLexicalFunction declarations.
         *tryAnnexB = false;
-        ParseContext::Scope::removeVarForAnnexB(pc, name);
+        ParseContext::Scope::removeVarForAnnexBLexicalFunction(pc, name);
     } else {
         *tryAnnexB = true;
     }
@@ -1080,14 +1086,14 @@ Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind 
             // functions for web compatibility reasons.
             if (pc->sc()->strict() ||
                 (p->value()->kind() != DeclarationKind::LexicalFunction &&
-                 p->value()->kind() != DeclarationKind::VarForAnnexB))
+                 p->value()->kind() != DeclarationKind::VarForAnnexBLexicalFunction))
             {
                 reportRedeclaration(name, p->value()->kind(), pos);
                 return false;
             }
 
             // Update the DeclarationKind to make a LexicalFunction
-            // declaration that shadows the VarForAnnexB.
+            // declaration that shadows the VarForAnnexBLexicalFunction.
             p->value() = DeclaredNameInfo(kind);
         } else {
             if (!scope->addDeclaredName(pc, p, name, kind))
@@ -1125,8 +1131,8 @@ Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind 
             // If the early error would have occurred due to Annex B.3.3
             // semantics, remove the synthesized Annex B var declaration but
             // do not report the redeclaration.
-            if (p->value()->kind() == DeclarationKind::VarForAnnexB) {
-                ParseContext::Scope::removeVarForAnnexB(pc, name);
+            if (p->value()->kind() == DeclarationKind::VarForAnnexBLexicalFunction) {
+                ParseContext::Scope::removeVarForAnnexBLexicalFunction(pc, name);
             } else {
                 reportRedeclaration(name, p->value()->kind(), pos);
                 return false;
@@ -1140,11 +1146,13 @@ Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind 
       }
 
       case DeclarationKind::PositionalFormalParameter:
-        MOZ_CRASH("Positional formal parameter names should use notePositionalFormalParameter");
+        MOZ_CRASH("Positional formal parameter names should use "
+                  "notePositionalFormalParameter");
         break;
 
-      case DeclarationKind::VarForAnnexB:
-        MOZ_CRASH("Synthesized Annex B vars should go through tryDeclareVarForAnnexB");
+      case DeclarationKind::VarForAnnexBLexicalFunction:
+        MOZ_CRASH("Synthesized Annex B vars should go through "
+                  "tryDeclareVarForAnnexBLexicalFunction");
         break;
     }
 
@@ -2601,7 +2609,7 @@ Parser<ParseHandler>::checkFunctionDefinition(HandleAtom funAtom, Node pn, Funct
                 // the function object when its declaration is reached, not at
                 // the start of the block.
 
-                if (!tryDeclareVarForAnnexB(funName, tryAnnexB))
+                if (!tryDeclareVarForAnnexBLexicalFunction(funName, tryAnnexB))
                     return false;
             }
 
