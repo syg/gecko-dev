@@ -319,7 +319,7 @@ class SyntaxParseHandler
 
     MOZ_MUST_USE bool setLastFunctionFormalParameterDefault(Node funcpn, Node pn) { return true; }
     Node newFunctionDefinition() { return NodeFunctionDefinition; }
-    void setComprehensionLambdaBody(Node pn, Node body) {}
+    bool setComprehensionLambdaBody(Node pn, Node body) { return true; }
     void setFunctionFormalParametersAndBody(Node pn, Node kid) {}
     void setFunctionBody(Node pn, Node kid) {}
     void setFunctionBox(Node pn, FunctionBox* funbox) {}

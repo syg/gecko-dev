@@ -7319,13 +7319,18 @@ Parser<ParseHandler>::generatorComprehensionLambda(unsigned begin)
     if (!handler.prependInitialYield(body, generator))
         return null();
 
+    if (!genpc.finishFunctionBodyScope())
+        return null();
+    if (!finishFunction())
+        return null();
     if (!leaveInnerFunction(outerpc))
         return null();
 
     // Note that if we ever start syntax-parsing generators, we will also
     // need to propagate the closed-over variable set to the inner
-    // lazyscript, as in finishFunctionDefinition.
-    handler.setComprehensionLambdaBody(genfn, body);
+    // lazyscript.
+    if (!handler.setComprehensionLambdaBody(genfn, body))
+        return null();
 
     return genfn;
 }
@@ -7374,8 +7379,15 @@ Parser<ParseHandler>::comprehensionFor(GeneratorKind comprehensionKind)
     ParseContext::Scope scope(pc);
     if (!scope.init(pc))
         return null();
-    if (!noteDeclaredName(name, DeclarationKind::Let, namePos))
-        return null();
+
+    {
+        // Push a temporary ForLoopLexicalHead Statement that allows for
+        // lexical declarations, as they are usually allowed only in braced
+        // statements.
+        ParseContext::Statement forHeadStmt(pc, StatementKind::ForLoopLexicalHead);
+        if (!noteDeclaredName(name, DeclarationKind::Let, namePos))
+            return null();
+    }
 
     Node decls = handler.newComprehensionBinding(lhs);
     if (!decls)

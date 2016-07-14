@@ -647,9 +647,13 @@ class FullParseHandler
     ParseNode* newFunctionDefinition() {
         return new_<CodeNode>(PNK_FUNCTION, pos());
     }
-    void setComprehensionLambdaBody(ParseNode* pn, ParseNode* body) {
+    bool setComprehensionLambdaBody(ParseNode* pn, ParseNode* body) {
         MOZ_ASSERT(body->isKind(PNK_STATEMENTLIST));
-        pn->pn_body = body;
+        ParseNode* paramsBody = newList(PNK_PARAMSBODY, body);
+        if (!paramsBody)
+            return false;
+        setFunctionFormalParametersAndBody(pn, paramsBody);
+        return true;
     }
     void setFunctionFormalParametersAndBody(ParseNode* pn, ParseNode* kid) {
         MOZ_ASSERT_IF(kid, kid->isKind(PNK_PARAMSBODY));
