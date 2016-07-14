@@ -5666,7 +5666,8 @@ BytecodeEmitter::emitForOf(ParseNode* forOfLoop, EmitterScope* headLexicalEmitte
         // recreation each iteration. If a lexical scope exists for the head,
         // it must be the innermost one. If that scope has closed-over
         // bindings inducing an environment, recreate the current environment.
-        ParseNode* forOfTarget = forOfHead->pn_kid1 ? forOfHead->pn_kid1 : forOfHead->pn_kid2;
+        DebugOnly<ParseNode*> forOfTarget =
+            forOfHead->pn_kid1 ? forOfHead->pn_kid1 : forOfHead->pn_kid2;
         MOZ_ASSERT(forOfTarget->isKind(PNK_LET) || forOfTarget->isKind(PNK_CONST));
         MOZ_ASSERT(headLexicalEmitterScope == innermostEmitterScope);
         MOZ_ASSERT(headLexicalEmitterScope->scope(this)->kind() == ScopeKind::Lexical);
@@ -5795,7 +5796,8 @@ BytecodeEmitter::emitForIn(ParseNode* forInLoop, EmitterScope* headLexicalEmitte
         // recreation each iteration. If a lexical scope exists for the head,
         // it must be the innermost one. If that scope has closed-over
         // bindings inducing an environment, recreate the current environment.
-        ParseNode* forInTarget = forInHead->pn_kid1 ? forInHead->pn_kid1 : forInHead->pn_kid2;
+        DebugOnly<ParseNode*> forInTarget =
+            forInHead->pn_kid1 ? forInHead->pn_kid1 : forInHead->pn_kid2;
         MOZ_ASSERT(forInTarget->isKind(PNK_LET) || forInTarget->isKind(PNK_CONST));
         MOZ_ASSERT(headLexicalEmitterScope == innermostEmitterScope);
         MOZ_ASSERT(headLexicalEmitterScope->scope(this)->kind() == ScopeKind::Lexical);
