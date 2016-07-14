@@ -471,6 +471,8 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
                                    Handle<LexicalScope::BindingData*> bindings);
     MOZ_MUST_USE bool enterNamedLambda(BytecodeEmitter* bce, FunctionBox* funbox);
     MOZ_MUST_USE bool enterParameterDefaults(BytecodeEmitter* bce, FunctionBox* funbox);
+    MOZ_MUST_USE bool enterComprehensionFor(BytecodeEmitter* bce,
+                                            Handle<LexicalScope::BindingData*> bindings);
     MOZ_MUST_USE bool enterFunctionBody(BytecodeEmitter* bce, FunctionBox* funbox);
     MOZ_MUST_USE bool enterGlobal(BytecodeEmitter* bce, GlobalSharedContext* globalsc);
     MOZ_MUST_USE bool enterEval(BytecodeEmitter* bce, EvalSharedContext* evalsc);
@@ -914,9 +916,34 @@ BytecodeEmitter::EmitterScope::enterNamedLambda(BytecodeEmitter* bce, FunctionBo
 bool
 BytecodeEmitter::EmitterScope::enterParameterDefaults(BytecodeEmitter* bce, FunctionBox* funbox)
 {
-    MOZ_ASSERT(this == bce->innermostEmitterScope);
     MOZ_ASSERT(funbox->hasDefaults() && funbox->defaultsScopeBindings());
     return enterLexical(bce, ScopeKind::ParameterDefaults, funbox->defaultsScopeBindings());
+}
+
+bool
+BytecodeEmitter::EmitterScope::enterComprehensionFor(BytecodeEmitter* bce,
+                                                     Handle<LexicalScope::BindingData*> bindings)
+{
+    if (!enterLexical(bce, ScopeKind::Lexical, bindings))
+        return false;
+
+    // For comprehensions, initialize all lexical names up front to undefined
+    // because they're now a dead feature and don't interact properly with
+    // TDZ.
+    auto nop = [](BytecodeEmitter*, const NameLocation&, bool) {
+        return true;
+    };
+
+    if (!bce->emit1(JSOP_UNDEFINED))
+        return false;
+    for (BindingIter bi(*bindings, frameSlotStart(), /* isNamedLambda = */ false); bi; bi++) {
+        if (!bce->emitInitializeName(bi.name(), nop))
+            return false;
+    }
+    if (!bce->emit1(JSOP_POP))
+        return false;
+
+    return true;
 }
 
 bool
@@ -6085,9 +6112,10 @@ BytecodeEmitter::emitComprehensionForOf(ParseNode* pn)
     // Initialize let bindings with undefined when entering, as the name
     // assigned to is a plain assignment.
     Maybe<EmitterScope> emitterScope;
+    TDZCheckCache tdzCache(this);
     if (lexicalScope) {
         emitterScope.emplace(this);
-        if (!emitterScope->enterLexical(this, ScopeKind::Lexical, loopDecl->scopeBindings()))
+        if (!emitterScope->enterComprehensionFor(this, loopDecl->scopeBindings()))
             return false;
     }
 
@@ -6162,6 +6190,12 @@ BytecodeEmitter::emitComprehensionForOf(ParseNode* pn)
     if (!tryNoteList.append(JSTRY_FOR_OF, stackDepth, top.offset, breakTarget.offset))
         return false;
 
+    if (emitterScope) {
+        if (!emitterScope->leave(this))
+            return false;
+        emitterScope.reset();
+    }
+
     // Pop the result and the iter.
     return emitUint16Operand(JSOP_POPN, 2);               //
 }
@@ -6203,9 +6237,10 @@ BytecodeEmitter::emitComprehensionForIn(ParseNode* pn)
     // Initialize let bindings with undefined when entering, as the name
     // assigned to is a plain assignment.
     Maybe<EmitterScope> emitterScope;
+    TDZCheckCache tdzCache(this);
     if (lexicalScope) {
         emitterScope.emplace(this);
-        if (!emitterScope->enterLexical(this, ScopeKind::Lexical, loopDecl->scopeBindings()))
+        if (!emitterScope->enterComprehensionFor(this, loopDecl->scopeBindings()))
             return false;
     }
 
@@ -6276,6 +6311,12 @@ BytecodeEmitter::emitComprehensionForIn(ParseNode* pn)
         return false;
     if (!emit1(JSOP_ENDITER))
         return false;
+
+    if (emitterScope) {
+        if (!emitterScope->leave(this))
+            return false;
+        emitterScope.reset();
+    }
 
     return true;
 }
