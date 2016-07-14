@@ -1013,7 +1013,7 @@ FoldFunction(ExclusiveContext* cx, ParseNode* node, Parser<FullParseHandler>& pa
 
     // Note: pn_body is null for lazily-parsed functions.
     if (ParseNode*& functionBody = node->pn_body) {
-        if (!Fold(cx, &functionBody, parser, node->pn_funbox->inGenexpLambda))
+        if (!Fold(cx, &functionBody, parser, node->pn_funbox->isGenexpLambda))
             return false;
     }
 

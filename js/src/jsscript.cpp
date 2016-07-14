@@ -2531,7 +2531,7 @@ JSScript::initFromFunctionBox(ExclusiveContext* cx, HandleScript script,
 
     script->funLength_ = funbox->length;
 
-    script->isGeneratorExp_ = funbox->inGenexpLambda;
+    script->isGeneratorExp_ = funbox->isGenexpLambda;
     script->setGeneratorKind(funbox->generatorKind());
 
     PositionalFormalParameterIter fi(script);

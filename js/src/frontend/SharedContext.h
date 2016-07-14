@@ -482,7 +482,7 @@ class FunctionBox : public ObjectBox, public SharedContext
     uint16_t        length;
 
     uint8_t         generatorKindBits_;     /* The GeneratorKind of this function. */
-    bool            inGenexpLambda:1;       /* lambda from generator expression */
+    bool            isGenexpLambda:1;       /* lambda from generator expression */
     bool            hasDestructuringArgs:1; /* arguments list contains destructuring expression */
     bool            useAsm:1;               /* see useAsmOrInsideUseAsm */
     bool            insideUseAsm:1;         /* see useAsmOrInsideUseAsm */
@@ -517,8 +517,7 @@ class FunctionBox : public ObjectBox, public SharedContext
 
     void initFromLazyFunction();
     void initStandaloneFunction(Scope* enclosingScope);
-    void initWithEnclosingContext(SharedContext* enclosing, FunctionSyntaxKind kind,
-                                  bool isGenexpLambda);
+    void initWithEnclosingContext(SharedContext* enclosing, FunctionSyntaxKind kind);
 
     ObjectBox* toObjectBox() override { return this; }
     JSFunction* function() const { return &object->as<JSFunction>(); }

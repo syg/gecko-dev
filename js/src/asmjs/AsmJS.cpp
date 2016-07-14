@@ -6952,8 +6952,7 @@ ParseFunction(ModuleValidator& m, ParseNode** fnOut, unsigned* line)
                                                     /* tryAnnexB = */ false);
     if (!funbox)
         return false;
-    funbox->initWithEnclosingContext(outerpc->sc(), frontend::Statement,
-                                     /* isGenexpLambda = */ false);
+    funbox->initWithEnclosingContext(outerpc->sc(), frontend::Statement);
 
     Directives newDirectives = directives;
     ParseContext funpc(&m.parser(), funbox, &newDirectives);
