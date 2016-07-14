@@ -2156,8 +2156,7 @@ IonBuilder::inspectOpcode(JSOp op)
         MOZ_ASSERT_IF(!info().isAnalysis(),
                       current->environmentChain()->op() == MDefinition::Op_NewCallObject ||
                       current->environmentChain()->op() == MDefinition::Op_NewRunOnceCallObject);
-
-        break;
+        return true;
 
       case JSOP_DEBUGCHECKSELFHOSTED:
       {
