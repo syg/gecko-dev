@@ -996,6 +996,31 @@ Parser<ParseHandler>::tryDeclareVarForAnnexB(HandlePropertyName name, bool* tryA
 
 template <typename ParseHandler>
 bool
+Parser<ParseHandler>::checkLexicalDeclarationDirectlyWithinBlock(DeclarationKind kind,
+                                                                 TokenPos pos)
+{
+    MOZ_ASSERT(DeclarationKindIsLexical(kind));
+    MOZ_ASSERT(pc->innermostStatement());
+
+    // It is an early error to declare a lexical binding not directly
+    // within a block.
+    ParseContext::Statement* stmt = pc->innermostStatement();
+    if (!StatementKindIsBraced(stmt->kind()) &&
+        stmt->kind() != StatementKind::ForLoopLexicalHead)
+    {
+        reportWithOffset(ParseError, false, pos.begin,
+                         stmt->kind() == StatementKind::Label
+                         ? JSMSG_LEXICAL_DECL_LABEL
+                         : JSMSG_LEXICAL_DECL_NOT_IN_BLOCK,
+                         DeclarationKindString(kind));
+        return false;
+    }
+
+    return true;
+}
+
+template <typename ParseHandler>
+bool
 Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind kind,
                                        TokenPos pos)
 {
@@ -1040,12 +1065,18 @@ Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind 
       }
 
       case DeclarationKind::LexicalFunction: {
+        if (pc->innermostStatement() && !checkLexicalDeclarationDirectlyWithinBlock(kind, pos))
+            return false;
+
         ParseContext::Scope* scope = pc->innermostScope();
         AddDeclaredNamePtr p = scope->lookupDeclaredNameForAdd(name);
 
         if (p) {
-            // In sloppy mode, lexical functions may be redeclared for web
-            // compatibility reasons.
+            // It is usually an early error if there is another declaration
+            // with the same name in the same scope.
+            //
+            // In sloppy mode, lexical functions may redeclare other lexical
+            // functions for web compatibility reasons.
             if (pc->sc()->strict() ||
                 (p->value()->kind() != DeclarationKind::LexicalFunction &&
                  p->value()->kind() != DeclarationKind::VarForAnnexB))
@@ -1080,23 +1111,11 @@ Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind 
 
       case DeclarationKind::SimpleCatchParameter:
       case DeclarationKind::CatchParameter: {
-        // It is an early error to declare a lexical binding not directly
-        // within a block. It is an early error if there is another
-        // declaration with the same name in the same scope.
+        if (pc->innermostStatement() && !checkLexicalDeclarationDirectlyWithinBlock(kind, pos))
+            return false;
 
-        if (ParseContext::Statement* stmt = pc->innermostStatement()) {
-            if (!StatementKindIsBraced(stmt->kind()) &&
-                stmt->kind() != StatementKind::ForLoopLexicalHead)
-            {
-                reportWithOffset(ParseError, false, pos.begin,
-                                 stmt->kind() == StatementKind::Label
-                                 ? JSMSG_LEXICAL_DECL_LABEL
-                                 : JSMSG_LEXICAL_DECL_NOT_IN_BLOCK,
-                                 DeclarationKindString(kind));
-                return false;
-            }
-        }
-
+        // It is an early error if there is another declaration with the same
+        // name in the same scope.
         ParseContext::Scope* scope = pc->innermostScope();
         AddDeclaredNamePtr p = scope->lookupDeclaredNameForAdd(name);
         if (p) {

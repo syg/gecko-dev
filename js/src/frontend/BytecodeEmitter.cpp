@@ -567,6 +567,9 @@ BytecodeEmitter::EmitterScope::dump(BytecodeEmitter* bce)
             fprintf(stdout, "environment hops=%u slot=%u\n",
                     l.environmentCoordinate().hops(), l.environmentCoordinate().slot());
             break;
+          case NameLocation::Kind::DynamicAnnexBVar:
+            fprintf(stdout, "dynamic annex b var\n");
+            break;
         }
     }
 
@@ -2780,6 +2783,9 @@ BytecodeEmitter::emitGetNameAtLocation(JSAtom* name, const NameLocation& loc, bo
         if (!emitEnvCoordOp(JSOP_GETALIASEDVAR, loc.environmentCoordinate()))
             return false;
         break;
+
+      case NameLocation::Kind::DynamicAnnexBVar:
+        MOZ_CRASH("Synthesized vars for Annex B.3.3 should only be used in initialization");
     }
 
     // Need to provide |this| value for call.
@@ -2804,6 +2810,9 @@ BytecodeEmitter::emitGetNameAtLocation(JSAtom* name, const NameLocation& loc, bo
             if (!emit1(JSOP_UNDEFINED))
                 return false;
             break;
+
+          case NameLocation::Kind::DynamicAnnexBVar:
+            MOZ_CRASH("Synthesized vars for Annex B.3.3 should only be used in initialization");
         }
     }
 
@@ -2825,12 +2834,21 @@ BytecodeEmitter::emitSetOrInitializeNameAtLocation(JSAtom* name, const NameLocat
 
     switch (loc.kind()) {
       case NameLocation::Kind::Dynamic:
-      case NameLocation::Kind::Import: {
+      case NameLocation::Kind::Import:
+      case NameLocation::Kind::DynamicAnnexBVar: {
         uint32_t atomIndex;
         if (!makeAtomIndex(name, &atomIndex))
             return false;
-        if (!emitIndexOp(JSOP_BINDNAME, atomIndex))
-            return false;
+        if (loc.kind() == NameLocation::Kind::DynamicAnnexBVar) {
+            // Annex B vars always go on the nearest variable environment,
+            // even if lexical environments in between contain same-named
+            // bindings.
+            if (!emit1(JSOP_BINDVAR))
+                return false;
+        } else {
+            if (!emitIndexOp(JSOP_BINDNAME, atomIndex))
+                return false;
+        }
         emittedBindOp = true;
         if (!emitRhs(this, loc, emittedBindOp))
             return false;
@@ -6304,9 +6322,15 @@ BytecodeEmitter::emitFunction(ParseNode* pn, bool needsProto)
             // Get the location of the 'var' binding in the body scope. The
             // name must be found, else there is a bug in the Annex B handling
             // in Parser.
+            //
+            // In sloppy eval contexts, this location is dynamic.
             Maybe<NameLocation> lhsLoc = locationOfNameBoundInScope(name, bodyEmitterScope);
-            MOZ_ASSERT(lhsLoc && (lhsLoc->bindingKind() == BindingKind::Var ||
-                                  lhsLoc->bindingKind() == BindingKind::FormalParameter));
+            if (!lhsLoc) {
+                lhsLoc = Some(NameLocation::DynamicAnnexBVar());
+            } else {
+                MOZ_ASSERT(lhsLoc->bindingKind() == BindingKind::Var ||
+                           lhsLoc->bindingKind() == BindingKind::FormalParameter);
+            }
             if (!emitSetOrInitializeNameAtLocation(name, *lhsLoc, emitRhs, false))
                 return false;
             if (!emit1(JSOP_POP))

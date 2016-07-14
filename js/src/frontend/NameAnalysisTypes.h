@@ -188,7 +188,11 @@ class NameLocation
         EnvironmentCoordinate,
 
         // An imported name in a module.
-        Import
+        Import,
+
+        // Cannot statically determine where the synthesized var for Annex
+        // B.3.3 lives.
+        DynamicAnnexBVar
     };
 
   private:
@@ -260,6 +264,10 @@ class NameLocation
 
     static NameLocation Import() {
         return NameLocation(Kind::Import, BindingKind::Import);
+    }
+
+    static NameLocation DynamicAnnexBVar() {
+        return NameLocation(Kind::DynamicAnnexBVar, BindingKind::Var);
     }
 
     static NameLocation fromBinding(BindingKind bindKind, const BindingLocation& bl) {
