@@ -504,6 +504,8 @@ FunctionBox::initWithEnclosingContext(SharedContext* enclosing, FunctionSyntaxKi
 
         if (!isGenexpLambda)
             thisBinding_ = ThisBinding::Function;
+        else
+            thisBinding_ = enclosing->thisBinding();
     } else {
         allowNewTarget_ = enclosing->allowNewTarget();
         allowSuperProperty_ = enclosing->allowSuperProperty();
