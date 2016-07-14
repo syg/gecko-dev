@@ -5391,7 +5391,7 @@ BytecodeEmitter::emitLexicalScope(ParseNode* pn)
     if (!emitterScope.enterLexical(this, kind, pn->scopeBindings()))
         return false;
 
-    if (pn->isKind(PNK_FOR)) {
+    if (body->isKind(PNK_FOR)) {
         // for loops need to emit {FRESHEN,RECREATE}LEXICALENV if there are
         // lexical declarations in the head. Signal this by passing a
         // non-nullptr lexical scope.
