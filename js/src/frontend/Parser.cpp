@@ -7304,7 +7304,7 @@ Parser<ParseHandler>::generatorComprehensionLambda(unsigned begin)
     // Note that if we ever start syntax-parsing generators, we will also
     // need to propagate the closed-over variable set to the inner
     // lazyscript, as in finishFunctionDefinition.
-    handler.setFunctionFormalParametersAndBody(genfn, body);
+    handler.setComprehensionLambdaBody(genfn, body);
 
     return genfn;
 }
