@@ -316,32 +316,12 @@ ScopeKindIsInBody(ScopeKind kind)
            kind == ScopeKind::With;
 }
 
-template <typename BindingData>
-static void
-CheckAllBindingsClosedOver(BytecodeEmitter* bce, BindingData& data)
+static inline void
+MarkAllBindingsClosedOver(LexicalScope::BindingData& data)
 {
-    // Marks all names as closed over if the the context requires it. This
-    // cannot be done in the Parser as we may not know if the context requires
-    // all bindings to be closed over until after parsing is finished. For
-    // example, legacy generators require all bindings to be closed over but
-    // it is unknown if a function is a legacy generator until the first
-    // 'yield' expression is parsed.
-    if (bce->sc->allBindingsClosedOver()) {
-        for (uint32_t i = 0; i < data.length; i++)
-            data.names[i] = BindingName(data.names[i].name(), true);
-    }
-}
-
-template <>
-void
-CheckAllBindingsClosedOver(BytecodeEmitter* bce, ModuleScope::BindingData& data)
-{
-    // As above, but ignores imports for module bindings, as imports are
-    // indirect and must not be given known slots.
-    if (bce->sc->allBindingsClosedOver()) {
-        for (uint32_t i = data.varStart; i < data.length; i++)
-            data.names[i] = BindingName(data.names[i].name(), true);
-    }
+    BindingName* names = data.names;
+    for (uint32_t i = 0; i < data.length; i++)
+        names[i] = BindingName(names[i].name(), true);
 }
 
 // A scope that that introduces bindings.
@@ -845,11 +825,8 @@ BytecodeEmitter::EmitterScope::enterLexical(BytecodeEmitter* bce, ScopeKind kind
     // This is not a problem with other scopes, as all other scopes with
     // bindings are body-level. At the time of their creation, whether or not
     // the context requires all bindings to be closed over is already known.
-    if (bce->sc->allBindingsClosedOver()) {
-        BindingName* names = bindings->names;
-        for (uint32_t i = 0; i < bindings->length; i++)
-            names[i] = BindingName(names[i].name(), /* closedOver = */ true);
-    }
+    if (bce->sc->allBindingsClosedOver())
+        MarkAllBindingsClosedOver(*bindings);
 
     // Resolve bindings.
     uint32_t firstFrameSlot = frameSlotStart();
@@ -900,6 +877,10 @@ BytecodeEmitter::EmitterScope::enterNamedLambda(BytecodeEmitter* bce, FunctionBo
 
     if (!ensureCache(bce))
         return false;
+
+    // See comment in enterLexical about allBindingsClosedOver.
+    if (funbox->allBindingsClosedOver())
+        MarkAllBindingsClosedOver(*funbox->namedLambdaBindings());
 
     BindingIter bi(*funbox->namedLambdaBindings(), LOCALNO_LIMIT, /* isNamedLambda = */ true);
     MOZ_ASSERT(bi);
