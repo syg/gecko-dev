@@ -5346,8 +5346,16 @@ BytecodeEmitter::emitLexicalScope(ParseNode* pn)
     if (!emitterScope.enterLexical(this, kind, pn->scopeBindings()))
         return false;
 
-    if (!emitLexicalScopeBody(body))
-        return false;
+    if (pn->isKind(PNK_FOR)) {
+        // for loops need to emit {FRESHEN,RECREATE}LEXICALENV if there are
+        // lexical declarations in the head. Signal this by passing a
+        // non-nullptr lexical scope.
+        if (!emitFor(body, &emitterScope))
+            return false;
+    } else {
+        if (!emitLexicalScopeBody(body))
+            return false;
+    }
 
     return emitterScope.leave(this);
 }
@@ -5569,19 +5577,14 @@ BytecodeEmitter::emitInitializeForInOrOfTarget(ParseNode* forHead)
 }
 
 bool
-BytecodeEmitter::emitForOf(ParseNode* forOfLoop)
+BytecodeEmitter::emitForOf(ParseNode* forOfLoop, EmitterScope* headLexicalEmitterScope)
 {
     MOZ_ASSERT(forOfLoop->isKind(PNK_FOR));
     MOZ_ASSERT(forOfLoop->isArity(PN_BINARY));
 
     ParseNode* forOfHead = forOfLoop->pn_left;
     MOZ_ASSERT(forOfHead->isKind(PNK_FOROF));
-
     MOZ_ASSERT(forOfHead->isArity(PN_TERNARY));
-    ParseNode* forOfTarget = forOfHead->pn_kid1 ? forOfHead->pn_kid1 : forOfHead->pn_kid2;
-
-    bool forLoopRequiresFreshEnvironment =
-        forOfTarget->isKind(PNK_LET) || forOfTarget->isKind(PNK_CONST);
 
     // Evaluate the expression being iterated.
     ParseNode* forHeadExpr = forOfHead->pn_kid3;
@@ -5612,17 +5615,18 @@ BytecodeEmitter::emitForOf(ParseNode* forOfLoop)
 
     // If the loop had an escaping lexical declaration, replace the current
     // environment with an dead zoned one to implement TDZ semantics.
-    if (forLoopRequiresFreshEnvironment) {
+    if (headLexicalEmitterScope) {
         // The environment chain only includes an environment for the for-of
         // loop head *if* a scope binding is captured, thereby requiring
-        // recreation each iteration.  Get the innermost scope (necessarily
-        // created by a parent LexicalScopeNode, for the guarding condition to
-        // have held).  If that scope has closed-over bindings inducing an
-        // environment, recreate the current environment.
-        Scope* forLexicalScope = innermostScope();
-        MOZ_ASSERT(forLexicalScope->kind() == ScopeKind::Lexical);
+        // recreation each iteration. If a lexical scope exists for the head,
+        // it must be the innermost one. If that scope has closed-over
+        // bindings inducing an environment, recreate the current environment.
+        ParseNode* forOfTarget = forOfHead->pn_kid1 ? forOfHead->pn_kid1 : forOfHead->pn_kid2;
+        MOZ_ASSERT(forOfTarget->isKind(PNK_LET) || forOfTarget->isKind(PNK_CONST));
+        MOZ_ASSERT(headLexicalEmitterScope == innermostEmitterScope);
+        MOZ_ASSERT(headLexicalEmitterScope->scope(this)->kind() == ScopeKind::Lexical);
 
-        if (forLexicalScope->hasEnvironment()) {
+        if (headLexicalEmitterScope->hasEnvironment()) {
             if (!emit1(JSOP_RECREATELEXICALENV))          // ITER RESULT
                 return false;
         }
@@ -5694,7 +5698,7 @@ BytecodeEmitter::emitForOf(ParseNode* forOfLoop)
 }
 
 bool
-BytecodeEmitter::emitForIn(ParseNode* forInLoop)
+BytecodeEmitter::emitForIn(ParseNode* forInLoop, EmitterScope* headLexicalEmitterScope)
 {
     MOZ_ASSERT(forInLoop->isKind(PNK_FOR));
     MOZ_ASSERT(forInLoop->isArity(PN_BINARY));
@@ -5702,12 +5706,7 @@ BytecodeEmitter::emitForIn(ParseNode* forInLoop)
 
     ParseNode* forInHead = forInLoop->pn_left;
     MOZ_ASSERT(forInHead->isKind(PNK_FORIN));
-
     MOZ_ASSERT(forInHead->isArity(PN_TERNARY));
-    ParseNode* forInTarget = forInHead->pn_kid1 ? forInHead->pn_kid1 : forInHead->pn_kid2;
-
-    bool forLoopRequiresFreshEnvironment =
-        forInTarget->isKind(PNK_LET) || forInTarget->isKind(PNK_CONST);
 
     // Evaluate the expression being iterated.
     ParseNode* expr = forInHead->pn_kid3;
@@ -5745,17 +5744,18 @@ BytecodeEmitter::emitForIn(ParseNode* forInLoop)
 
     // If the loop had an escaping lexical declaration, replace the current
     // environment with an dead zoned one to implement TDZ semantics.
-    if (forLoopRequiresFreshEnvironment) {
+    if (headLexicalEmitterScope) {
         // The environment chain only includes an environment for the for-in
         // loop head *if* a scope binding is captured, thereby requiring
-        // recreation each iteration.  Get the innermost scope (necessarily
-        // created by a parent LexicalScopeNode, for the guarding condition to
-        // have held).  If that scope has closed-over bindings inducing an
-        // environment, recreate the current environment.
-        Scope* forLexicalScope = innermostScope();
-        MOZ_ASSERT(forLexicalScope->kind() == ScopeKind::Lexical);
+        // recreation each iteration. If a lexical scope exists for the head,
+        // it must be the innermost one. If that scope has closed-over
+        // bindings inducing an environment, recreate the current environment.
+        ParseNode* forInTarget = forInHead->pn_kid1 ? forInHead->pn_kid1 : forInHead->pn_kid2;
+        MOZ_ASSERT(forInTarget->isKind(PNK_LET) || forInTarget->isKind(PNK_CONST));
+        MOZ_ASSERT(headLexicalEmitterScope == innermostEmitterScope);
+        MOZ_ASSERT(headLexicalEmitterScope->scope(this)->kind() == ScopeKind::Lexical);
 
-        if (forLexicalScope->hasEnvironment()) {
+        if (headLexicalEmitterScope->hasEnvironment()) {
             if (!emit1(JSOP_RECREATELEXICALENV))          // ITER ITERVAL
                 return false;
         }
@@ -5815,7 +5815,7 @@ BytecodeEmitter::emitForIn(ParseNode* forInLoop)
 
 /* C-style `for (init; cond; update) ...` loop. */
 bool
-BytecodeEmitter::emitCStyleFor(ParseNode* pn)
+BytecodeEmitter::emitCStyleFor(ParseNode* pn, EmitterScope* headLexicalEmitterScope)
 {
     LoopControl loopInfo(this, StatementKind::ForLoop);
 
@@ -5847,7 +5847,7 @@ BytecodeEmitter::emitCStyleFor(ParseNode* pn)
     // ES6 spec also skips cloning the environment in this case.)
     bool forLoopRequiresFreshening = false;
     if (ParseNode* init = forHead->pn_kid1) {
-        forLoopRequiresFreshening = init->isKind(PNK_LET);
+        forLoopRequiresFreshening = init->isKind(PNK_LET) && headLexicalEmitterScope;
 
         // Emit the `init` clause, whether it's an expression or a variable
         // declaration. (The loop variables were hoisted into an enclosing
@@ -5908,14 +5908,14 @@ BytecodeEmitter::emitCStyleFor(ParseNode* pn)
     if (forLoopRequiresFreshening) {
         // The environment chain only includes an environment for the for(;;)
         // loop head's let-declaration *if* a scope binding is captured, thus
-        // requiring a fresh environment each iteration.  Get the innermost
-        // scope (necessarily created by a parent LexicalScopeNode, for the
-        // guarding condition to have held).  If that scope has closed-over
-        // bindings inducing an environment, freshen the current environment.
-        Scope* forLexicalScope = innermostScope();
-        MOZ_ASSERT(forLexicalScope->kind() == ScopeKind::Lexical);
+        // requiring a fresh environment each iteration. If a lexical scope
+        // exists for the head, it must be the innermost one. If that scope
+        // has closed-over bindings inducing an environment, recreate the
+        // current environment.
+        MOZ_ASSERT(headLexicalEmitterScope == innermostEmitterScope);
+        MOZ_ASSERT(headLexicalEmitterScope->scope(this)->kind() == ScopeKind::Lexical);
 
-        if (forLexicalScope->hasEnvironment()) {
+        if (headLexicalEmitterScope->hasEnvironment()) {
             if (!emit1(JSOP_FRESHENLEXICALENV))
                 return false;
         }
@@ -5985,21 +5985,21 @@ BytecodeEmitter::emitCStyleFor(ParseNode* pn)
 }
 
 bool
-BytecodeEmitter::emitFor(ParseNode* pn)
+BytecodeEmitter::emitFor(ParseNode* pn, EmitterScope* headLexicalEmitterScope)
 {
     MOZ_ASSERT(pn->isKind(PNK_FOR));
 
     if (pn->pn_left->isKind(PNK_FORHEAD))
-        return emitCStyleFor(pn);
+        return emitCStyleFor(pn, headLexicalEmitterScope);
 
     if (!updateLineNumberNotes(pn->pn_pos.begin))
         return false;
 
     if (pn->pn_left->isKind(PNK_FORIN))
-        return emitForIn(pn);
+        return emitForIn(pn, headLexicalEmitterScope);
 
     MOZ_ASSERT(pn->pn_left->isKind(PNK_FOROF));
-    return emitForOf(pn);
+    return emitForOf(pn, headLexicalEmitterScope);
 }
 
 bool
