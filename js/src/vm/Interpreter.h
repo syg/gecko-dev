@@ -558,9 +558,6 @@ ReportRuntimeLexicalError(JSContext* cx, unsigned errorNumber, HandleScript scri
 // script. Due to the extensibility of the global lexical scope, we also check
 // for redeclarations during runtime in JSOP_DEF{VAR,LET,CONST}.
 void
-ReportRuntimeRedeclaration(JSContext* cx, HandlePropertyName name, BindingKind redeclKind);
-
-void
 ReportRuntimeRedeclaration(JSContext* cx, HandlePropertyName name, const char* redeclKind);
 
 bool

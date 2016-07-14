@@ -4576,7 +4576,16 @@ js::DeleteNameOperation(JSContext* cx, HandlePropertyName name, HandleObject sco
     RootedId id(cx, NameToId(name));
     if (!DeleteProperty(cx, scope, id, result))
         return false;
-    res.setBoolean(result.ok());
+
+    bool status = result.ok();
+    res.setBoolean(status);
+
+    if (status) {
+        // Deleting a name from the global object removes it from [[VarNames]].
+        if (pobj == scope && scope->is<GlobalObject>())
+            scope->compartment()->removeFromVarNames(name);
+    }
+
     return true;
 }
 
@@ -4993,12 +5002,6 @@ js::ReportRuntimeLexicalError(JSContext* cx, unsigned errorNumber,
     }
 
     ReportRuntimeLexicalError(cx, errorNumber, name);
-}
-
-void
-js::ReportRuntimeRedeclaration(JSContext* cx, HandlePropertyName name, BindingKind redeclKind)
-{
-    return ReportRuntimeRedeclaration(cx, name, BindingKindString(redeclKind));
 }
 
 void

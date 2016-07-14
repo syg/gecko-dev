@@ -2985,10 +2985,10 @@ js::CheckLexicalNameConflict(JSContext* cx, Handle<LexicalEnvironmentObject*> le
     RootedShape shape(cx);
     if (varObj->is<GlobalObject>() && varObj->compartment()->isInVarNames(name)) {
         // ES 15.1.11 step 5.a
-        redeclKind = BindingKindString(BindingKind::Var);
+        redeclKind = "var";
     } else if ((shape = lexicalEnv->lookup(cx, name))) {
         // ES 15.1.11 step 5.b
-        redeclKind = BindingKindString(shape->writable() ? BindingKind::Let : BindingKind::Const);
+        redeclKind = shape->writable() ? "let" : "const";
     } else if (varObj->isNative() && (shape = varObj->as<NativeObject>().lookup(cx, name))) {
         // Faster path for ES 15.1.11 step 5.c-d when the shape can be found
         // without going through a resolve hook.
@@ -3016,8 +3016,7 @@ js::CheckVarNameConflict(JSContext* cx, Handle<LexicalEnvironmentObject*> lexica
                          HandlePropertyName name)
 {
     if (Shape* shape = lexicalEnv->lookup(cx, name)) {
-        ReportRuntimeRedeclaration(cx, name, shape->writable() ? BindingKind::Let
-                                                               : BindingKind::Const);
+        ReportRuntimeRedeclaration(cx, name, shape->writable() ? "let" : "const");
         return false;
     }
     return true;

@@ -666,6 +666,10 @@ struct JSCompartment
     // Add a name to [[VarNames]].  Reports OOM on failure.
     MOZ_MUST_USE bool addToVarNames(JSContext* cx, JS::Handle<JSAtom*> name);
 
+    void removeFromVarNames(JS::Handle<JSAtom*> name) {
+        varNames_.remove(name);
+    }
+
     // Whether the given name is in [[VarNames]].
     bool isInVarNames(JS::Handle<JSAtom*> name) {
         return varNames_.has(name);
