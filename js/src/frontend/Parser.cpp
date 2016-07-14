@@ -996,20 +996,19 @@ Parser<ParseHandler>::tryDeclareVarForAnnexB(HandlePropertyName name, bool* tryA
 
 template <typename ParseHandler>
 bool
-Parser<ParseHandler>::checkLexicalDeclarationDirectlyWithinBlock(DeclarationKind kind,
+Parser<ParseHandler>::checkLexicalDeclarationDirectlyWithinBlock(ParseContext::Statement& stmt,
+                                                                 DeclarationKind kind,
                                                                  TokenPos pos)
 {
     MOZ_ASSERT(DeclarationKindIsLexical(kind));
-    MOZ_ASSERT(pc->innermostStatement());
 
     // It is an early error to declare a lexical binding not directly
     // within a block.
-    ParseContext::Statement* stmt = pc->innermostStatement();
-    if (!StatementKindIsBraced(stmt->kind()) &&
-        stmt->kind() != StatementKind::ForLoopLexicalHead)
+    if (!StatementKindIsBraced(stmt.kind()) &&
+        stmt.kind() != StatementKind::ForLoopLexicalHead)
     {
         reportWithOffset(ParseError, false, pos.begin,
-                         stmt->kind() == StatementKind::Label
+                         stmt.kind() == StatementKind::Label
                          ? JSMSG_LEXICAL_DECL_LABEL
                          : JSMSG_LEXICAL_DECL_NOT_IN_BLOCK,
                          DeclarationKindString(kind));
@@ -1065,8 +1064,10 @@ Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind 
       }
 
       case DeclarationKind::LexicalFunction: {
-        if (pc->innermostStatement() && !checkLexicalDeclarationDirectlyWithinBlock(kind, pos))
-            return false;
+        // Functions in block have complex allowances in sloppy mode for being
+        // labelled that other lexical declarations do not have. Those checks
+        // are more complex than calling checkLexicalDeclarationDirectlyWithin-
+        // Block and are done in checkFunctionDefinition.
 
         ParseContext::Scope* scope = pc->innermostScope();
         AddDeclaredNamePtr p = scope->lookupDeclaredNameForAdd(name);
@@ -1111,8 +1112,10 @@ Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind 
 
       case DeclarationKind::SimpleCatchParameter:
       case DeclarationKind::CatchParameter: {
-        if (pc->innermostStatement() && !checkLexicalDeclarationDirectlyWithinBlock(kind, pos))
-            return false;
+        if (ParseContext::Statement* stmt = pc->innermostStatement()) {
+            if (!checkLexicalDeclarationDirectlyWithinBlock(*stmt, kind, pos))
+                return false;
+        }
 
         // It is an early error if there is another declaration with the same
         // name in the same scope.
@@ -2564,46 +2567,33 @@ Parser<ParseHandler>::checkFunctionDefinition(HandleAtom funAtom, Node pn, Funct
                                               bool *tryAnnexB)
 {
     if (kind == Statement) {
+        TokenPos pos = handler.getPosition(pn);
         RootedPropertyName funName(context, funAtom->asPropertyName());
 
         // In sloppy mode, Annex B.3.2 allows labelled function
         // declarations. Otherwise it is a parse error.
-        bool bodyLevelFunction = pc->atBodyLevel();
-        if (!bodyLevelFunction) {
-            ParseContext::Statement* stmt = pc->innermostStatement();
-            if (stmt->kind() == StatementKind::Label) {
-                if (pc->sc()->strict()) {
-                    report(ParseError, false, null(), JSMSG_FUNCTION_LABEL);
-                    return false;
-                }
-
-                // Find the innermost non-label statement.
-                while (stmt && stmt->kind() == StatementKind::Label)
-                    stmt = stmt->enclosing();
-
-                // A switch, try, catch, or finally statement is always
-                // braced, so it's okay to label functions in sloppy mode
-                // under switch.
-                if (stmt && !StatementKindIsBraced(stmt->kind())) {
-                    report(ParseError, false, null(), JSMSG_SLOPPY_FUNCTION_LABEL);
-                    return false;
-                }
-
-                bodyLevelFunction = !stmt;
-            }
-        }
-
-        if (bodyLevelFunction) {
-            if (!noteDeclaredName(funName, DeclarationKind::BodyLevelFunction,
-                                  handler.getPosition(pn)))
-            {
+        ParseContext::Statement* declaredInStmt = pc->innermostStatement();
+        if (declaredInStmt && declaredInStmt->kind() == StatementKind::Label) {
+            if (pc->sc()->strict()) {
+                reportWithOffset(ParseError, false, pos.begin, JSMSG_FUNCTION_LABEL);
                 return false;
             }
 
-            // Body-level functions in modules are always closed over.
-            if (pc->atModuleLevel())
-                pc->varScope().lookupDeclaredName(funName)->value()->setClosedOver();
-        } else {
+            // Find the innermost non-label statement.
+            while (declaredInStmt && declaredInStmt->kind() == StatementKind::Label)
+                declaredInStmt = declaredInStmt->enclosing();
+
+            if (declaredInStmt && !StatementKindIsBraced(declaredInStmt->kind())) {
+                reportWithOffset(ParseError, false, pos.begin, JSMSG_SLOPPY_FUNCTION_LABEL);
+                return false;
+            }
+        }
+
+        if (declaredInStmt) {
+            DeclarationKind declKind = DeclarationKind::LexicalFunction;
+            if (!checkLexicalDeclarationDirectlyWithinBlock(*declaredInStmt, declKind, pos))
+                return false;
+
             if (!pc->sc()->strict()) {
                 // Under sloppy mode, try Annex B.3.3 semantics. If making an
                 // additional 'var' binding of the same name does not throw an
@@ -2615,11 +2605,15 @@ Parser<ParseHandler>::checkFunctionDefinition(HandleAtom funAtom, Node pn, Funct
                     return false;
             }
 
-            if (!noteDeclaredName(funName, DeclarationKind::LexicalFunction,
-                                  handler.getPosition(pn)))
-            {
+            if (!noteDeclaredName(funName, declKind, pos))
                 return false;
-            }
+        } else {
+            if (!noteDeclaredName(funName, DeclarationKind::BodyLevelFunction, pos))
+                return false;
+
+            // Body-level functions in modules are always closed over.
+            if (pc->atModuleLevel())
+                pc->varScope().lookupDeclaredName(funName)->value()->setClosedOver();
         }
     } else {
         // A function expression does not introduce any binding.

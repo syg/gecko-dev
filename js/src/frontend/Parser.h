@@ -1192,7 +1192,8 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     bool tryDeclareVar(HandlePropertyName name, DeclarationKind kind,
                        mozilla::Maybe<DeclarationKind>* redeclaredKind);
     bool tryDeclareVarForAnnexB(HandlePropertyName name, bool* tryAnnexB);
-    bool checkLexicalDeclarationDirectlyWithinBlock(DeclarationKind kind, TokenPos pos);
+    bool checkLexicalDeclarationDirectlyWithinBlock(ParseContext::Statement& stmt,
+                                                    DeclarationKind kind, TokenPos pos);
     bool noteDeclaredName(HandlePropertyName name, DeclarationKind kind, TokenPos pos);
     bool noteUsedName(HandlePropertyName name, UsedNameInfo info);
 
