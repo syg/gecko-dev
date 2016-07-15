@@ -613,10 +613,45 @@ BytecodeEmitter::EmitterScope::appendScopeNote(BytecodeEmitter* bce)
                                                         : ScopeNote::NoScopeNoteIndex);
 }
 
+#ifdef DEBUG
+static bool
+NameIsOnEnvironment(Scope* scope, JSAtom* name)
+{
+    for (BindingIter bi(scope); bi; bi++) {
+        // If found, the name must already be on the environment or an import,
+        // or else there is a bug in the closed-over name analysis in the
+        // Parser.
+        if (bi.name() == name) {
+            BindingLocation::Kind kind = bi.location().kind();
+
+            if (bi.hasArgumentSlot()) {
+                JSScript* script = scope->as<FunctionScope>().script();
+                if (!script->strict() && !script->hasDefaults()) {
+                    // Check for duplicate positional formal parameters.
+                    for (BindingIter bi2(bi); bi2 && bi2.hasArgumentSlot(); bi2++) {
+                        if (bi2.name() == name)
+                            kind = bi2.location().kind();
+                    }
+                }
+            }
+
+            return kind == BindingLocation::Kind::Global ||
+                   kind == BindingLocation::Kind::Environment ||
+                   kind == BindingLocation::Kind::Import;
+        }
+    }
+
+    // If not found, assume it's on the global or dynamically accessed.
+    return true;
+}
+#endif
+
 /* static */ NameLocation
 BytecodeEmitter::EmitterScope::searchInEnclosingScope(JSAtom* name, Scope* scope, uint8_t hops)
 {
     for (ScopeIter si(scope); si; si++) {
+        MOZ_ASSERT(NameIsOnEnvironment(si.scope(), name));
+
         bool hasEnv = si.hasSyntacticEnvironment();
 
         switch (si.kind()) {

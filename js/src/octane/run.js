@@ -49,7 +49,7 @@ load(base_dir + 'typescript.js');
 load(base_dir + 'typescript-input.js');
 load(base_dir + 'typescript-compiler.js');
 */
-load(base_dir + 'earley-boyer.js');
+load(base_dir + 'code-load.js');
 var success = true;
 
 function PrintResult(name, result) {

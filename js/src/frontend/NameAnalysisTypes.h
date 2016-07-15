@@ -151,10 +151,61 @@ class DeclaredNameInfo
     }
 };
 
-enum class UsedNameInfo
+class UsedNameInfo
 {
-    FromSameFunction,
-    FromInnerFunction
+    using ScopeIdVector = Vector<uint32_t, 4, LifoAllocPolicy<Fallible>>;
+
+    struct Data
+    {
+        ScopeIdVector scopes;
+        bool usedFromInnerFunction;
+
+        Data(LifoAlloc& alloc)
+          : scopes(alloc),
+            usedFromInnerFunction(false)
+        { }
+    };
+
+    Data* data_;
+
+  public:
+    UsedNameInfo()
+      : data_(nullptr)
+    { }
+
+    bool init(LifoAlloc& alloc) {
+        MOZ_ASSERT(!data_);
+        data_ = static_cast<Data*>(alloc.alloc(sizeof(Data)));
+        if (!data_)
+            return false;
+        new (data_) Data(alloc);
+        return true;
+    }
+
+    bool noteUsedInScope(uint32_t id) {
+        ScopeIdVector& s = data_->scopes;
+        if (s.empty() || s.back() < id)
+            return s.append(id);
+        return true;
+    }
+
+    void noteBoundInScope(uint32_t id) {
+        ScopeIdVector& s = data_->scopes;
+        while (!s.empty() && s.back() >= id)
+            s.popBack();
+    }
+
+    bool isFree() const {
+        return !data_->scopes.empty();
+    }
+
+    void setUsedFromInnerFunction() {
+        data_->usedFromInnerFunction = true;
+    }
+
+    bool usedFromInnerFunction() const {
+        return data_->usedFromInnerFunction;
+    }
 };
 
 // Used in BytecodeEmitter to map names to locations.
