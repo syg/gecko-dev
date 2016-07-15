@@ -2070,7 +2070,11 @@ bool
 Parser<SyntaxParseHandler>::declareFunctionArgumentsObject()
 {
     // We don't need to analyze how 'arguments' is used to optimize its
-    // allocation if we aren't compiling a JSScript.
+    // allocation if we aren't compiling a JSScript, but we do need to see if
+    // there are uses of 'arguments' to determine if the function is likely to
+    // be a constructor wrapper. See isLikelyConstructorWrapper.
+    if (hasUsedFunctionSpecialName(context->names().arguments))
+        pc->functionBox()->usesArguments = true;
     return true;
 }
 
