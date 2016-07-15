@@ -19,7 +19,8 @@ BytecodeAnalysis::BytecodeAnalysis(TempAllocator& alloc, JSScript* script)
     infos_(alloc),
     usesEnvironmentChain_(false),
     hasTryFinally_(false),
-    hasSetArg_(false)
+    hasSetArg_(false),
+    hasLambdaInDefaultsWithCallObject_(false)
 {
 }
 

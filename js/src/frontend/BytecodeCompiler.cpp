@@ -628,8 +628,6 @@ frontend::CompileGlobalScript(ExclusiveContext* cx, LifoAlloc* alloc, ScopeKind 
                               SourceCompressionTask* extraSct,
                               ScriptSourceObject** sourceObjectOut)
 {
-    AutoTimer timer("CompileGlobalScript");
-
     MOZ_ASSERT(scopeKind == ScopeKind::Global || scopeKind == ScopeKind::NonSyntactic);
     BytecodeCompiler compiler(cx, alloc, options, srcBuf, /* enclosingScope = */ nullptr,
                               TraceLogger_ParserCompileScript);

@@ -37,7 +37,7 @@ load(base_dir + 'earley-boyer.js');
 load(base_dir + 'regexp.js');
 load(base_dir + 'splay.js');
 load(base_dir + 'navier-stokes.js');
-load(base_dir + 'pdfjs.js');
+//load(base_dir + 'pdfjs.js');
 load(base_dir + 'mandreel.js');
 load(base_dir + 'gbemu-part1.js');
 load(base_dir + 'gbemu-part2.js');
@@ -49,8 +49,7 @@ load(base_dir + 'typescript.js');
 load(base_dir + 'typescript-input.js');
 load(base_dir + 'typescript-compiler.js');
 */
-load(base_dir + 'raytrace.js');
-
+load(base_dir + 'earley-boyer.js');
 var success = true;
 
 function PrintResult(name, result) {
