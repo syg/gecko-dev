@@ -216,7 +216,7 @@ ParseContext::Scope::propagateFreeNamesAndMarkClosedOverBindings(ParseContext* p
             if (p->value()->usedFromInnerFunction())
                 bi.setClosedOver();
             p->value()->noteBoundInScope(id());
-            if (p->value()->isFree())
+            if (!p->value()->isFree())
                 pc->usedNames_->remove(p);
         }
     }
@@ -359,12 +359,11 @@ ParseContext::addClosedOverNames(LifoAlloc& alloc, ParseContext* innerpc)
 {
     MOZ_ASSERT(this != innerpc, "And the angel said to him, Stop hitting yourself!");
     for (UsedNameSet::Range r = innerpc->usedNames_->all(); !r.empty(); r.popFront()) {
-        if (r.front().value()->isFree()) {
-            JSAtom* name = r.front().key();
-            if (!noteUsedName(alloc, name))
-                return false;
-            usedNames_->lookup(name)->value()->setUsedFromInnerFunction();
-        }
+        MOZ_ASSERT(r.front().value()->isFree());
+        JSAtom* name = r.front().key();
+        if (!noteUsedName(alloc, name))
+            return false;
+        usedNames_->lookup(name)->value()->setUsedFromInnerFunction();
     }
     return true;
 }
@@ -385,7 +384,8 @@ bool
 ParseContext::collectFreeNames(MutableHandle<GCVector<JSAtom*>> freeVariables)
 {
     for (UsedNameSet::Range r = usedNames_->all(); !r.empty(); r.popFront()) {
-        if (r.front().value()->isFree() && !freeVariables.append(r.front().key()))
+        MOZ_ASSERT(r.front().value()->isFree());
+        if (!freeVariables.append(r.front().key()))
             return false;
     }
     return true;
