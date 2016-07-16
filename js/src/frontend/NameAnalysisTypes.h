@@ -151,60 +151,61 @@ class DeclaredNameInfo
     }
 };
 
+// Used in Parser to track used names.
 class UsedNameInfo
 {
     using ScopeIdVector = Vector<uint32_t, 4, LifoAllocPolicy<Fallible>>;
 
-    struct Data
-    {
-        ScopeIdVector scopes;
-        bool usedFromInnerFunction;
+    uintptr_t bits_;
 
-        Data(LifoAlloc& alloc)
-          : scopes(alloc),
-            usedFromInnerFunction(false)
-        { }
-    };
+    static const uintptr_t UsedFromInnerFunctionFlag = 0x1;
+    static const uintptr_t FlagMask = 0x1;
 
-    Data* data_;
+    ScopeIdVector& scopes() const {
+        MOZ_ASSERT(bits_);
+        return *reinterpret_cast<ScopeIdVector*>(bits_ & ~FlagMask);
+    }
 
   public:
     UsedNameInfo()
-      : data_(nullptr)
+      : bits_(0)
     { }
 
     bool init(LifoAlloc& alloc) {
-        MOZ_ASSERT(!data_);
-        data_ = static_cast<Data*>(alloc.alloc(sizeof(Data)));
-        if (!data_)
+        MOZ_ASSERT(!bits_);
+        ScopeIdVector* vec = static_cast<ScopeIdVector*>(alloc.alloc(sizeof(ScopeIdVector)));
+        if (!vec)
             return false;
-        new (data_) Data(alloc);
+        new (vec) ScopeIdVector(alloc);
+        bits_ = reinterpret_cast<uintptr_t>(vec);
         return true;
     }
 
     bool noteUsedInScope(uint32_t id) {
-        ScopeIdVector& s = data_->scopes;
+        ScopeIdVector& s = scopes();
         if (s.empty() || s.back() < id)
             return s.append(id);
         return true;
     }
 
     void noteBoundInScope(uint32_t id) {
-        ScopeIdVector& s = data_->scopes;
+        ScopeIdVector& s = scopes();
         while (!s.empty() && s.back() >= id)
             s.popBack();
     }
 
     bool isFree() const {
-        return !data_->scopes.empty();
+        return !scopes().empty();
     }
 
     void setUsedFromInnerFunction() {
-        data_->usedFromInnerFunction = true;
+        MOZ_ASSERT(bits_);
+        bits_ |= UsedFromInnerFunctionFlag;
     }
 
     bool usedFromInnerFunction() const {
-        return data_->usedFromInnerFunction;
+        MOZ_ASSERT(bits_);
+        return bits_ & UsedFromInnerFunctionFlag;
     }
 };
 

@@ -515,19 +515,23 @@ class InlineMap
         return impl_.all();
     }
 
+    MOZ_ALWAYS_INLINE
     Ptr lookup(const Lookup& l) {
         return impl_.lookup(l);
     }
 
+    MOZ_ALWAYS_INLINE
     bool has(const Lookup& l) const {
         return const_cast<InlineMap*>(this)->lookup(l).found();
     }
 
+    MOZ_ALWAYS_INLINE
     AddPtr lookupForAdd(const Lookup& l) {
         return impl_.lookupForAdd(l);
     }
 
     template <typename KeyInput, typename ValueInput>
+    MOZ_ALWAYS_INLINE
     MOZ_MUST_USE bool add(AddPtr& p, KeyInput&& key, ValueInput&& value) {
         return impl_.add(p, mozilla::Forward<Key>(key), mozilla::Forward<Value>(value));
     }
@@ -642,19 +646,23 @@ class InlineSet
         return impl_.all();
     }
 
+    MOZ_ALWAYS_INLINE
     Ptr lookup(const Lookup& l) {
         return impl_.lookup(l);
     }
 
+    MOZ_ALWAYS_INLINE
     bool has(const Lookup& l) const {
         return const_cast<InlineSet*>(this)->lookup(l).found();
     }
 
+    MOZ_ALWAYS_INLINE
     AddPtr lookupForAdd(const Lookup& l) {
         return impl_.lookupForAdd(l);
     }
 
     template <typename TInput>
+    MOZ_ALWAYS_INLINE
     MOZ_MUST_USE bool add(AddPtr& p, TInput&& key) {
         return impl_.add(p, mozilla::Forward<TInput>(key));
     }

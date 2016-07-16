@@ -72,8 +72,8 @@ using UsedNameSet = RECYCLABLE_NAME_MAP_TYPE(UsedNameInfo);
 
 // A pool of recyclable InlineTables for use in the frontend. The Parser and
 // BytecodeEmitter create many maps for name analysis that are short-lived
-// (i.e., for the duration of parsig or emitting a lexical scope). Making them
-// recyclable cuts down significantly on allocator churn.
+// (i.e., for the duration of parsing or emitting a lexical scope). Making
+// them recyclable cuts down significantly on allocator churn.
 template <typename RepresentativeTable>
 class InlineTablePool
 {

@@ -216,6 +216,8 @@ ParseContext::Scope::propagateFreeNamesAndMarkClosedOverBindings(ParseContext* p
             if (p->value()->usedFromInnerFunction())
                 bi.setClosedOver();
             p->value()->noteBoundInScope(id());
+            if (p->value()->isFree())
+                pc->usedNames_->remove(p);
         }
     }
 }
