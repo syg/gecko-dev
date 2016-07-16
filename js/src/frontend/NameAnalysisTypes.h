@@ -157,6 +157,22 @@ enum class UsedNameInfo
     FromInnerFunction
 };
 
+class UsedName : public TaggedName
+{
+  public:
+    UsedName(JSAtom* name, bool usedFromInnerFunction)
+      : TaggedName(name, usedFromInnerFunction)
+    { }
+
+    void setUsedFromInnerFunction() {
+        setTagged();
+    }
+
+    bool usedFromInnerFunction() const {
+        return tagged();
+    }
+};
+
 // Used in BytecodeEmitter to map names to locations.
 class NameLocation
 {

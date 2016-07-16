@@ -70,43 +70,37 @@ using UsedNameSet = RECYCLABLE_NAME_MAP_TYPE(UsedNameInfo);
 
 #undef RECYCLABLE_NAME_MAP_TYPE
 
-// A pool of recyclable InlineTables for use in the frontend. The Parser and
+using UsedNameVector = Vector<UsedName, 8, SystemAllocPolicy>;
+
+// A pool of recyclable containers for use in the frontend. The Parser and
 // BytecodeEmitter create many maps for name analysis that are short-lived
 // (i.e., for the duration of parsig or emitting a lexical scope). Making them
 // recyclable cuts down significantly on allocator churn.
-template <typename RepresentativeTable>
-class InlineTablePool
+template <typename RepresentativeCollection, typename ConcreteCollectionPool>
+class CollectionPool
 {
-    using RecyclableTables = Vector<void*, 32, SystemAllocPolicy>;
+    using RecyclableCollections = Vector<void*, 32, SystemAllocPolicy>;
 
-    RecyclableTables all_;
-    RecyclableTables recyclable_;
+    RecyclableCollections all_;
+    RecyclableCollections recyclable_;
 
-    template <typename Table>
-    static void assertInvariants() {
-        static_assert(Table::SizeOfInlineEntries == RepresentativeTable::SizeOfInlineEntries,
-                      "Only tables with the same size for inline entries are usable in the pool.");
-        static_assert(mozilla::IsPod<typename Table::Table::Entry>::value,
-                      "Only tables with POD values are usable in the pool.");
+    static RepresentativeCollection* asRepresentative(void* p) {
+        return reinterpret_cast<RepresentativeCollection*>(p);
     }
 
-    static RepresentativeTable* asRepresentative(void* p) {
-        return reinterpret_cast<RepresentativeTable*>(p);
-    }
-
-    RepresentativeTable* allocate() {
+    RepresentativeCollection* allocate() {
         size_t newAllLength = all_.length() + 1;
         if (!all_.reserve(newAllLength) || !recyclable_.reserve(newAllLength))
             return nullptr;
 
-        RepresentativeTable* table = js_new<RepresentativeTable>();
-        if (table)
-            all_.infallibleAppend(table);
-        return table;
+        RepresentativeCollection* container = js_new<RepresentativeCollection>();
+        if (container)
+            all_.infallibleAppend(container);
+        return container;
     }
 
   public:
-    ~InlineTablePool() {
+    ~CollectionPool() {
         purgeAll();
     }
 
@@ -123,53 +117,78 @@ class InlineTablePool
         recyclable_.clearAndFree();
     }
 
-    // Fallibly aquire one of the supported table types from the pool.
-    template <typename Table>
-    Table* acquire(ExclusiveContext* cx) {
-        assertInvariants<Table>();
+    // Fallibly aquire one of the supported container types from the pool.
+    template <typename Collection>
+    Collection* acquire(ExclusiveContext* cx) {
+        ConcreteCollectionPool::template assertInvariants<Collection>();
 
-        RepresentativeTable* table;
+        RepresentativeCollection* container;
         if (recyclable_.empty()) {
-            table = allocate();
-            if (!table)
+            container = allocate();
+            if (!container)
                 ReportOutOfMemory(cx);
         } else {
-            table = asRepresentative(recyclable_.popCopy());
-            table->clear();
+            container = asRepresentative(recyclable_.popCopy());
+            container->clear();
         }
-        return reinterpret_cast<Table*>(table);
+        return reinterpret_cast<Collection*>(container);
     }
 
-    // Release a table back to the pool.
-    template <typename Table>
-    void release(Table** table) {
-        assertInvariants<Table>();
-        MOZ_ASSERT(*table);
+    // Release a container back to the pool.
+    template <typename Collection>
+    void release(Collection** container) {
+        ConcreteCollectionPool::template assertInvariants<Collection>();
+        MOZ_ASSERT(*container);
 
 #ifdef DEBUG
         bool ok = false;
-        // Make sure the table is in |all_| but not already in |recyclable_|.
+        // Make sure the container is in |all_| but not already in |recyclable_|.
         for (void** it = all_.begin(); it != all_.end(); ++it) {
-            if (*it == *table) {
+            if (*it == *container) {
                 ok = true;
                 break;
             }
         }
         MOZ_ASSERT(ok);
         for (void** it = recyclable_.begin(); it != recyclable_.end(); ++it)
-            MOZ_ASSERT(*it != *table);
+            MOZ_ASSERT(*it != *container);
 #endif
 
         MOZ_ASSERT(recyclable_.length() < all_.length());
         // Reserved in allocateFresh.
-        recyclable_.infallibleAppend(*table);
-        *table = nullptr;
+        recyclable_.infallibleAppend(*container);
+        *container = nullptr;
+    }
+};
+
+template <typename RepresentativeTable>
+class InlineTablePool : public CollectionPool<RepresentativeTable,
+                                              InlineTablePool<RepresentativeTable>>
+{
+  public:
+    template <typename Table>
+    static void assertInvariants() {
+        static_assert(Table::SizeOfInlineEntries == RepresentativeTable::SizeOfInlineEntries,
+                      "Only tables with the same size for inline entries are usable in the pool.");
+        static_assert(mozilla::IsPod<typename Table::Table::Entry>::value,
+                      "Only tables with POD values are usable in the pool.");
+    }
+};
+
+class UsedNameVectorPool : public CollectionPool<UsedNameVector, UsedNameVectorPool>
+{
+  public:
+    template <typename Vector>
+    static void assertInvariants() {
+        static_assert(mozilla::IsSame<Vector, UsedNameVector>::value,
+                      "Only UsedNameVectors are usable in the pool.");
     }
 };
 
 class NameMapPool
 {
-    InlineTablePool<AtomIndexMap> pool_;
+    InlineTablePool<AtomIndexMap> mapPool_;
+    UsedNameVectorPool vectorPool_;
     uint32_t activeCompilations_;
 
   public:
@@ -191,24 +210,44 @@ class NameMapPool
     }
 
     template <typename Map>
-    Map* acquire(ExclusiveContext* cx) {
+    inline Map* acquire(ExclusiveContext* cx) {
         MOZ_ASSERT(hasActiveCompilation());
-        return pool_.acquire<Map>(cx);
+        return mapPool_.acquire<Map>(cx);
     }
 
     template <typename Map>
-    void release(Map** map) {
+    inline void release(Map** map) {
         MOZ_ASSERT(hasActiveCompilation());
         MOZ_ASSERT(map);
         if (*map)
-            pool_.release(map);
+            mapPool_.release(map);
     }
 
     void purge() {
-        if (!hasActiveCompilation())
-            pool_.purgeAll();
+        if (!hasActiveCompilation()) {
+            mapPool_.purgeAll();
+            vectorPool_.purgeAll();
+        }
     }
 };
+
+template <>
+inline UsedNameVector*
+NameMapPool::acquire<UsedNameVector>(ExclusiveContext* cx)
+{
+    MOZ_ASSERT(hasActiveCompilation());
+    return vectorPool_.acquire<UsedNameVector>(cx);
+}
+
+template <>
+inline void
+NameMapPool::release<UsedNameVector>(UsedNameVector** vec)
+{
+    MOZ_ASSERT(hasActiveCompilation());
+    MOZ_ASSERT(vec);
+    if (*vec)
+        vectorPool_.release(vec);
+}
 
 } // namespace frontend
 } // namespace js

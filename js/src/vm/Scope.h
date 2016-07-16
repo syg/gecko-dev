@@ -71,30 +71,50 @@ enum class ScopeKind : uint8_t
 const char* BindingKindString(BindingKind kind);
 const char* ScopeKindString(ScopeKind kind);
 
-class BindingName
+class TaggedName
 {
-    // A JSAtom* with its low bit used as a tag for whether it is closed over
-    // (i.e., exists in the environment shape).
+    // A JSAtom* with its low bit used as a tag.
     uintptr_t bits_;
 
-    static const uintptr_t ClosedOverFlag = 0x1;
+    static const uintptr_t TaggedFlag = 0x1;
     static const uintptr_t FlagMask = 0x1;
 
-  public:
-    BindingName()
+  protected:
+    TaggedName()
       : bits_(0)
     { }
 
-    BindingName(JSAtom* name, bool closedOver)
-      : bits_(uintptr_t(name) | (closedOver ? ClosedOverFlag : 0x0))
+    TaggedName(JSAtom* name, bool tagged)
+      : bits_(uintptr_t(name) | (tagged ? TaggedFlag : 0x0))
     { }
 
+    void setTagged() {
+        bits_ |= TaggedFlag;
+    }
+
+    bool tagged() const {
+        return bits_ & TaggedFlag;
+    }
+
+  public:
     JSAtom* name() const {
         return (JSAtom*)(bits_ & ~FlagMask);
     }
+};
+
+class BindingName : public TaggedName
+{
+  public:
+    BindingName()
+      : TaggedName()
+    { }
+
+    BindingName(JSAtom* name, bool closedOver)
+      : TaggedName(name, closedOver)
+    { }
 
     bool closedOver() const {
-        return bits_ & ClosedOverFlag;
+        return tagged();
     }
 };
 
