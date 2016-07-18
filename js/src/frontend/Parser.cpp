@@ -291,6 +291,17 @@ SharedContext::computeThisBinding(Scope* scope)
     thisBinding_ = ThisBinding::Global;
 }
 
+void
+SharedContext::computeInWith(Scope* scope)
+{
+    for (ScopeIter si(scope); si; si++) {
+        if (si.kind() == ScopeKind::With) {
+            inWith_ = true;
+            break;
+        }
+    }
+}
+
 EvalSharedContext::EvalSharedContext(ExclusiveContext* cx, JSObject* enclosingEnv,
                                      Scope* enclosingScope, Directives directives,
                                      bool extraWarnings)
@@ -300,6 +311,7 @@ EvalSharedContext::EvalSharedContext(ExclusiveContext* cx, JSObject* enclosingEn
     bindings(cx)
 {
     computeAllowSyntax(enclosingScope);
+    computeInWith(enclosingScope);
     computeThisBinding(enclosingScope);
 
     // Like all things Debugger, Debugger.Frame.eval needs special
@@ -512,6 +524,8 @@ FunctionBox::initWithEnclosingContext(SharedContext* enclosing, FunctionSyntaxKi
         needsThisTDZChecks_ = enclosing->needsThisTDZChecks();
         thisBinding_ = enclosing->thisBinding();
     }
+
+    inWith_ = enclosing->inWith();
 }
 
 void
@@ -532,6 +546,8 @@ FunctionBox::initWithEnclosingScope(Scope* enclosingScope)
         computeAllowSyntax(enclosingScope);
         computeThisBinding(enclosingScope);
     }
+
+    computeInWith(enclosingScope);
 }
 
 template <typename ParseHandler>

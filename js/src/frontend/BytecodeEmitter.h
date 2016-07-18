@@ -343,6 +343,8 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     // run-one script or a run-once lambda).
     MOZ_MUST_USE bool checkRunOnceContext();
 
+    bool needsImplicitThis();
+
     void tellDebuggerAboutCompiledScript(ExclusiveContext* cx);
 
     inline TokenStream* tokenStream();
