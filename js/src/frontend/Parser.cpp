@@ -457,9 +457,10 @@ FunctionBox::initStandaloneFunction(Scope* enclosingScope)
 }
 
 void
-FunctionBox::initWithEnclosingContext(SharedContext* enclosing, FunctionSyntaxKind kind)
+FunctionBox::initWithEnclosingParseContext(ParseContext* enclosing, FunctionSyntaxKind kind)
 {
-    useAsm = enclosing->isFunctionBox() && enclosing->asFunctionBox()->useAsmOrInsideUseAsm();
+    SharedContext* sc = enclosing->sc();
+    useAsm = sc->isFunctionBox() && sc->asFunctionBox()->useAsmOrInsideUseAsm();
 
     JSFunction* fun = function();
 
@@ -476,18 +477,26 @@ FunctionBox::initWithEnclosingContext(SharedContext* enclosing, FunctionSyntaxKi
         }
 
         if (isGenexpLambda)
-            thisBinding_ = enclosing->thisBinding();
+            thisBinding_ = sc->thisBinding();
         else
             thisBinding_ = ThisBinding::Function;
     } else {
-        allowNewTarget_ = enclosing->allowNewTarget();
-        allowSuperProperty_ = enclosing->allowSuperProperty();
-        allowSuperCall_ = enclosing->allowSuperCall();
-        needsThisTDZChecks_ = enclosing->needsThisTDZChecks();
-        thisBinding_ = enclosing->thisBinding();
+        allowNewTarget_ = sc->allowNewTarget();
+        allowSuperProperty_ = sc->allowSuperProperty();
+        allowSuperCall_ = sc->allowSuperCall();
+        needsThisTDZChecks_ = sc->needsThisTDZChecks();
+        thisBinding_ = sc->thisBinding();
     }
 
-    inWith_ = enclosing->inWith();
+    if (sc->inWith()) {
+        inWith_ = true;
+    } else {
+        auto isWith = [](ParseContext::Statement* stmt) {
+            return stmt->kind() == StatementKind::With;
+        };
+
+        inWith_ = enclosing->findInnermostStatement(isWith);
+    }
 }
 
 void
@@ -2927,7 +2936,7 @@ Parser<FullParseHandler>::trySyntaxParseInnerFunction(ParseNode* pn, HandleFunct
                                              tryAnnexB);
         if (!funbox)
             return false;
-        funbox->initWithEnclosingContext(pc->sc(), kind);
+        funbox->initWithEnclosingParseContext(pc, kind);
 
         if (!parser->innerFunction(SyntaxParseHandler::NodeGeneric, pc, funbox, inHandling,
                                    kind, generatorKind, inheritedDirectives, newDirectives))
@@ -3015,7 +3024,7 @@ Parser<ParseHandler>::innerFunction(Node pn, ParseContext* outerpc, HandleFuncti
     FunctionBox* funbox = newFunctionBox(pn, fun, inheritedDirectives, generatorKind, tryAnnexB);
     if (!funbox)
         return false;
-    funbox->initWithEnclosingContext(outerpc->sc(), kind);
+    funbox->initWithEnclosingParseContext(outerpc, kind);
 
     return innerFunction(pn, outerpc, funbox, inHandling, kind, generatorKind,
                          inheritedDirectives, newDirectives);
@@ -7305,7 +7314,7 @@ Parser<ParseHandler>::generatorComprehensionLambda(unsigned begin)
     if (!genFunbox)
         return null();
     genFunbox->isGenexpLambda = true;
-    genFunbox->initWithEnclosingContext(outerpc->sc(), Expression);
+    genFunbox->initWithEnclosingParseContext(outerpc, Expression);
 
     ParseContext genpc(this, genFunbox, /* newDirectives = */ nullptr);
     if (!genpc.init())
