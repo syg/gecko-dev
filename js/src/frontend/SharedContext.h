@@ -521,7 +521,7 @@ class FunctionBox : public ObjectBox, public SharedContext
 
     void initFromLazyFunction();
     void initStandaloneFunction(Scope* enclosingScope);
-    void initWithEnclosingContext(SharedContext* enclosing, FunctionSyntaxKind kind);
+    void initWithEnclosingParseContext(ParseContext* enclosing, FunctionSyntaxKind kind);
 
     ObjectBox* toObjectBox() override { return this; }
     JSFunction* function() const { return &object->as<JSFunction>(); }

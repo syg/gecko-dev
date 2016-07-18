@@ -2635,9 +2635,8 @@ BytecodeEmitter::needsImplicitThis()
         return true;
 
     // Otherwise see if the current point is under a 'with'.
-    BytecodeEmitter* bce = this;
-    for (EmitterScope* es = innermostEmitterScope; es; es = es->enclosing(&bce)) {
-        if (es->scope(bce)->kind() == ScopeKind::With)
+    for (EmitterScope* es = innermostEmitterScope; es; es = es->enclosingInFrame()) {
+        if (es->scope(this)->kind() == ScopeKind::With)
             return true;
     }
 
@@ -2837,13 +2836,17 @@ BytecodeEmitter::emitGetNameAtLocation(JSAtom* name, const NameLocation& loc, bo
     // Need to provide |this| value for call.
     if (callContext) {
         switch (loc.kind()) {
-          case NameLocation::Kind::Dynamic:
-          case NameLocation::Kind::Global: {
+          case NameLocation::Kind::Dynamic: {
             JSOp thisOp = needsImplicitThis() ? JSOP_IMPLICITTHIS : JSOP_GIMPLICITTHIS;
             if (!emitAtomOp(name, thisOp))
                 return false;
             break;
           }
+
+          case NameLocation::Kind::Global:
+            if (!emitAtomOp(name, JSOP_GIMPLICITTHIS))
+                return false;
+            break;
 
           case NameLocation::Kind::Intrinsic:
           case NameLocation::Kind::NamedLambdaCallee:
