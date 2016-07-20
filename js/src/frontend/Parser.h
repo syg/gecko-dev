@@ -102,7 +102,6 @@ class ParseContext : public Nestable<ParseContext>
         // A lexically declared name is a member only of the declared name set of
         // the scope in which it is declared.
         DeclaredNameMap* declared_;
-        BloomishSet declaredSet_;
 
         // Monotonically increasing id.
         uint32_t id_;
