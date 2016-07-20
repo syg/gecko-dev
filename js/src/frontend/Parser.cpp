@@ -1172,9 +1172,10 @@ Parser<ParseHandler>::propagateFreeNamesAndMarkClosedOverBindings(ParseContext::
     uint32_t scopeId = scope.id();
     for (BindingIter bi = scope.bindings(pc); bi; bi++) {
         if (UsedNamePtr p = usedNames.lookup(bi.name())) {
-            if (p->value().isFreeInScope(scriptId, scopeId))
+            bool closedOver;
+            p->value().noteBoundInScope(scriptId, scopeId, &closedOver);
+            if (closedOver)
                 bi.setClosedOver();
-            p->value().noteBoundInScope(scriptId, scopeId);
         }
 
         if (mozilla::IsSame<ParseHandler, SyntaxParseHandler>::value) {
@@ -2052,9 +2053,9 @@ Parser<FullParseHandler>::standaloneFunctionBody(HandleFunction fun,
     return fn;
 }
 
-template <>
+template <typename ParseHandler>
 bool
-Parser<FullParseHandler>::declareFunctionArgumentsObject()
+Parser<ParseHandler>::declareFunctionArgumentsObject()
 {
     FunctionBox* funbox = pc->functionBox();
 
@@ -2113,19 +2114,6 @@ Parser<FullParseHandler>::declareFunctionArgumentsObject()
             funbox->setDefinitelyNeedsArgsObj();
     }
 
-    return true;
-}
-
-template <>
-bool
-Parser<SyntaxParseHandler>::declareFunctionArgumentsObject()
-{
-    // We don't need to analyze how 'arguments' is used to optimize its
-    // allocation if we aren't compiling a JSScript, but we do need to see if
-    // there are uses of 'arguments' to determine if the function is likely to
-    // be a constructor wrapper. See isLikelyConstructorWrapper.
-    if (hasUsedFunctionSpecialName(context->names().arguments))
-        pc->functionBox()->usesArguments = true;
     return true;
 }
 
