@@ -96,6 +96,8 @@ class BindingName
     bool closedOver() const {
         return bits_ & ClosedOverFlag;
     }
+
+    void trace(JSTracer* trc);
 };
 
 class BindingLocation

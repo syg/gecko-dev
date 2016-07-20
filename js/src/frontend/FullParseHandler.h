@@ -48,6 +48,7 @@ class FullParseHandler
      */
     const Rooted<LazyScript*> lazyOuterFunction_;
     size_t lazyInnerFunctionIndex;
+    size_t lazyBindingNameIndex;
 
     const TokenPos& pos() {
         return tokenStream.currentToken().pos;
@@ -104,6 +105,7 @@ class FullParseHandler
         tokenStream(tokenStream),
         lazyOuterFunction_(cx, lazyOuterFunction),
         lazyInnerFunctionIndex(0),
+        lazyBindingNameIndex(0),
         syntaxParser(syntaxParser)
     {}
 
@@ -869,12 +871,19 @@ class FullParseHandler
     bool canSkipLazyInnerFunctions() {
         return !!lazyOuterFunction_;
     }
+    bool canSkipLazyBindingNames() {
+        return !!lazyOuterFunction_;
+    }
     LazyScript* lazyOuterFunction() {
         return lazyOuterFunction_;
     }
     JSFunction* nextLazyInnerFunction() {
         MOZ_ASSERT(lazyInnerFunctionIndex < lazyOuterFunction()->numInnerFunctions());
         return lazyOuterFunction()->innerFunctions()[lazyInnerFunctionIndex++];
+    }
+    BindingName nextLazyBindingName() {
+        MOZ_ASSERT(lazyBindingNameIndex < lazyOuterFunction()->numBindingNames());
+        return lazyOuterFunction()->bindingNames()[lazyBindingNameIndex++];
     }
 };
 

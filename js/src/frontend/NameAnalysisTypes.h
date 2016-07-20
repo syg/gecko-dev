@@ -151,64 +151,6 @@ class DeclaredNameInfo
     }
 };
 
-// Used in Parser to track used names.
-class UsedNameInfo
-{
-    using ScopeIdVector = Vector<uint32_t, 4, LifoAllocPolicy<Fallible>>;
-
-    uintptr_t bits_;
-
-    static const uintptr_t UsedFromInnerFunctionFlag = 0x1;
-    static const uintptr_t FlagMask = 0x1;
-
-    ScopeIdVector& scopes() const {
-        MOZ_ASSERT(bits_);
-        return *reinterpret_cast<ScopeIdVector*>(bits_ & ~FlagMask);
-    }
-
-  public:
-    UsedNameInfo()
-      : bits_(0)
-    { }
-
-    bool init(LifoAlloc& alloc) {
-        MOZ_ASSERT(!bits_);
-        ScopeIdVector* vec = static_cast<ScopeIdVector*>(alloc.alloc(sizeof(ScopeIdVector)));
-        if (!vec)
-            return false;
-        new (vec) ScopeIdVector(alloc);
-        bits_ = reinterpret_cast<uintptr_t>(vec);
-        return true;
-    }
-
-    bool noteUsedInScope(uint32_t id) {
-        ScopeIdVector& s = scopes();
-        if (s.empty() || s.back() < id)
-            return s.append(id);
-        return true;
-    }
-
-    void noteBoundInScope(uint32_t id) {
-        ScopeIdVector& s = scopes();
-        while (!s.empty() && s.back() >= id)
-            s.popBack();
-    }
-
-    bool isFree() const {
-        return !scopes().empty();
-    }
-
-    void setUsedFromInnerFunction() {
-        MOZ_ASSERT(bits_);
-        bits_ |= UsedFromInnerFunctionFlag;
-    }
-
-    bool usedFromInnerFunction() const {
-        MOZ_ASSERT(bits_);
-        return bits_ & UsedFromInnerFunctionFlag;
-    }
-};
-
 // Used in BytecodeEmitter to map names to locations.
 class NameLocation
 {
@@ -404,9 +346,6 @@ namespace mozilla {
 
 template <>
 struct IsPod<js::frontend::DeclaredNameInfo> : TrueType {};
-
-template <>
-struct IsPod<js::frontend::UsedNameInfo> : TrueType {};
 
 template <>
 struct IsPod<js::frontend::NameLocation> : TrueType {};

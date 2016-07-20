@@ -540,6 +540,12 @@ class SyntaxParseHandler
     bool canSkipLazyInnerFunctions() {
         return false;
     }
+    bool canSkipLazyBindingNames() {
+        return false;
+    }
+    BindingName nextLazyBindingName() {
+        MOZ_CRASH("SyntaxParseHandler::canSkipLazyBindingNames must return false");
+    }
 
     void adjustGetToSet(Node node) {}
 

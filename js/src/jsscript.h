@@ -1757,7 +1757,7 @@ class LazyScript : public gc::TenuredCell
         // Assorted bits that should really be in ScriptSourceObject.
         uint32_t version : 8;
 
-        uint32_t numFreeVariables : 24;
+        uint32_t numBindingNames : 24;
         uint32_t numInnerFunctions : 20;
 
         uint32_t generatorKindBits : 2;
@@ -1790,7 +1790,7 @@ class LazyScript : public gc::TenuredCell
     LazyScript(JSFunction* fun, void* table, uint64_t packedFields,
                uint32_t begin, uint32_t end, uint32_t lineno, uint32_t column);
 
-    // Create a LazyScript without initializing the freeVariables and the
+    // Create a LazyScript without initializing the bindingNames and the
     // innerFunctions. To be GC-safe, the caller must initialize both vectors
     // with valid atoms and functions.
     static LazyScript* CreateRaw(ExclusiveContext* cx, HandleFunction fun,
@@ -1798,15 +1798,15 @@ class LazyScript : public gc::TenuredCell
                                  uint32_t lineno, uint32_t column);
 
   public:
-    // Create a LazyScript and initialize freeVariables and innerFunctions
+    // Create a LazyScript and initialize bindingNames and innerFunctions
     // with the provided vectors.
     static LazyScript* Create(ExclusiveContext* cx, HandleFunction fun,
-                              Handle<GCVector<JSAtom*>> freeVariables,
+                              Handle<GCVector<BindingName>> bindingNames,
                               Handle<GCVector<JSFunction*>> innerFunctions,
                               JSVersion version, uint32_t begin, uint32_t end,
                               uint32_t lineno, uint32_t column);
 
-    // Create a LazyScript and initialize the freeVariables and the
+    // Create a LazyScript and initialize the bindingNames and the
     // innerFunctions with dummy values to be replaced in a later initialization
     // phase.
     //
@@ -1860,18 +1860,18 @@ class LazyScript : public gc::TenuredCell
 
     void setEnclosingScopeAndSource(Scope* enclosingScope, ScriptSourceObject* sourceObject);
 
-    uint32_t numFreeVariables() const {
-        return p_.numFreeVariables;
+    uint32_t numBindingNames() const {
+        return p_.numBindingNames;
     }
-    JSAtom** freeVariables() {
-        return (JSAtom**)table_;
+    BindingName* bindingNames() {
+        return (BindingName*)table_;
     }
 
     uint32_t numInnerFunctions() const {
         return p_.numInnerFunctions;
     }
     GCPtrFunction* innerFunctions() {
-        return (GCPtrFunction*)&freeVariables()[numFreeVariables()];
+        return (GCPtrFunction*)&bindingNames()[numBindingNames()];
     }
 
     GeneratorKind generatorKind() const { return GeneratorKindFromBits(p_.generatorKindBits); }

@@ -958,6 +958,15 @@ js::GCMarker::mark(T* thing)
 
 /*** Inline, Eager GC Marking *********************************************************************/
 
+static inline void
+TraceBindingNames(JSTracer* trc, BindingName* names, uint32_t length)
+{
+    for (uint32_t i = 0; i < length; i++) {
+        JSAtom* name = names[i].name();
+        TraceManuallyBarrieredEdge(trc, &name, "scope name");
+    }
+};
+
 // Each of the eager, inline marking paths is directly preceeded by the
 // out-of-line, generic tracing code for comparison. Both paths must end up
 // traversing equivalent subgraphs.
@@ -978,9 +987,7 @@ LazyScript::traceChildren(JSTracer* trc)
         TraceEdge(trc, &enclosingScope_, "enclosingScope");
 
     // We rely on the fact that atoms are always tenured.
-    JSAtom** freeVariables = this->freeVariables();
-    for (auto i : MakeRange(numFreeVariables()))
-        TraceManuallyBarrieredEdge(trc, &freeVariables[i], "lazyScriptFreeVariable");
+    TraceBindingNames(trc, bindingNames(), numBindingNames());
 
     GCPtrFunction* innerFunctions = this->innerFunctions();
     for (auto i : MakeRange(numInnerFunctions()))
@@ -1002,9 +1009,9 @@ js::GCMarker::eagerlyMarkChildren(LazyScript *thing)
         traverseEdge(thing, static_cast<Scope*>(thing->enclosingScope_));
 
     // We rely on the fact that atoms are always tenured.
-    JSAtom** freeVariables = thing->freeVariables();
-    for (auto i : MakeRange(thing->numFreeVariables()))
-        traverseEdge(thing, static_cast<JSString*>(freeVariables[i]));
+    BindingName* bindingNames = thing->bindingNames();
+    for (auto i : MakeRange(thing->numBindingNames()))
+        traverseEdge(thing, static_cast<JSString*>(bindingNames[i].name()));
 
     GCPtrFunction* innerFunctions = thing->innerFunctions();
     for (auto i : MakeRange(thing->numInnerFunctions()))
@@ -1181,14 +1188,6 @@ js::GCMarker::eagerlyMarkChildren(JSRope* rope)
 }
 
 static inline void
-TraceBindingNames(JSTracer* trc, BindingName* names, uint32_t length)
-{
-    for (uint32_t i = 0; i < length; i++) {
-        JSAtom* name = names[i].name();
-        TraceManuallyBarrieredEdge(trc, &name, "scope name");
-    }
-};
-static inline void
 TraceNullableBindingNames(JSTracer* trc, BindingName* names, uint32_t length)
 {
     for (uint32_t i = 0; i < length; i++) {
@@ -1201,6 +1200,12 @@ static inline void
 TraceBindingData(JSTracer* trc, Data* data)
 {
     TraceBindingNames(trc, data->names, data->length);
+}
+void
+BindingName::trace(JSTracer* trc)
+{
+    JSAtom* atom = name();
+    TraceManuallyBarrieredEdge(trc, &atom, "binding name");
 }
 void
 BindingIter::trace(JSTracer* trc)

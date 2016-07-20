@@ -99,6 +99,7 @@ class MOZ_STACK_CLASS BytecodeCompiler
     Maybe<SourceCompressionTask> maybeSourceCompressor;
     SourceCompressionTask* sourceCompressor;
 
+    Maybe<UsedNameTracker> usedNames;
     Maybe<Parser<SyntaxParseHandler>> syntaxParser;
     Maybe<Parser<FullParseHandler>> parser;
 
@@ -217,17 +218,21 @@ BytecodeCompiler::canLazilyParse()
 bool
 BytecodeCompiler::createParser()
 {
+    usedNames.emplace(cx);
+    if (!usedNames->init())
+        return false;
+
     if (canLazilyParse()) {
         syntaxParser.emplace(cx, alloc, options, sourceBuffer.get(), sourceBuffer.length(),
-                             /* foldConstants = */ false, (Parser<SyntaxParseHandler>*) nullptr,
-                             (LazyScript*) nullptr);
+                             /* foldConstants = */ false, *usedNames,
+                             (Parser<SyntaxParseHandler>*) nullptr, (LazyScript*) nullptr);
 
         if (!syntaxParser->checkOptions())
             return false;
     }
 
     parser.emplace(cx, alloc, options, sourceBuffer.get(), sourceBuffer.length(),
-                   /* foldConstants = */ true, syntaxParser.ptrOr(nullptr), nullptr);
+                   /* foldConstants = */ true, *usedNames, syntaxParser.ptrOr(nullptr), nullptr);
     parser->sct = sourceCompressor;
     parser->ss = scriptSource;
     if (!parser->checkOptions())
@@ -705,8 +710,11 @@ frontend::CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy, const cha
 
     AutoCompilationTraceLogger traceLogger(cx, TraceLogger_ParserCompileLazy, options);
 
+    UsedNameTracker usedNames(cx);
+    if (!usedNames.init())
+        return false;
     Parser<FullParseHandler> parser(cx, &cx->tempLifoAlloc(), options, chars, length,
-                                    /* foldConstants = */ true, nullptr, lazy);
+                                    /* foldConstants = */ true, usedNames, nullptr, lazy);
     if (!parser.checkOptions())
         return false;
 

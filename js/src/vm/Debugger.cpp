@@ -4923,10 +4923,13 @@ Debugger::isCompilableUnit(JSContext* cx, unsigned argc, Value* vp)
     bool result = true;
 
     CompileOptions options(cx);
+    frontend::UsedNameTracker usedNames(cx);
+    if (!usedNames.init())
+        return false;
     frontend::Parser<frontend::FullParseHandler> parser(cx, &cx->tempLifoAlloc(),
                                                         options, chars.twoByteChars(),
                                                         length, /* foldConstants = */ true,
-                                                        nullptr, nullptr);
+                                                        usedNames, nullptr, nullptr);
     JS::WarningReporter older = JS::SetWarningReporter(cx->runtime(), nullptr);
     if (!parser.checkOptions() || !parser.parse()) {
         // We ran into an error. If it was because we ran out of memory we report

@@ -66,7 +66,6 @@ using DeclaredNameMap = RECYCLABLE_NAME_MAP_TYPE(DeclaredNameInfo);
 using CheckTDZMap = RECYCLABLE_NAME_MAP_TYPE(MaybeCheckTDZ);
 using NameLocationMap = RECYCLABLE_NAME_MAP_TYPE(NameLocation);
 using AtomIndexMap = RECYCLABLE_NAME_MAP_TYPE(uint32_t);
-using UsedNameSet = RECYCLABLE_NAME_MAP_TYPE(UsedNameInfo);
 
 #undef RECYCLABLE_NAME_MAP_TYPE
 

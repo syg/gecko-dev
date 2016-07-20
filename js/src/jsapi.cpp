@@ -109,8 +109,6 @@ using JS::ToInt32;
 using JS::ToInteger;
 using JS::ToUint32;
 
-using js::frontend::Parser;
-
 #ifdef HAVE_VA_LIST_AS_ARRAY
 #define JS_ADDRESSOF_VA_LIST(ap) ((va_list*)(ap))
 #else
@@ -4137,9 +4135,13 @@ JS_BufferIsCompilableUnit(JSContext* cx, HandleObject obj, const char* utf8, siz
     bool result = true;
 
     CompileOptions options(cx);
-    Parser<frontend::FullParseHandler> parser(cx, &cx->tempLifoAlloc(),
-                                              options, chars, length,
-                                              /* foldConstants = */ true, nullptr, nullptr);
+    frontend::UsedNameTracker usedNames(cx);
+    if (!usedNames.init())
+        return false;
+    frontend::Parser<frontend::FullParseHandler> parser(cx, &cx->tempLifoAlloc(),
+                                                        options, chars, length,
+                                                        /* foldConstants = */ true,
+                                                        usedNames, nullptr, nullptr);
     JS::WarningReporter older = JS::SetWarningReporter(cx->runtime(), nullptr);
     if (!parser.checkOptions() || !parser.parse()) {
         // We ran into an error. If it was because we ran out of source, we

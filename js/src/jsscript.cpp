@@ -194,21 +194,26 @@ js::XDRScriptConst(XDRState<XDR_DECODE>*, MutableHandleValue);
 // Code LazyScript's free variables.
 template<XDRMode mode>
 static bool
-XDRLazyFreeVariables(XDRState<mode>* xdr, MutableHandle<LazyScript*> lazy)
+XDRLazyBindingNames(XDRState<mode>* xdr, MutableHandle<LazyScript*> lazy)
 {
     JSContext* cx = xdr->cx();
     RootedAtom atom(cx);
-    JSAtom** freeVariables = lazy->freeVariables();
-    size_t numFreeVariables = lazy->numFreeVariables();
-    for (size_t i = 0; i < numFreeVariables; i++) {
-        if (mode == XDR_ENCODE)
-            atom = freeVariables[i];
+    uint8_t closedOver;
+    BindingName* bindingNames = lazy->bindingNames();
+    size_t numBindingNames = lazy->numBindingNames();
+    for (size_t i = 0; i < numBindingNames; i++) {
+        if (mode == XDR_ENCODE) {
+            atom = bindingNames[i].name();
+            closedOver = bindingNames[i].closedOver();
+        }
 
         if (!XDRAtom(xdr, &atom))
             return false;
+        if (!xdr->codeUint8(&closedOver))
+            return false;
 
         if (mode == XDR_DECODE)
-            freeVariables[i] = atom;
+            bindingNames[i] = BindingName(atom, closedOver);
     }
 
     return true;
@@ -258,8 +263,8 @@ XDRRelazificationInfo(XDRState<mode>* xdr, HandleFunction fun, HandleScript scri
         }
     }
 
-    // Code free variables.
-    if (!XDRLazyFreeVariables(xdr, lazy))
+    // Code binding names.
+    if (!XDRLazyBindingNames(xdr, lazy))
         return false;
 
     // No need to do anything with inner functions, since we asserted we don't
@@ -932,7 +937,7 @@ js::XDRLazyScript(XDRState<mode>* xdr, HandleScope enclosingScope, HandleScript 
     }
 
     // Code free variables.
-    if (!XDRLazyFreeVariables(xdr, lazy))
+    if (!XDRLazyBindingNames(xdr, lazy))
         return false;
 
     // Code inner functions.
@@ -3887,7 +3892,7 @@ LazyScript::CreateRaw(ExclusiveContext* cx, HandleFunction fun,
     p.hasBeenCloned = false;
     p.treatAsRunOnce = false;
 
-    size_t bytes = (p.numFreeVariables * sizeof(JSAtom*))
+    size_t bytes = (p.numBindingNames * sizeof(BindingName))
                  + (p.numInnerFunctions * sizeof(GCPtrFunction));
 
     ScopedJSFreePtr<uint8_t> table(bytes ? fun->zone()->pod_malloc<uint8_t>(bytes) : nullptr);
@@ -3907,7 +3912,7 @@ LazyScript::CreateRaw(ExclusiveContext* cx, HandleFunction fun,
 
 /* static */ LazyScript*
 LazyScript::Create(ExclusiveContext* cx, HandleFunction fun,
-                   Handle<GCVector<JSAtom*>> freeVariables,
+                   Handle<GCVector<BindingName>> bindingNames,
                    Handle<GCVector<JSFunction*>> innerFunctions,
                    JSVersion version,
                    uint32_t begin, uint32_t end, uint32_t lineno, uint32_t column)
@@ -3918,7 +3923,7 @@ LazyScript::Create(ExclusiveContext* cx, HandleFunction fun,
     };
 
     p.version = version;
-    p.numFreeVariables = freeVariables.length();
+    p.numBindingNames = bindingNames.length();
     p.numInnerFunctions = innerFunctions.length();
     p.generatorKindBits = GeneratorKindAsBits(NotGenerator);
     p.strict = false;
@@ -3933,9 +3938,9 @@ LazyScript::Create(ExclusiveContext* cx, HandleFunction fun,
     if (!res)
         return nullptr;
 
-    JSAtom** resFreeVariables = res->freeVariables();
-    for (size_t i = 0; i < res->numFreeVariables(); i++)
-        resFreeVariables[i] = freeVariables[i];
+    BindingName* resBindingNames = res->bindingNames();
+    for (size_t i = 0; i < res->numBindingNames(); i++)
+        resBindingNames[i] = bindingNames[i];
 
     GCPtrFunction* resInnerFunctions = res->innerFunctions();
     for (size_t i = 0; i < res->numInnerFunctions(); i++)
@@ -3966,9 +3971,9 @@ LazyScript::Create(ExclusiveContext* cx, HandleFunction fun,
     // Fill with dummies, to be GC-safe after the initialization of the free
     // variables and inner functions.
     size_t i, num;
-    JSAtom** variables = res->freeVariables();
-    for (i = 0, num = res->numFreeVariables(); i < num; i++)
-        variables[i] = dummyAtom;
+    BindingName* bindingNames = res->bindingNames();
+    for (i = 0, num = res->numBindingNames(); i < num; i++)
+        bindingNames[i] = BindingName(dummyAtom, false);
 
     GCPtrFunction* functions = res->innerFunctions();
     for (i = 0, num = res->numInnerFunctions(); i < num; i++)
