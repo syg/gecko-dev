@@ -1142,10 +1142,15 @@ Parser<ParseHandler>::noteUsedName(HandlePropertyName name)
     // to know if they are closed over. So no need to track used name at the
     // global scope. It is not incorrect to track them, this is an
     // optimization.
-    if (pc->sc()->isGlobalContext() && pc->innermostScope() == &pc->varScope())
+    ParseContext::Scope* scope = pc->innermostScope();
+    if (pc->sc()->isGlobalContext() && scope == &pc->varScope())
         return true;
 
-    return usedNames.note(context, name, pc->scriptId(), pc->innermostScope()->id());
+    // If the name is already declared, don't bother recording the use.
+    if (scope->lookupDeclaredName(name))
+        return true;
+
+    return usedNames.note(context, name, pc->scriptId(), scope->id());
 }
 
 template <typename ParseHandler>

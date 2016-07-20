@@ -578,13 +578,19 @@ enum TripledotHandling { TripledotAllowed, TripledotProhibited };
 // 1. Number all scopes in monotonic increasing order in textual order.
 // 2. Number all scripts in monotonic increasing order in textual order.
 // 3. When an identifier u is used in scope numbered S in script numbered F,
-// 3a. If u is found in Used, append (max(back(Used[u]).F, F),S) to Used[u].
+// 3a. If u is found in Used, let (F_u,S_u) be the final item in the list
+//     Used[u]. Append (max(F,F_u),S) to Used[u].
 // 3b. Otherwise, assign the the list [(F,S)] to Used[u].
 // 4. When we finish parsing a scope S in function F, for each declared name d in
 //    Declared(S):
 // 4a. If d is found in Used, mark d as closed over if there is a value
 //     (F_d, S_d) in Used[d] such that F_d > F and S_d > S.
 // 4b. Remove all values (F_d, S_d) in Used[d] such that S_d are >= S.
+//
+// Steps 1 and 2 are implemented by UsedNameTracker::next{Script,Scope}Id.
+// Step 3 is implemented by UsedNameTracker::noteUsedInScope.
+// Step 4 is implemented by UsedNameTracker::noteBoundInScope and
+// Parser::propagateFreeNamesAndMarkClosedOverBindings.
 class UsedNameTracker
 {
   public:
@@ -618,7 +624,7 @@ class UsedNameTracker
             IdPair& deepest = scopes_.back();
             if (deepest.scopeId < scopeId) {
                 IdPair pair;
-                pair.scriptId = std::max(deepest.scriptId, scriptId);
+                pair.scriptId = (std::max)(deepest.scriptId, scriptId);
                 pair.scopeId = scopeId;
                 return scopes_.append(pair);
             }
