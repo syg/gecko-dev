@@ -408,6 +408,7 @@ FunctionBox::FunctionBox(ExclusiveContext* cx, LifoAlloc& alloc, ObjectBox* trac
     insideUseAsm(false),
     isAnnexB(false),
     wasEmitted(false),
+    declaredArguments(false),
     usesArguments(false),
     usesApply(false),
     usesThis(false),
@@ -1149,10 +1150,10 @@ Parser<ParseHandler>::noteUsedName(HandlePropertyName name)
 
 template <typename ParseHandler>
 bool
-Parser<ParseHandler>::hasFreeName(HandlePropertyName name)
+Parser<ParseHandler>::hasUsedName(HandlePropertyName name)
 {
     if (UsedNamePtr p = usedNames.lookup(name))
-        return p->value().isFreeInScript(pc->scriptId());
+        return p->value().isUsedInScript(pc->scriptId());
     return false;
 }
 
@@ -1168,16 +1169,17 @@ Parser<ParseHandler>::propagateFreeNamesAndMarkClosedOverBindings(ParseContext::
     }
 
     uint32_t scriptId = pc->scriptId();
+    uint32_t scopeId = scope.id();
     for (BindingIter bi = scope.bindings(pc); bi; bi++) {
         if (UsedNamePtr p = usedNames.lookup(bi.name())) {
-            if (p->value().isFreeInScript(scriptId))
+            if (p->value().isFreeInScope(scriptId, scopeId))
                 bi.setClosedOver();
-            p->value().noteBoundInScope(scriptId, scope.id());
+            p->value().noteBoundInScope(scriptId, scopeId);
+        }
 
-            if (mozilla::IsSame<ParseHandler, SyntaxParseHandler>::value) {
-                if (!pc->bindingNamesForLazy.append(BindingName(bi.name(), bi.closedOver())))
-                    return false;
-            }
+        if (mozilla::IsSame<ParseHandler, SyntaxParseHandler>::value) {
+            if (!pc->bindingNamesForLazy.append(BindingName(bi.name(), bi.closedOver())))
+                return false;
         }
     }
 
@@ -1632,7 +1634,7 @@ Parser<FullParseHandler>::evalBody(EvalSharedContext* evalsc)
     // declaration does not shadow the enclosing script's 'arguments'
     // binding (i.e. not a lexical declaration), check the enclosing
     // script.
-    if (hasFreeName(context->names().arguments)) {
+    if (hasUsedName(context->names().arguments)) {
         if (IsArgumentsUsedInLegacyGenerator(context, pc->sc()->compilationEnclosingScope())) {
             report(ParseError, false, nullptr, JSMSG_BAD_GENEXP_BODY, js_arguments_str);
             return nullptr;
@@ -1794,10 +1796,10 @@ Parser<ParseHandler>::targetScopeForFunctionSpecialName(DeclarationKind* declKin
 
 template <typename ParseHandler>
 bool
-Parser<ParseHandler>::hasFreeFunctionSpecialName(HandlePropertyName name)
+Parser<ParseHandler>::hasUsedFunctionSpecialName(HandlePropertyName name)
 {
     MOZ_ASSERT(name == context->names().arguments || name == context->names().dotThis);
-    return hasFreeName(name) || pc->functionBox()->bindingsAccessedDynamically();
+    return hasUsedName(name) || pc->functionBox()->bindingsAccessedDynamically();
 }
 
 template <typename ParseHandler>
@@ -1813,7 +1815,14 @@ Parser<ParseHandler>::declareFunctionThis()
     // '.this' to be bound.
     FunctionBox* funbox = pc->functionBox();
     HandlePropertyName dotThis = context->names().dotThis;
-    if (hasFreeFunctionSpecialName(dotThis) || funbox->isDerivedClassConstructor()) {
+
+    bool declareThis;
+    if (handler.canSkipLazyBindingNames())
+        declareThis = funbox->function()->lazyScript()->hasThisBinding();
+    else
+        declareThis = hasUsedFunctionSpecialName(dotThis) || funbox->isDerivedClassConstructor();
+
+    if (declareThis) {
         DeclarationKind declKind;
         ParseContext::Scope& targetScope = targetScopeForFunctionSpecialName(&declKind);
         AddDeclaredNamePtr p = targetScope.lookupDeclaredNameForAdd(dotThis);
@@ -1932,6 +1941,15 @@ Parser<SyntaxParseHandler>::finishFunction()
     if (!finishExtraFunctionScopes())
         return false;
 
+    // There are too many bindings or inner functions to be saved into the
+    // LazyScript. Do a full parse.
+    if (pc->bindingNamesForLazy.length() >= LazyScript::NumBindingNamesLimit ||
+        pc->innerFunctionsForLazy.length() >= LazyScript::NumInnerFunctionsLimit)
+    {
+        MOZ_ALWAYS_FALSE(abortIfSyntaxParser());
+        return false;
+    }
+
     FunctionBox* funbox = pc->functionBox();
     RootedFunction fun(context, funbox->function());
     LazyScript* lazy = LazyScript::Create(context, fun,
@@ -1952,6 +1970,10 @@ Parser<SyntaxParseHandler>::finishFunction()
         lazy->setIsDerivedClassConstructor();
     if (funbox->needsHomeObject())
         lazy->setNeedsHomeObject();
+    if (funbox->declaredArguments)
+        lazy->setShouldDeclareArguments();
+    if (funbox->hasThisBinding())
+        lazy->setHasThisBinding();
 
     // Flags that need to copied back into the parser when we do the full
     // parse.
@@ -2038,13 +2060,21 @@ Parser<FullParseHandler>::declareFunctionArgumentsObject()
 
     // Time to implement the odd semantics of 'arguments'.
     HandlePropertyName argumentsName = context->names().arguments;
-    if (hasFreeFunctionSpecialName(argumentsName)) {
+
+    bool tryDeclareArguments;
+    if (handler.canSkipLazyBindingNames())
+        tryDeclareArguments = funbox->function()->lazyScript()->shouldDeclareArguments();
+    else
+        tryDeclareArguments = hasUsedFunctionSpecialName(argumentsName);
+
+    if (tryDeclareArguments) {
         DeclarationKind declKind;
         ParseContext::Scope& targetScope = targetScopeForFunctionSpecialName(&declKind);
         AddDeclaredNamePtr p = targetScope.lookupDeclaredNameForAdd(argumentsName);
         if (!p) {
             if (!targetScope.addDeclaredName(pc, p, argumentsName, declKind))
                 return false;
+            funbox->declaredArguments = true;
             funbox->usesArguments = true;
         } else if (&targetScope == &pc->defaultsScope()) {
             // Formal parameters shadow the arguments object.
@@ -2094,7 +2124,7 @@ Parser<SyntaxParseHandler>::declareFunctionArgumentsObject()
     // allocation if we aren't compiling a JSScript, but we do need to see if
     // there are uses of 'arguments' to determine if the function is likely to
     // be a constructor wrapper. See isLikelyConstructorWrapper.
-    if (hasFreeFunctionSpecialName(context->names().arguments))
+    if (hasUsedFunctionSpecialName(context->names().arguments))
         pc->functionBox()->usesArguments = true;
     return true;
 }
@@ -2866,7 +2896,7 @@ Parser<FullParseHandler>::trySyntaxParseInnerFunction(ParseNode* pn, HandleFunct
         // parse to avoid the overhead of a lazy syntax-only parse. Although
         // the prediction may be incorrect, IIFEs are common enough that it
         // pays off for lots of code.
-        if (pn->isLikelyIIFE() && generatorKind != NotGenerator)
+        if (pn->isLikelyIIFE() && generatorKind == NotGenerator)
             break;
 
         Parser<SyntaxParseHandler>* parser = handler.syntaxParser;

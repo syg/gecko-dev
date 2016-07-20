@@ -576,14 +576,14 @@ enum TripledotHandling { TripledotAllowed, TripledotProhibited };
 // The algorithm:
 //
 // 1. Number all scopes in monotonic increasing order in textual order.
-// 2. Number all functions in monotonic increasing order in textual order.
-// 3. When an identifier u is used in scope numbered S in function numbered F,
+// 2. Number all scripts in monotonic increasing order in textual order.
+// 3. When an identifier u is used in scope numbered S in script numbered F,
 // 3a. If u is found in Used, append (F,S) to Used[u].
 // 3b. Otherwise, assign the the list [(F,S)] to Used[u].
 // 4. When we finish parsing a scope S in function F, for each declared name d in
 //    Declared(S):
 // 4a. If d is found in Used, mark d as closed over if there is a value
-//     (F_d, S_d) in Used[d] such that F_d > F.
+//     (F_d, S_d) in Used[d] such that F_d > F and S_d > S.
 // 4b. Remove all values (F_d, S_d) in Used[d] such that S_d are >= S.
 class UsedNameTracker
 {
@@ -609,7 +609,10 @@ class UsedNameTracker
 
         bool noteUsedInScope(uint32_t scriptId, uint32_t scopeId) {
             if (scopes_.empty() || scopes_.back().scopeId < scopeId) {
-                return scopes_.append(IdPair { scriptId, scopeId });
+                IdPair pair;
+                pair.scriptId = scriptId;
+                pair.scopeId = scopeId;
+                return scopes_.append(pair);
             }
             return true;
         }
@@ -619,8 +622,15 @@ class UsedNameTracker
                 scopes_.popBack();
         }
 
-        bool isFreeInScript(uint32_t scriptId) const {
-            return !scopes_.empty() && scopes_.back().scriptId > scriptId;
+        bool isFreeInScope(uint32_t scriptId, uint32_t scopeId) const {
+            if (scopes_.empty())
+                return false;
+            const UsedNameInfo::IdPair& back = scopes_.back();
+            return back.scriptId > scriptId && back.scopeId > scopeId;
+        }
+
+        bool isUsedInScript(uint32_t scriptId) const {
+            return !scopes_.empty() && scopes_.back().scriptId >= scriptId;
         }
     };
 
@@ -655,8 +665,8 @@ class UsedNameTracker
 
         ~AutoResetCounters() {
             if (resetOnDestruction_) {
-                MOZ_ASSERT(savedScriptCounter_ >= usedNames_.scriptCounter_);
-                MOZ_ASSERT(savedScopeCounter_ >= usedNames_.scopeCounter_);
+                MOZ_ASSERT(savedScriptCounter_ <= usedNames_.scriptCounter_);
+                MOZ_ASSERT(savedScopeCounter_ <= usedNames_.scopeCounter_);
                 usedNames_.scriptCounter_ = savedScriptCounter_;
                 usedNames_.scopeCounter_ = savedScopeCounter_;
             }
@@ -1194,7 +1204,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     bool matchInOrOf(bool* isForInp, bool* isForOfp, DeclarationKind* delcKind = nullptr);
 
     ParseContext::Scope& targetScopeForFunctionSpecialName(DeclarationKind* declKind);
-    bool hasFreeFunctionSpecialName(HandlePropertyName name);
+    bool hasUsedFunctionSpecialName(HandlePropertyName name);
     bool declareFunctionArgumentsObject();
     bool declareFunctionThis();
     Node newInternalDotName(HandlePropertyName name);
@@ -1256,7 +1266,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
                                                     DeclarationKind kind, TokenPos pos);
     bool noteDeclaredName(HandlePropertyName name, DeclarationKind kind, TokenPos pos);
     bool noteUsedName(HandlePropertyName name);
-    bool hasFreeName(HandlePropertyName name);
+    bool hasUsedName(HandlePropertyName name);
 
     // Required on Scope exit.
     bool propagateFreeNamesAndMarkClosedOverBindings(ParseContext::Scope& scope);

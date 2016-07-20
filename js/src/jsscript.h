@@ -1751,13 +1751,15 @@ class LazyScript : public gc::TenuredCell
 #if JS_BITS_PER_WORD == 32
     uint32_t padding;
 #endif
-  private:
 
+  private:
     struct PackedView {
         // Assorted bits that should really be in ScriptSourceObject.
         uint32_t version : 8;
 
-        uint32_t numBindingNames : 24;
+        uint32_t shouldDeclareArguments : 1;
+        uint32_t hasThisBinding : 1;
+        uint32_t numBindingNames : 22;
         uint32_t numInnerFunctions : 20;
 
         uint32_t generatorKindBits : 2;
@@ -1798,6 +1800,9 @@ class LazyScript : public gc::TenuredCell
                                  uint32_t lineno, uint32_t column);
 
   public:
+    static const uint32_t NumBindingNamesLimit = 1 << 22;
+    static const uint32_t NumInnerFunctionsLimit = 1 << 20;
+
     // Create a LazyScript and initialize bindingNames and innerFunctions
     // with the provided vectors.
     static LazyScript* Create(ExclusiveContext* cx, HandleFunction fun,
@@ -1952,6 +1957,20 @@ class LazyScript : public gc::TenuredCell
     }
     void setNeedsHomeObject() {
         p_.needsHomeObject = true;
+    }
+
+    bool shouldDeclareArguments() const {
+        return p_.shouldDeclareArguments;
+    }
+    void setShouldDeclareArguments() {
+        p_.shouldDeclareArguments = true;
+    }
+
+    bool hasThisBinding() const {
+        return p_.hasThisBinding;
+    }
+    void setHasThisBinding() {
+        p_.hasThisBinding = true;
     }
 
     const char* filename() const {

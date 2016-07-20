@@ -490,10 +490,11 @@ class FunctionBox : public ObjectBox, public SharedContext
     bool            wasEmitted:1;           /* Bytecode has been emitted for this function. */
 
     // Fields for use in heuristics.
-    bool            usesArguments:1;  /* contains a free use of 'arguments' */
-    bool            usesApply:1;      /* contains an f.apply() call */
-    bool            usesThis:1;       /* contains 'this' */
-    bool            usesReturn:1;     /* contains a 'return' statement */
+    bool            declaredArguments:1;    /* the Parser declared 'arguments' */
+    bool            usesArguments:1;        /* contains a free use of 'arguments' */
+    bool            usesApply:1;            /* contains an f.apply() call */
+    bool            usesThis:1;             /* contains 'this' */
+    bool            usesReturn:1;           /* contains a 'return' statement */
 
     FunctionContextFlags funCxFlags;
 
