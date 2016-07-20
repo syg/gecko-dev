@@ -4923,10 +4923,10 @@ Debugger::isCompilableUnit(JSContext* cx, unsigned argc, Value* vp)
     bool result = true;
 
     CompileOptions options(cx);
-    frontend::UsedNameTracker usedNames(cx);
+    frontend::UsedNameTracker usedNames(cx->tempLifoAlloc());
     if (!usedNames.init())
         return false;
-    frontend::Parser<frontend::FullParseHandler> parser(cx, &cx->tempLifoAlloc(),
+    frontend::Parser<frontend::FullParseHandler> parser(cx, cx->tempLifoAlloc(),
                                                         options, chars.twoByteChars(),
                                                         length, /* foldConstants = */ true,
                                                         usedNames, nullptr, nullptr);
@@ -7575,7 +7575,7 @@ EvaluateInEnv(JSContext* cx, Handle<Env*> env, AbstractFramePtr frame,
         RootedScope scope(cx, GlobalScope::createEmpty(cx, ScopeKind::NonSyntactic));
         if (!scope)
             return false;
-        script = frontend::CompileEvalScript(cx, &cx->tempLifoAlloc(), env, scope,
+        script = frontend::CompileEvalScript(cx, cx->tempLifoAlloc(), env, scope,
                                              options, srcBuf);
         if (script)
             script->setActiveEval();
@@ -7585,7 +7585,7 @@ EvaluateInEnv(JSContext* cx, Handle<Env*> env, AbstractFramePtr frame,
         // circumvent the fresh lexical scope that all eval have, so that the
         // users of executeInGlobal, like the web console, may add new bindings to
         // the global scope.
-        script = frontend::CompileGlobalScript(cx, &cx->tempLifoAlloc(), scopeKind, options,
+        script = frontend::CompileGlobalScript(cx, cx->tempLifoAlloc(), scopeKind, options,
                                                srcBuf);
     }
 

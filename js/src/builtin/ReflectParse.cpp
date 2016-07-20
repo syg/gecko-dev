@@ -3656,10 +3656,10 @@ reflect_parse(JSContext* cx, uint32_t argc, Value* vp)
     options.setFileAndLine(filename, lineno);
     options.setCanLazilyParse(false);
     mozilla::Range<const char16_t> chars = linearChars.twoByteRange();
-    UsedNameTracker usedNames(cx);
+    UsedNameTracker usedNames(cx->tempLifoAlloc());
     if (!usedNames.init())
         return false;
-    Parser<FullParseHandler> parser(cx, &cx->tempLifoAlloc(), options, chars.start().get(),
+    Parser<FullParseHandler> parser(cx, cx->tempLifoAlloc(), options, chars.start().get(),
                                     chars.length(), /* foldConstants = */ false, usedNames,
                                     nullptr, nullptr);
     if (!parser.checkOptions())

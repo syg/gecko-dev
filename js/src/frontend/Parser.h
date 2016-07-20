@@ -602,11 +602,11 @@ class UsedNameTracker
             uint32_t scopeId;
         };
 
-        Vector<IdPair, 24> scopes_;
+        Vector<IdPair, 4, LifoAllocPolicy<Fallible>> scopes_;
 
       public:
-        explicit UsedNameInfo(ExclusiveContext* cx)
-          : scopes_(cx)
+        explicit UsedNameInfo(LifoAlloc& alloc)
+          : scopes_(alloc)
         { }
 
         UsedNameInfo(UsedNameInfo&& other)
@@ -649,7 +649,7 @@ class UsedNameTracker
         }
     };
 
-    using UsedNameMap = HashMap<JSAtom*, UsedNameInfo>;
+    using UsedNameMap = HashMap<JSAtom*, UsedNameInfo, DefaultHasher<JSAtom*>, LifoAllocPolicy<Fallible>>;
 
   private:
     UsedNameMap map_;
@@ -692,8 +692,8 @@ class UsedNameTracker
         }
     };
 
-    explicit UsedNameTracker(ExclusiveContext* cx)
-      : map_(cx),
+    explicit UsedNameTracker(LifoAlloc& alloc)
+      : map_(alloc),
         scriptCounter_(0),
         scopeCounter_(0)
     { }
@@ -716,7 +716,7 @@ class UsedNameTracker
         return map_.lookup(name);
     }
 
-    MOZ_MUST_USE bool note(ExclusiveContext* cx, JSAtom* name, uint32_t scriptId, uint32_t scopeId);
+    MOZ_MUST_USE bool note(LifoAlloc& alloc, JSAtom* name, uint32_t scriptId, uint32_t scopeId);
 };
 
 template <typename ParseHandler>
@@ -853,7 +853,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     bool reportWithOffset(ParseReportKind kind, bool strict, uint32_t offset, unsigned errorNumber,
                           ...);
 
-    Parser(ExclusiveContext* cx, LifoAlloc* alloc, const ReadOnlyCompileOptions& options,
+    Parser(ExclusiveContext* cx, LifoAlloc& alloc, const ReadOnlyCompileOptions& options,
            const char16_t* chars, size_t length, bool foldConstants, UsedNameTracker& usedNames,
            Parser<SyntaxParseHandler>* syntaxParser, LazyScript* lazyOuterFunction);
     ~Parser();

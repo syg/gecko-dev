@@ -47,7 +47,7 @@ class MOZ_STACK_CLASS BytecodeCompiler
   public:
     // Construct an object passing mandatory arguments.
     BytecodeCompiler(ExclusiveContext* cx,
-                     LifoAlloc* alloc,
+                     LifoAlloc& alloc,
                      const ReadOnlyCompileOptions& options,
                      SourceBufferHolder& sourceBuffer,
                      HandleScope enclosingScope,
@@ -86,7 +86,7 @@ class MOZ_STACK_CLASS BytecodeCompiler
     AutoKeepAtoms keepAtoms;
 
     ExclusiveContext* cx;
-    LifoAlloc* alloc;
+    LifoAlloc& alloc;
     const ReadOnlyCompileOptions& options;
     SourceBufferHolder& sourceBuffer;
 
@@ -119,7 +119,7 @@ AutoCompilationTraceLogger::AutoCompilationTraceLogger(ExclusiveContext* cx,
 {}
 
 BytecodeCompiler::BytecodeCompiler(ExclusiveContext* cx,
-                                   LifoAlloc* alloc,
+                                   LifoAlloc& alloc,
                                    const ReadOnlyCompileOptions& options,
                                    SourceBufferHolder& sourceBuffer,
                                    HandleScope enclosingScope,
@@ -218,7 +218,7 @@ BytecodeCompiler::canLazilyParse()
 bool
 BytecodeCompiler::createParser()
 {
-    usedNames.emplace(cx);
+    usedNames.emplace(alloc);
     if (!usedNames->init())
         return false;
 
@@ -627,7 +627,7 @@ struct AutoTimer
 };
 
 JSScript*
-frontend::CompileGlobalScript(ExclusiveContext* cx, LifoAlloc* alloc, ScopeKind scopeKind,
+frontend::CompileGlobalScript(ExclusiveContext* cx, LifoAlloc& alloc, ScopeKind scopeKind,
                               const ReadOnlyCompileOptions& options,
                               SourceBufferHolder& srcBuf,
                               SourceCompressionTask* extraSct,
@@ -642,7 +642,7 @@ frontend::CompileGlobalScript(ExclusiveContext* cx, LifoAlloc* alloc, ScopeKind 
 }
 
 JSScript*
-frontend::CompileEvalScript(ExclusiveContext* cx, LifoAlloc* alloc,
+frontend::CompileEvalScript(ExclusiveContext* cx, LifoAlloc& alloc,
                             HandleObject environment, HandleScope enclosingScope,
                             const ReadOnlyCompileOptions& options,
                             SourceBufferHolder& srcBuf,
@@ -658,11 +658,10 @@ frontend::CompileEvalScript(ExclusiveContext* cx, LifoAlloc* alloc,
 
 ModuleObject*
 frontend::CompileModule(ExclusiveContext* cx, const ReadOnlyCompileOptions& optionsInput,
-                        SourceBufferHolder& srcBuf, LifoAlloc* alloc,
+                        SourceBufferHolder& srcBuf, LifoAlloc& alloc,
                         ScriptSourceObject** sourceObjectOut /* = nullptr */)
 {
     MOZ_ASSERT(srcBuf.get());
-    MOZ_ASSERT(alloc);
     MOZ_ASSERT_IF(sourceObjectOut, *sourceObjectOut == nullptr);
 
     CompileOptions options(cx, optionsInput);
@@ -683,7 +682,7 @@ frontend::CompileModule(JSContext* cx, const ReadOnlyCompileOptions& options,
     if (!GlobalObject::ensureModulePrototypesCreated(cx, cx->global()))
         return nullptr;
 
-    LifoAlloc* alloc = &cx->asJSContext()->tempLifoAlloc();
+    LifoAlloc& alloc = cx->asJSContext()->tempLifoAlloc();
     RootedModuleObject module(cx, CompileModule(cx, options, srcBuf, alloc));
     if (!module)
         return nullptr;
@@ -710,10 +709,10 @@ frontend::CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy, const cha
 
     AutoCompilationTraceLogger traceLogger(cx, TraceLogger_ParserCompileLazy, options);
 
-    UsedNameTracker usedNames(cx);
+    UsedNameTracker usedNames(cx->tempLifoAlloc());
     if (!usedNames.init())
         return false;
-    Parser<FullParseHandler> parser(cx, &cx->tempLifoAlloc(), options, chars, length,
+    Parser<FullParseHandler> parser(cx, cx->tempLifoAlloc(), options, chars, length,
                                     /* foldConstants = */ true, usedNames, nullptr, lazy);
     if (!parser.checkOptions())
         return false;
@@ -760,7 +759,7 @@ CompileFunctionBody(JSContext* cx, MutableHandleFunction fun, const ReadOnlyComp
     // FIXME: make Function pass in two strings and parse them as arguments and
     // ProgramElements respectively.
 
-    BytecodeCompiler compiler(cx, &cx->tempLifoAlloc(), options, srcBuf, enclosingScope,
+    BytecodeCompiler compiler(cx, cx->tempLifoAlloc(), options, srcBuf, enclosingScope,
                               TraceLogger_ParserCompileFunction);
     compiler.setSourceArgumentsNotIncluded();
     return compiler.compileFunctionBody(fun, formals, generatorKind);

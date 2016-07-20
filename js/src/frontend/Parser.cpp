@@ -369,14 +369,14 @@ ParseContext::~ParseContext()
 }
 
 bool
-UsedNameTracker::note(ExclusiveContext* cx, JSAtom* name, uint32_t scriptId, uint32_t scopeId)
+UsedNameTracker::note(LifoAlloc& alloc, JSAtom* name, uint32_t scriptId, uint32_t scopeId)
 {
     UsedNameMap::AddPtr p = map_.lookupForAdd(name);
     if (p) {
         if (!p->value().noteUsedInScope(scriptId, scopeId))
             return false;
     } else {
-        UsedNameInfo info(cx);
+        UsedNameInfo info(alloc);
         if (!info.noteUsedInScope(scriptId, scopeId))
             return false;
         if (!map_.add(p, name, Move(info)))
@@ -573,7 +573,7 @@ Parser<SyntaxParseHandler>::abortIfSyntaxParser()
 }
 
 template <typename ParseHandler>
-Parser<ParseHandler>::Parser(ExclusiveContext* cx, LifoAlloc* alloc,
+Parser<ParseHandler>::Parser(ExclusiveContext* cx, LifoAlloc& alloc,
                              const ReadOnlyCompileOptions& options,
                              const char16_t* chars, size_t length,
                              bool foldConstants,
@@ -582,7 +582,7 @@ Parser<ParseHandler>::Parser(ExclusiveContext* cx, LifoAlloc* alloc,
                              LazyScript* lazyOuterFunction)
   : AutoGCRooter(cx, PARSER),
     context(cx),
-    alloc(*alloc),
+    alloc(alloc),
     tokenStream(cx, options, chars, length, thisForCtor()),
     traceListHead(nullptr),
     pc(nullptr),
@@ -596,7 +596,7 @@ Parser<ParseHandler>::Parser(ExclusiveContext* cx, LifoAlloc* alloc,
 #endif
     abortedSyntaxParse(false),
     isUnexpectedEOF_(false),
-    handler(cx, *alloc, tokenStream, syntaxParser, lazyOuterFunction)
+    handler(cx, alloc, tokenStream, syntaxParser, lazyOuterFunction)
 {
     cx->perThreadData->frontendMapPool.addActiveCompilation();
 
@@ -606,7 +606,7 @@ Parser<ParseHandler>::Parser(ExclusiveContext* cx, LifoAlloc* alloc,
     if (options.extraWarningsOption)
         handler.disableSyntaxParser();
 
-    tempPoolMark = alloc->mark();
+    tempPoolMark = alloc.mark();
 }
 
 template<typename ParseHandler>
@@ -1150,7 +1150,7 @@ Parser<ParseHandler>::noteUsedName(HandlePropertyName name)
     if (scope->lookupDeclaredName(name))
         return true;
 
-    return usedNames.note(context, name, pc->scriptId(), scope->id());
+    return usedNames.note(alloc, name, pc->scriptId(), scope->id());
 }
 
 template <typename ParseHandler>

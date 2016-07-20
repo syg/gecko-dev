@@ -3926,7 +3926,7 @@ Compile(JSContext* cx, const ReadOnlyCompileOptions& options, ScopeKind scopeKin
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
 
-    script.set(frontend::CompileGlobalScript(cx, &cx->tempLifoAlloc(), scopeKind, options, srcBuf));
+    script.set(frontend::CompileGlobalScript(cx, cx->tempLifoAlloc(), scopeKind, options, srcBuf));
     return !!script;
 }
 
@@ -4135,10 +4135,10 @@ JS_BufferIsCompilableUnit(JSContext* cx, HandleObject obj, const char* utf8, siz
     bool result = true;
 
     CompileOptions options(cx);
-    frontend::UsedNameTracker usedNames(cx);
+    frontend::UsedNameTracker usedNames(cx->tempLifoAlloc());
     if (!usedNames.init())
         return false;
-    frontend::Parser<frontend::FullParseHandler> parser(cx, &cx->tempLifoAlloc(),
+    frontend::Parser<frontend::FullParseHandler> parser(cx, cx->tempLifoAlloc(),
                                                         options, chars, length,
                                                         /* foldConstants = */ true,
                                                         usedNames, nullptr, nullptr);
@@ -4403,7 +4403,7 @@ Evaluate(JSContext* cx, ScopeKind scopeKind, HandleObject env,
 
     options.setIsRunOnce(true);
     SourceCompressionTask sct(cx);
-    RootedScript script(cx, frontend::CompileGlobalScript(cx, &cx->tempLifoAlloc(),
+    RootedScript script(cx, frontend::CompileGlobalScript(cx, cx->tempLifoAlloc(),
                                                           scopeKind, options, srcBuf, &sct));
     if (!script)
         return false;
