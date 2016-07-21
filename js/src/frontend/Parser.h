@@ -570,22 +570,34 @@ enum TripledotHandling { TripledotAllowed, TripledotProhibited };
 
 // A data structure for tracking used names per parsing session in order
 // compute which bindings are closed over. Scripts and scopes are numbered
-// monotonically in textual order and name uses are tracked by the (script id,
-// scope id) pairs of their use sites.
+// monotonically in textual order and name uses are tracked by lists of
+// (script id, scope id) pairs of their use sites.
+//
+// Intuitively, in a pair (P,S), P tracks the most nested function that has a
+// use of u, and S tracks the most nested scope that is still being parsed.
+//
+// P is used to answer the question "is u used by a nested function?"
+// S is used to answer the question "is u used in any scopes currently being
+//                                   parsed?"
 //
 // The algorithm:
 //
 // 1. Number all scopes in monotonic increasing order in textual order.
 // 2. Number all scripts in monotonic increasing order in textual order.
-// 3. When an identifier u is used in scope numbered S in script numbered F,
-// 3a. If u is found in Used, let (F_u,S_u) be the final item in the list
-//     Used[u]. Append (max(F,F_u),S) to Used[u].
-// 3b. Otherwise, assign the the list [(F,S)] to Used[u].
-// 4. When we finish parsing a scope S in function F, for each declared name d in
+// 3. When an identifier u is used in scope numbered S in script numbered P,
+// 3a. If u is found in Used, let (P_u,S_u) be the final item in the list
+//     Used[u]. Append (max(P,P_u),S) to Used[u].
+//
+//     NOTE: max(P,P_u) guarantees that a live use of a name across function
+//     boundaries can be determined by only inspecting the last pair of the
+//     list in Used[u].
+//
+// 3b. Otherwise, assign the the list [(P,S)] to Used[u].
+// 4. When we finish parsing a scope S in script P, for each declared name d in
 //    Declared(S):
 // 4a. If d is found in Used, mark d as closed over if there is a value
-//     (F_d, S_d) in Used[d] such that F_d > F and S_d > S.
-// 4b. Remove all values (F_d, S_d) in Used[d] such that S_d are >= S.
+//     (P_d, S_d) in Used[d] such that P_d > P and S_d > S.
+// 4b. Remove all values (P_d, S_d) in Used[d] such that S_d are >= S.
 //
 // Steps 1 and 2 are implemented by UsedNameTracker::next{Script,Scope}Id.
 // Step 3 is implemented by UsedNameTracker::noteUsedInScope.
