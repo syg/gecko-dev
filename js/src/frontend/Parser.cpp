@@ -911,6 +911,13 @@ DeclarationKindIsVar(DeclarationKind kind)
            kind == DeclarationKind::ForOfVar;
 }
 
+static bool
+DeclarationKindIsParameter(DeclarationKind kind)
+{
+    return kind == DeclarationKind::PositionalFormalParameter ||
+           kind == DeclarationKind::FormalParameter;
+}
+
 template <typename ParseHandler>
 bool
 Parser<ParseHandler>::tryDeclareVar(HandlePropertyName name, DeclarationKind kind,
@@ -937,14 +944,7 @@ Parser<ParseHandler>::tryDeclareVar(HandlePropertyName name, DeclarationKind kin
         AddDeclaredNamePtr p = scope->lookupDeclaredNameForAdd(name);
         if (p) {
             DeclarationKind declaredKind = p->value()->kind();
-            if (declaredKind == DeclarationKind::PositionalFormalParameter) {
-                // In sloppy mode, positional formal parameters may be
-                // redeclared.
-                if (pc->sc()->strict()) {
-                    *redeclaredKind = Some(declaredKind);
-                    return true;
-                }
-            } else if (!DeclarationKindIsVar(declaredKind)) {
+            if (!DeclarationKindIsVar(declaredKind) && !DeclarationKindIsParameter(declaredKind)) {
                 // Annex B.3.5 allows redeclaring simple (non-destructured)
                 // catch parameters with var declarations, except when it
                 // appears in a for-of.
