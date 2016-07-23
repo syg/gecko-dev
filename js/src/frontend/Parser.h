@@ -167,12 +167,6 @@ class ParseContext : public Nestable<ParseContext>
             return maybeReportOOM(pc, declared().add(p, name, DeclaredNameInfo(kind)));
         }
 
-        void skipLazyBindingName(BindingName name) {
-            MOZ_ASSERT(lookupDeclaredName(name.name()));
-            if (name.closedOver())
-                lookupDeclaredName(name.name())->value()->setClosedOver();
-        }
-
         // Move all declared parameter names to the parameter default
         // expression scope.
         static MOZ_MUST_USE bool moveFormalParameterDeclaredNamesForDefaults(ParseContext* pc);
@@ -319,9 +313,9 @@ class ParseContext : public Nestable<ParseContext>
     // All inner functions in this context. Only used when syntax parsing.
     Rooted<GCVector<JSFunction*>> innerFunctionsForLazy;
 
-    // All binding names, in order of appearance, only used when syntax
-    // parsing.
-    Rooted<GCVector<BindingName>> bindingNamesForLazy;
+    // Closed over binding names, in order of appearance. Null-delimited
+    // between scopes. Only used when syntax parsing.
+    Rooted<GCVector<JSAtom*>> closedOverBindingsForLazy;
 
     // In a function context, points to a Directive struct that can be updated
     // to reflect new directives encountered in the Directive Prologue that
@@ -362,7 +356,7 @@ class ParseContext : public Nestable<ParseContext>
         lastYieldOffset(NoYieldOffset),
         positionalFormalParameterNames(prs->context),
         innerFunctionsForLazy(prs->context, GCVector<JSFunction*>(prs->context)),
-        bindingNamesForLazy(prs->context, GCVector<BindingName>(prs->context)),
+        closedOverBindingsForLazy(prs->context, GCVector<JSAtom*>(prs->context)),
         newDirectives(newDirectives),
         inDeclDestructuring(false),
         funHasReturnExpr(false),

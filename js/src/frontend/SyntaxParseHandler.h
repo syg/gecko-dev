@@ -540,11 +540,11 @@ class SyntaxParseHandler
     bool canSkipLazyInnerFunctions() {
         return false;
     }
-    bool canSkipLazyBindingNames() {
+    bool canSkipLazyClosedOverBindings() {
         return false;
     }
-    BindingName nextLazyBindingName() {
-        MOZ_CRASH("SyntaxParseHandler::canSkipLazyBindingNames must return false");
+    JSAtom* nextLazyClosedOverBinding() {
+        MOZ_CRASH("SyntaxParseHandler::canSkipLazyClosedOverBindings must return false");
     }
 
     void adjustGetToSet(Node node) {}

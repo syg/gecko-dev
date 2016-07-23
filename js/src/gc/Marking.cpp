@@ -987,7 +987,11 @@ LazyScript::traceChildren(JSTracer* trc)
         TraceEdge(trc, &enclosingScope_, "enclosingScope");
 
     // We rely on the fact that atoms are always tenured.
-    TraceBindingNames(trc, bindingNames(), numBindingNames());
+    JSAtom** closedOverBindings = this->closedOverBindings();
+    for (auto i : MakeRange(numClosedOverBindings())) {
+        if (closedOverBindings[i])
+            TraceManuallyBarrieredEdge(trc, &closedOverBindings[i], "closedOverBinding");
+    }
 
     GCPtrFunction* innerFunctions = this->innerFunctions();
     for (auto i : MakeRange(numInnerFunctions()))
@@ -1009,9 +1013,11 @@ js::GCMarker::eagerlyMarkChildren(LazyScript *thing)
         traverseEdge(thing, static_cast<Scope*>(thing->enclosingScope_));
 
     // We rely on the fact that atoms are always tenured.
-    BindingName* bindingNames = thing->bindingNames();
-    for (auto i : MakeRange(thing->numBindingNames()))
-        traverseEdge(thing, static_cast<JSString*>(bindingNames[i].name()));
+    JSAtom** closedOverBindings = thing->closedOverBindings();
+    for (auto i : MakeRange(thing->numClosedOverBindings())) {
+        if (closedOverBindings[i])
+            traverseEdge(thing, static_cast<JSString*>(closedOverBindings[i]));
+    }
 
     GCPtrFunction* innerFunctions = thing->innerFunctions();
     for (auto i : MakeRange(thing->numInnerFunctions()))

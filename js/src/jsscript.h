@@ -1759,7 +1759,7 @@ class LazyScript : public gc::TenuredCell
 
         uint32_t shouldDeclareArguments : 1;
         uint32_t hasThisBinding : 1;
-        uint32_t numBindingNames : 22;
+        uint32_t numClosedOverBindings : 22;
         uint32_t numInnerFunctions : 20;
 
         uint32_t generatorKindBits : 2;
@@ -1792,7 +1792,7 @@ class LazyScript : public gc::TenuredCell
     LazyScript(JSFunction* fun, void* table, uint64_t packedFields,
                uint32_t begin, uint32_t end, uint32_t lineno, uint32_t column);
 
-    // Create a LazyScript without initializing the bindingNames and the
+    // Create a LazyScript without initializing the closedOverBindings and the
     // innerFunctions. To be GC-safe, the caller must initialize both vectors
     // with valid atoms and functions.
     static LazyScript* CreateRaw(ExclusiveContext* cx, HandleFunction fun,
@@ -1800,18 +1800,18 @@ class LazyScript : public gc::TenuredCell
                                  uint32_t lineno, uint32_t column);
 
   public:
-    static const uint32_t NumBindingNamesLimit = 1 << 22;
+    static const uint32_t NumClosedOverBindingsLimit = 1 << 22;
     static const uint32_t NumInnerFunctionsLimit = 1 << 20;
 
-    // Create a LazyScript and initialize bindingNames and innerFunctions
+    // Create a LazyScript and initialize closedOverBindings and innerFunctions
     // with the provided vectors.
     static LazyScript* Create(ExclusiveContext* cx, HandleFunction fun,
-                              Handle<GCVector<BindingName>> bindingNames,
+                              Handle<GCVector<JSAtom*>> closedOverBindings,
                               Handle<GCVector<JSFunction*>> innerFunctions,
                               JSVersion version, uint32_t begin, uint32_t end,
                               uint32_t lineno, uint32_t column);
 
-    // Create a LazyScript and initialize the bindingNames and the
+    // Create a LazyScript and initialize the closedOverBindings and the
     // innerFunctions with dummy values to be replaced in a later initialization
     // phase.
     //
@@ -1865,18 +1865,18 @@ class LazyScript : public gc::TenuredCell
 
     void setEnclosingScopeAndSource(Scope* enclosingScope, ScriptSourceObject* sourceObject);
 
-    uint32_t numBindingNames() const {
-        return p_.numBindingNames;
+    uint32_t numClosedOverBindings() const {
+        return p_.numClosedOverBindings;
     }
-    BindingName* bindingNames() {
-        return (BindingName*)table_;
+    JSAtom** closedOverBindings() {
+        return (JSAtom**)table_;
     }
 
     uint32_t numInnerFunctions() const {
         return p_.numInnerFunctions;
     }
     GCPtrFunction* innerFunctions() {
-        return (GCPtrFunction*)&bindingNames()[numBindingNames()];
+        return (GCPtrFunction*)&closedOverBindings()[numClosedOverBindings()];
     }
 
     GeneratorKind generatorKind() const { return GeneratorKindFromBits(p_.generatorKindBits); }

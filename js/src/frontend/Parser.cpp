@@ -1155,7 +1155,7 @@ Parser<ParseHandler>::noteUsedName(HandlePropertyName name)
 {
     // If the we are delazifying, the LazyScript already has all the
     // closed-over info for bindings and there's no need to track used names.
-    if (handler.canSkipLazyBindingNames())
+    if (handler.canSkipLazyClosedOverBindings())
         return true;
 
     // The asm.js validator does all its own symbol-table management so, as an
@@ -1191,27 +1191,36 @@ template <typename ParseHandler>
 bool
 Parser<ParseHandler>::propagateFreeNamesAndMarkClosedOverBindings(ParseContext::Scope& scope)
 {
-    if (handler.canSkipLazyBindingNames()) {
-        uint32_t numBindings = scope.computeNumBindings(pc);
-        for (uint32_t i = 0; i < numBindings; i++)
-            scope.skipLazyBindingName(handler.nextLazyBindingName());
+    if (handler.canSkipLazyClosedOverBindings()) {
+        // Scopes are nullptr-delimited in the LazyScript closed over bindings
+        // array.
+        while (JSAtom* name = handler.nextLazyClosedOverBinding())
+            scope.lookupDeclaredName(name)->value()->setClosedOver();
         return true;
     }
 
+    bool isSyntaxParser = mozilla::IsSame<ParseHandler, SyntaxParseHandler>::value;
     uint32_t scriptId = pc->scriptId();
     uint32_t scopeId = scope.id();
     for (BindingIter bi = scope.bindings(pc); bi; bi++) {
         if (UsedNamePtr p = usedNames.lookup(bi.name())) {
             bool closedOver;
             p->value().noteBoundInScope(scriptId, scopeId, &closedOver);
-            if (closedOver)
+            if (closedOver) {
                 bi.setClosedOver();
-        }
 
-        if (mozilla::IsSame<ParseHandler, SyntaxParseHandler>::value) {
-            if (!pc->bindingNamesForLazy.append(BindingName(bi.name(), bi.closedOver())))
-                return false;
+                if (isSyntaxParser) {
+                    if (!pc->closedOverBindingsForLazy.append(bi.name()))
+                        return false;
+                }
+            }
         }
+    }
+
+    // Append a nullptr to denote end-of-scope.
+    if (isSyntaxParser) {
+        if (!pc->closedOverBindingsForLazy.append(nullptr))
+            return false;
     }
 
     return true;
@@ -1848,7 +1857,7 @@ Parser<ParseHandler>::declareFunctionThis()
     HandlePropertyName dotThis = context->names().dotThis;
 
     bool declareThis;
-    if (handler.canSkipLazyBindingNames())
+    if (handler.canSkipLazyClosedOverBindings())
         declareThis = funbox->function()->lazyScript()->hasThisBinding();
     else
         declareThis = hasUsedFunctionSpecialName(dotThis) || funbox->isDerivedClassConstructor();
@@ -1974,7 +1983,7 @@ Parser<SyntaxParseHandler>::finishFunction()
 
     // There are too many bindings or inner functions to be saved into the
     // LazyScript. Do a full parse.
-    if (pc->bindingNamesForLazy.length() >= LazyScript::NumBindingNamesLimit ||
+    if (pc->closedOverBindingsForLazy.length() >= LazyScript::NumClosedOverBindingsLimit ||
         pc->innerFunctionsForLazy.length() >= LazyScript::NumInnerFunctionsLimit)
     {
         MOZ_ALWAYS_FALSE(abortIfSyntaxParser());
@@ -1984,7 +1993,7 @@ Parser<SyntaxParseHandler>::finishFunction()
     FunctionBox* funbox = pc->functionBox();
     RootedFunction fun(context, funbox->function());
     LazyScript* lazy = LazyScript::Create(context, fun,
-                                          pc->bindingNamesForLazy, pc->innerFunctionsForLazy,
+                                          pc->closedOverBindingsForLazy, pc->innerFunctionsForLazy,
                                           versionNumber(), funbox->bufStart, funbox->bufEnd,
                                           funbox->startLine, funbox->startColumn);
     if (!lazy)
@@ -2093,7 +2102,7 @@ Parser<ParseHandler>::declareFunctionArgumentsObject()
     HandlePropertyName argumentsName = context->names().arguments;
 
     bool tryDeclareArguments;
-    if (handler.canSkipLazyBindingNames())
+    if (handler.canSkipLazyClosedOverBindings())
         tryDeclareArguments = funbox->function()->lazyScript()->shouldDeclareArguments();
     else
         tryDeclareArguments = hasUsedFunctionSpecialName(argumentsName);
