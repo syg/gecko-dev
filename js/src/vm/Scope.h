@@ -194,9 +194,11 @@ class Scope : public js::gc::TenuredCell
     // FunctionScope::Data.
     struct RefCountedData
     {
-        uint32_t refCount;
+        uint32_t refCount : 31;
+        bool notLifoAllocated : 1;
 
         void addRef() {
+            MOZ_ASSERT(notLifoAllocated);
             refCount++;
         }
 
