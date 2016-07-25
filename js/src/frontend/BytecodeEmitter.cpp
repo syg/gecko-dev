@@ -995,8 +995,8 @@ BytecodeEmitter::EmitterScope::enterFunctionBody(BytecodeEmitter* bce, FunctionB
 
     // Resolve body-level bindings, if there are any.
     uint32_t firstFrameSlot = frameSlotStart();
-    if (funbox->funScopeBindings()) {
-        Handle<FunctionScope::BindingData*> bindings = funbox->funScopeBindings();
+    if (funbox->varScopeBindings()) {
+        Handle<FunctionScope::BindingData*> bindings = funbox->varScopeBindings();
         NameLocationMap& cache = nameCache();
 
         BindingIter bi(*bindings, firstFrameSlot, funbox->hasDefaults());
@@ -1037,7 +1037,7 @@ BytecodeEmitter::EmitterScope::enterFunctionBody(BytecodeEmitter* bce, FunctionB
     // Create and intern the VM scope.
     auto createScope = [funbox, firstFrameSlot](ExclusiveContext* cx, HandleScope enclosing) {
         RootedFunction fun(cx, funbox->function());
-        return FunctionScope::create(cx, funbox->funScopeBindings(), firstFrameSlot,
+        return FunctionScope::create(cx, funbox->varScopeBindings(), firstFrameSlot,
                                      funbox->hasDefaults(),
                                      funbox->needsCallObjectRegardlessOfBindings(),
                                      fun, enclosing);
@@ -7417,7 +7417,7 @@ BytecodeEmitter::isRestParameter(ParseNode* pn, bool* result)
 
     JSAtom* name = pn->name();
     if (!BindingKindIsLexical(lookupName(name).bindingKind())) {
-        FunctionScope::BindingData* bindings = funbox->funScopeBindings();
+        FunctionScope::BindingData* bindings = funbox->varScopeBindings();
         if (bindings->nonPositionalFormalStart > 0) {
             *result = name == bindings->names[bindings->nonPositionalFormalStart - 1].name();
             return true;

@@ -473,7 +473,7 @@ class FunctionBox : public ObjectBox, public SharedContext
     LexicalScope::BindingData* defaultsScopeBindings_;
 
     // Names from the 'var' scope of the function.
-    FunctionScope::BindingData* funScopeBindings_;
+    FunctionScope::BindingData* varScopeBindings_;
 
     void initWithEnclosingScope(Scope* enclosingScope);
 
@@ -515,9 +515,9 @@ class FunctionBox : public ObjectBox, public SharedContext
         return MutableHandle<LexicalScope::BindingData*>::fromMarkedLocation(&defaultsScopeBindings_);
     }
 
-    MutableHandle<FunctionScope::BindingData*> funScopeBindings() {
+    MutableHandle<FunctionScope::BindingData*> varScopeBindings() {
         MOZ_ASSERT(context->compartment()->runtimeFromAnyThread()->keepAtoms());
-        return MutableHandle<FunctionScope::BindingData*>::fromMarkedLocation(&funScopeBindings_);
+        return MutableHandle<FunctionScope::BindingData*>::fromMarkedLocation(&varScopeBindings_);
     }
 
     void initFromLazyFunction();

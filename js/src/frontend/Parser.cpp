@@ -406,7 +406,7 @@ FunctionBox::FunctionBox(ExclusiveContext* cx, LifoAlloc& alloc, ObjectBox* trac
     enclosingScope_(nullptr),
     namedLambdaBindings_(nullptr),
     defaultsScopeBindings_(nullptr),
-    funScopeBindings_(nullptr),
+    varScopeBindings_(nullptr),
     functionNode(nullptr),
     bufStart(0),
     bufEnd(0),
@@ -1949,7 +1949,7 @@ Parser<FullParseHandler>::finishFunction()
                                                                            hasDefaults);
         if (!bindings)
             return false;
-        funbox->funScopeBindings().set(*bindings);
+        funbox->varScopeBindings().set(*bindings);
     }
 
     if (hasDefaults) {
@@ -8227,7 +8227,7 @@ Parser<ParseHandler>::computedPropertyName(YieldHandling yieldHandling, Node lit
     uint32_t begin = pos().begin;
 
     // Turn off the inDeclDestructuring flag when parsing computed property
-    // names. In short, when parsing 'let {[x + y]: z} = obj;', noteNameUse()
+    // names. In short, when parsing 'let {[x + y]: z} = obj;', noteUsedName()
     // should be called on x and y, but not on z. See the comment on
     // Parser<>::checkDestructuringPattern() for details.
     bool saved = pc->inDeclDestructuring;
