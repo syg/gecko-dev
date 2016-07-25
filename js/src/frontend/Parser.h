@@ -602,37 +602,37 @@ class UsedNameTracker
   public:
     class UsedNameInfo
     {
-        struct IdPair
+        struct Use
         {
             uint32_t scriptId;
             uint32_t scopeId;
         };
 
-        Vector<IdPair, 4, LifoAllocPolicy<Fallible>> scopes_;
+        Vector<Use, 4, LifoAllocPolicy<Fallible>> uses_;
 
       public:
         explicit UsedNameInfo(LifoAlloc& alloc)
-          : scopes_(alloc)
+          : uses_(alloc)
         { }
 
         UsedNameInfo(UsedNameInfo&& other)
-          : scopes_(mozilla::Move(other.scopes_))
+          : uses_(mozilla::Move(other.uses_))
         { }
 
         bool noteUsedInScope(uint32_t scriptId, uint32_t scopeId) {
-            if (scopes_.empty()) {
-                IdPair pair;
-                pair.scriptId = scriptId;
-                pair.scopeId = scopeId;
-                return scopes_.append(pair);
+            if (uses_.empty()) {
+                Use use;
+                use.scriptId = scriptId;
+                use.scopeId = scopeId;
+                return uses_.append(use);
             }
 
-            IdPair& deepest = scopes_.back();
-            if (deepest.scopeId < scopeId) {
-                IdPair pair;
-                pair.scriptId = (std::max)(deepest.scriptId, scriptId);
-                pair.scopeId = scopeId;
-                return scopes_.append(pair);
+            Use& innermost = uses_.back();
+            if (innermost.scopeId < scopeId) {
+                Use use;
+                use.scriptId = (std::max)(innermost.scriptId, scriptId);
+                use.scopeId = scopeId;
+                return uses_.append(use);
             }
 
             return true;
@@ -640,18 +640,18 @@ class UsedNameTracker
 
         void noteBoundInScope(uint32_t scriptId, uint32_t scopeId, bool* closedOver) {
             *closedOver = false;
-            while (!scopes_.empty()) {
-                IdPair& deepest = scopes_.back();
-                if (deepest.scopeId < scopeId)
+            while (!uses_.empty()) {
+                Use& innermost = uses_.back();
+                if (innermost.scopeId < scopeId)
                     break;
-                if (deepest.scriptId > scriptId)
+                if (innermost.scriptId > scriptId)
                     *closedOver = true;
-                scopes_.popBack();
+                uses_.popBack();
             }
         }
 
         bool isUsedInScript(uint32_t scriptId) const {
-            return !scopes_.empty() && scopes_.back().scriptId >= scriptId;
+            return !uses_.empty() && uses_.back().scriptId >= scriptId;
         }
     };
 
