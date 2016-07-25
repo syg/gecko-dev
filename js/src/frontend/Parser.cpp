@@ -372,17 +372,22 @@ ParseContext::~ParseContext()
     // error would have occurred for declaring a binding in the nearest var
     // scope. Mark them as needing extra assignments to this var binding.
     finishInnerFunctionBoxesForAnnexB();
-
-    if (namedLambdaScope_)
-        namedLambdaScope_->release(this);
-    if (defaultsScope_)
-        defaultsScope_->release(this);
-    varScope_->release(this);
 }
 
 bool
 UsedNameTracker::note(LifoAlloc& alloc, JSAtom* name, uint32_t scriptId, uint32_t scopeId)
 {
+    // The same name is often used multiple times in succession. Optimize for
+    // this case.
+    for (size_t i = 0; i < mozilla::ArrayLength(recents_); i++) {
+        if ((recents_[i].name == name &&
+             recents_[i].use.scriptId == scriptId &&
+             recents_[i].use.scopeId == scopeId))
+        {
+            return true;
+        }
+    }
+
     UsedNameMap::AddPtr p = map_.lookupForAdd(name);
     if (p) {
         if (!p->value().noteUsedInScope(scriptId, scopeId))
@@ -394,6 +399,13 @@ UsedNameTracker::note(LifoAlloc& alloc, JSAtom* name, uint32_t scriptId, uint32_
         if (!map_.add(p, name, Move(info)))
             return false;
     }
+
+    // Rotate the recent entries.
+    for (size_t i = mozilla::ArrayLength(recents_) - 1; i != 0; i--)
+        recents_[i] = recents_[i - 1];
+    recents_[0].name = name;
+    recents_[0].use.scriptId = scriptId;
+    recents_[0].use.scopeId = scopeId;
 
     return true;
 }
@@ -1171,10 +1183,6 @@ Parser<ParseHandler>::noteUsedName(HandlePropertyName name)
     if (pc->sc()->isGlobalContext() && scope == &pc->varScope())
         return true;
 
-    // If the name is already declared, don't bother recording the use.
-    if (scope->lookupDeclaredName(name))
-        return true;
-
     return usedNames.note(alloc, name, pc->scriptId(), scope->id());
 }
 
@@ -1580,23 +1588,6 @@ Parser<FullParseHandler>::newLexicalScopeData(ParseContext::Scope& scope)
 
 template <>
 SyntaxParseHandler::Node
-Parser<SyntaxParseHandler>::makeFunctionBodyLexicalScope(Node body)
-{
-    return body;
-}
-
-template <>
-ParseNode*
-Parser<FullParseHandler>::makeFunctionBodyLexicalScope(ParseNode* body)
-{
-    Maybe<LexicalScope::BindingData*> bindings = newLexicalScopeData(pc->varScope());
-    if (!bindings)
-        return nullptr;
-    return handler.newLexicalScope(*bindings, body);
-}
-
-template <>
-SyntaxParseHandler::Node
 Parser<SyntaxParseHandler>::finishLexicalScope(ParseContext::Scope& scope, Node body)
 {
     if (!propagateFreeNamesAndMarkClosedOverBindings(scope))
@@ -1613,7 +1604,6 @@ Parser<FullParseHandler>::finishLexicalScope(ParseContext::Scope& scope, ParseNo
     Maybe<LexicalScope::BindingData*> bindings = newLexicalScopeData(scope);
     if (!bindings)
         return nullptr;
-    scope.release(pc);
     return handler.newLexicalScope(*bindings, body);
 }
 
@@ -1906,13 +1896,6 @@ bool
 Parser<ParseHandler>::declareDotGeneratorName()
 {
     return noteDeclaredName(context->names().dotGenerator, DeclarationKind::Var, pos());
-}
-
-template <typename ParseHandler>
-bool
-Parser<ParseHandler>::finishFunctionBodyScope()
-{
-    return propagateFreeNamesAndMarkClosedOverBindings(pc->varScope());
 }
 
 template <typename ParseHandler>
@@ -2233,17 +2216,7 @@ Parser<ParseHandler>::functionBody(InHandling inHandling, YieldHandling yieldHan
             return null();
     }
 
-    // Note that finishLexicalScope is not used here as to:
-    //
-    //   1. Make the function's body-level lexical scope bindings (i.e., get
-    //      the 'let' and 'const' bindings out of the var scope) without
-    //      releasing the ParseContext::Scope. It is still needed to generate
-    //      the 'var' bindings later.
-    //
-    //   2. Optimize away useless propagation if there is no defaults scope.
-    if (!finishFunctionBodyScope())
-        return null();
-    return makeFunctionBodyLexicalScope(pn);
+    return finishLexicalScope(pc->varScope(), pn);
 }
 
 template <typename ParseHandler>
@@ -7365,7 +7338,7 @@ Parser<ParseHandler>::generatorComprehensionLambda(unsigned begin)
     if (!handler.prependInitialYield(body, generator))
         return null();
 
-    if (!finishFunctionBodyScope())
+    if (!propagateFreeNamesAndMarkClosedOverBindings(pc->varScope()))
         return null();
     if (!finishFunction())
         return null();

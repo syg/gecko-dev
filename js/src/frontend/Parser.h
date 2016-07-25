@@ -9,6 +9,7 @@
 #ifndef frontend_Parser_h
 #define frontend_Parser_h
 
+#include "mozilla/Array.h"
 #include "mozilla/Maybe.h"
 
 #include "jspubtd.h"
@@ -93,6 +94,8 @@ class ParseContext : public Nestable<ParseContext>
     // Tracks declared and used names within a scope.
     class Scope : public Nestable<Scope>
     {
+        NameMapPool& pool_;
+
         // Names declared in this scope. Corresponds to the union of
         // VarDeclaredNames and LexicallyDeclaredNames in the ES spec.
         //
@@ -126,13 +129,13 @@ class ParseContext : public Nestable<ParseContext>
         template <typename ParseHandler>
         explicit Scope(Parser<ParseHandler>* parser)
           : Nestable<Scope>(&parser->pc->innermostScope_),
+            pool_(parser->context->frontendMapPool()),
             declared_(nullptr),
             id_(parser->usedNames.nextScopeId())
         { }
 
-        void release(ParseContext* pc) {
-            ExclusiveContext* cx = pc->sc()->context;
-            cx->frontendMapPool().release(&declared_);
+        ~Scope() {
+            pool_.release(&declared_);
         }
 
         void dump(ParseContext* pc);
@@ -149,7 +152,7 @@ class ParseContext : public Nestable<ParseContext>
 
             MOZ_ASSERT(!declared_);
             ExclusiveContext* cx = pc->sc()->context;
-            declared_ = cx->frontendMapPool().acquire<DeclaredNameMap>(cx);
+            declared_ = pool_.acquire<DeclaredNameMap>(cx);
             return declared_;
         }
 
@@ -599,15 +602,15 @@ enum TripledotHandling { TripledotAllowed, TripledotProhibited };
 // Parser::propagateFreeNamesAndMarkClosedOverBindings.
 class UsedNameTracker
 {
+    struct Use
+    {
+        uint32_t scriptId;
+        uint32_t scopeId;
+    };
+
   public:
     class UsedNameInfo
     {
-        struct Use
-        {
-            uint32_t scriptId;
-            uint32_t scopeId;
-        };
-
         Vector<Use, 4, LifoAllocPolicy<Fallible>> uses_;
 
       public:
@@ -658,7 +661,20 @@ class UsedNameTracker
     using UsedNameMap = HashMap<JSAtom*, UsedNameInfo, DefaultHasher<JSAtom*>, LifoAllocPolicy<Fallible>>;
 
   private:
+    // The map of names to chains of uses.
     UsedNameMap map_;
+
+    // A cache of the most recently noted names to reduce hash operations.
+    struct RecentNote
+    {
+        JSAtom* name;
+        Use use;
+
+        RecentNote()
+          : name(nullptr)
+        { }
+    };
+    mozilla::Array<RecentNote, 2> recents_;
 
     // Monotonically increasing id for all nested scripts.
     uint32_t scriptCounter_;
@@ -1300,7 +1316,6 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     mozilla::Maybe<FunctionScope::BindingData*> newFunctionScopeData(ParseContext::Scope& scope,
                                                                      bool hasDefaults);
     mozilla::Maybe<LexicalScope::BindingData*> newLexicalScopeData(ParseContext::Scope& scope);
-    Node makeFunctionBodyLexicalScope(Node body);
     Node finishLexicalScope(ParseContext::Scope& scope, Node body);
 
     Node propertyName(YieldHandling yieldHandling, Node propList,
