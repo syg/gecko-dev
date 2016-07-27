@@ -27,7 +27,7 @@
 #endif
 #include "builtin/AtomicsObject.h"
 #include "ds/FixedSizeHash.h"
-#include "frontend/NameMaps.h"
+#include "frontend/NameCollections.h"
 #include "gc/GCRuntime.h"
 #include "gc/Tracer.h"
 #include "irregexp/RegExpStack.h"
@@ -571,9 +571,10 @@ class PerThreadData : public PerThreadDataFriendFields
     bool gcSweeping;
 #endif
 
-    // Pools used for recycling name maps and sets when parsing and emitting
-    // bytecode. Purged on GC when there are no active script compilations.
-    frontend::NameMapPool frontendMapPool;
+    // Pools used for recycling name maps and vectors when parsing and
+    // emitting bytecode. Purged on GC when there are no active script
+    // compilations.
+    frontend::NameCollectionPool frontendCollectionPool;
 
     explicit PerThreadData(JSRuntime* runtime);
     ~PerThreadData();

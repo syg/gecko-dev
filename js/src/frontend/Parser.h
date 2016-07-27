@@ -16,7 +16,7 @@
 
 #include "frontend/BytecodeCompiler.h"
 #include "frontend/FullParseHandler.h"
-#include "frontend/NameMaps.h"
+#include "frontend/NameCollections.h"
 #include "frontend/SharedContext.h"
 #include "frontend/SyntaxParseHandler.h"
 
@@ -94,7 +94,8 @@ class ParseContext : public Nestable<ParseContext>
     // Tracks declared and used names within a scope.
     class Scope : public Nestable<Scope>
     {
-        NameMapPool& pool_;
+        // The pool we acquired declared_ from.
+        NameCollectionPool& pool_;
 
         // Names declared in this scope. Corresponds to the union of
         // VarDeclaredNames and LexicallyDeclaredNames in the ES spec.
@@ -129,7 +130,7 @@ class ParseContext : public Nestable<ParseContext>
         template <typename ParseHandler>
         explicit Scope(Parser<ParseHandler>* parser)
           : Nestable<Scope>(&parser->pc->innermostScope_),
-            pool_(parser->context->frontendMapPool()),
+            pool_(parser->context->frontendCollectionPool()),
             declared_(nullptr),
             id_(parser->usedNames.nextScopeId())
         { }
@@ -292,6 +293,14 @@ class ParseContext : public Nestable<ParseContext>
     // on. Only used when full parsing.
     Vector<FunctionBox*> innerFunctionBoxesForAnnexB_;
 
+    // Simple formal parameter names, in order of appearance. Only used when
+    // isFunctionBox().
+    AtomVector* positionalFormalParameterNames_;
+
+    // Closed over binding names, in order of appearance. Null-delimited
+    // between scopes. Only used when syntax parsing.
+    AtomVector* closedOverBindingsForLazy_;
+
     // Monotonically increasing id.
     uint32_t scriptId_;
 
@@ -309,16 +318,8 @@ class ParseContext : public Nestable<ParseContext>
     static const uint32_t NoYieldOffset = UINT32_MAX;
     uint32_t lastYieldOffset;
 
-    // Simple formal parameter names, in order of appearance. Only used when
-    // isFunctionBox().
-    AtomVector* positionalFormalParameterNames_;
-
     // All inner functions in this context. Only used when syntax parsing.
     Rooted<GCVector<JSFunction*, 8>> innerFunctionsForLazy;
-
-    // Closed over binding names, in order of appearance. Null-delimited
-    // between scopes. Only used when syntax parsing.
-    AtomVector* closedOverBindingsForLazy_;
 
     // In a function context, points to a Directive struct that can be updated
     // to reflect new directives encountered in the Directive Prologue that
@@ -353,13 +354,13 @@ class ParseContext : public Nestable<ParseContext>
         innermostStatement_(nullptr),
         innermostScope_(nullptr),
         innerFunctionBoxesForAnnexB_(prs->context),
+        positionalFormalParameterNames_(nullptr),
+        closedOverBindingsForLazy_(nullptr),
         scriptId_(prs->usedNames.nextScriptId()),
         isStandaloneFunctionBody_(false),
         superScopeNeedsHomeObject_(false),
         lastYieldOffset(NoYieldOffset),
-      positionalFormalParameterNames_(nullptr),
         innerFunctionsForLazy(prs->context, GCVector<JSFunction*, 8>(prs->context)),
-        closedOverBindingsForLazy_(nullptr),
         newDirectives(newDirectives),
         inDeclDestructuring(false),
         funHasReturnExpr(false),
@@ -376,14 +377,6 @@ class ParseContext : public Nestable<ParseContext>
     ~ParseContext();
 
     MOZ_MUST_USE bool init();
-
-    AtomVector& positionalFormalParameterNames() {
-        return *positionalFormalParameterNames_;
-    }
-
-    AtomVector& closedOverBindingsForLazy() {
-        return *closedOverBindingsForLazy_;
-    }
 
     SharedContext* sc() {
         return sc_;
@@ -439,6 +432,14 @@ class ParseContext : public Nestable<ParseContext>
     template <typename T, typename Predicate /* (Statement*) -> bool */>
     T* findInnermostStatement(Predicate predicate) {
         return Statement::findNearest<T>(innermostStatement_, predicate);
+    }
+
+    AtomVector& positionalFormalParameterNames() {
+        return *positionalFormalParameterNames_;
+    }
+
+    AtomVector& closedOverBindingsForLazy() {
+        return *closedOverBindingsForLazy_;
     }
 
     MOZ_MUST_USE bool addInnerFunctionBoxForAnnexB(FunctionBox* funbox);
@@ -674,19 +675,6 @@ class UsedNameTracker
     // The map of names to chains of uses.
     UsedNameMap map_;
 
-    // A cache of the most recently noted names to reduce hash operations.
-    struct RecentNote
-    {
-        JSAtom* name;
-        uint32_t scopeId;
-
-        RecentNote()
-          : name(nullptr)
-        { }
-    };
-
-    mozilla::Array<RecentNote, 2> recents_;
-
     // Monotonically increasing id for all nested scripts.
     uint32_t scriptCounter_;
 
@@ -747,14 +735,6 @@ class UsedNameTracker
 
     UsedNameMap::Ptr lookup(JSAtom* name) {
         return map_.lookup(name);
-    }
-
-    bool hasRecentNote(JSAtom* name, uint32_t scopeId) {
-        for (size_t i = 0; i < mozilla::ArrayLength(recents_); i++) {
-            if (recents_[i].name == name && recents_[i].scopeId == scopeId)
-                return true;
-        }
-        return false;
     }
 
     MOZ_MUST_USE bool note(ExclusiveContext* cx, JSAtom* name, uint32_t scriptId, uint32_t scopeId);

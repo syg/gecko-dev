@@ -213,8 +213,8 @@ class ExclusiveContext : public ContextFriendFields,
         return perThreadData->dtoaState;
     }
 
-    frontend::NameMapPool& frontendMapPool() {
-        return perThreadData->frontendMapPool;
+    frontend::NameCollectionPool& frontendCollectionPool() {
+        return perThreadData->frontendCollectionPool;
     }
 
     /*

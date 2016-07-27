@@ -339,6 +339,9 @@ class NameLocation
     }
 };
 
+// This type is declared here for LazyScript::Create.
+using AtomVector = Vector<JSAtom*, 24, SystemAllocPolicy>;
+
 } // namespace frontend
 } // namespace js
 

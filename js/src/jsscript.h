@@ -19,6 +19,7 @@
 #include "jsopcode.h"
 #include "jstypes.h"
 
+#include "frontend/NameAnalysisTypes.h"
 #include "gc/Barrier.h"
 #include "gc/Rooting.h"
 #include "jit/IonCode.h"
@@ -1805,9 +1806,8 @@ class LazyScript : public gc::TenuredCell
 
     // Create a LazyScript and initialize closedOverBindings and innerFunctions
     // with the provided vectors.
-    using AtomVector = Vector<JSAtom*, 24, SystemAllocPolicy>;
     static LazyScript* Create(ExclusiveContext* cx, HandleFunction fun,
-                              AtomVector& closedOverBindings,
+                              const frontend::AtomVector& closedOverBindings,
                               Handle<GCVector<JSFunction*, 8>> innerFunctions,
                               JSVersion version, uint32_t begin, uint32_t end,
                               uint32_t lineno, uint32_t column);

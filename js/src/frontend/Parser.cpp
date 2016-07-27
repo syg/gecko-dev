@@ -324,11 +324,11 @@ ParseContext::init()
             return false;
 
         ExclusiveContext* cx = sc()->context;
-        positionalFormalParameterNames_ = cx->frontendMapPool().acquireVector(cx);
+        positionalFormalParameterNames_ = cx->frontendCollectionPool().acquire<AtomVector>(cx);
         if (!positionalFormalParameterNames_)
             return false;
 
-        closedOverBindingsForLazy_ = cx->frontendMapPool().acquireVector(cx);
+        closedOverBindingsForLazy_ = cx->frontendCollectionPool().acquire<AtomVector>(cx);
         if (!closedOverBindingsForLazy_)
             return false;
     }
@@ -383,8 +383,8 @@ ParseContext::~ParseContext()
     finishInnerFunctionBoxesForAnnexB();
 
     ExclusiveContext* cx = sc()->context;
-    cx->frontendMapPool().release(&positionalFormalParameterNames_);
-    cx->frontendMapPool().release(&closedOverBindingsForLazy_);
+    cx->frontendCollectionPool().release(&positionalFormalParameterNames_);
+    cx->frontendCollectionPool().release(&closedOverBindingsForLazy_);
 }
 
 bool
@@ -401,12 +401,6 @@ UsedNameTracker::note(ExclusiveContext* cx, JSAtom* name, uint32_t scriptId, uin
         if (!map_.add(p, name, Move(info)))
             return false;
     }
-
-    // Rotate the recent entries.
-    for (size_t i = mozilla::ArrayLength(recents_) - 1; i != 0; i--)
-        recents_[i] = recents_[i - 1];
-    recents_[0].name = name;
-    recents_[0].scopeId = scopeId;
 
     return true;
 }
@@ -636,7 +630,7 @@ Parser<ParseHandler>::Parser(ExclusiveContext* cx, LifoAlloc& alloc,
     isUnexpectedEOF_(false),
     handler(cx, alloc, tokenStream, syntaxParser, lazyOuterFunction)
 {
-    cx->perThreadData->frontendMapPool.addActiveCompilation();
+    cx->perThreadData->frontendCollectionPool.addActiveCompilation();
 
     // The Mozilla specific JSOPTION_EXTRA_WARNINGS option adds extra warnings
     // which are not generated if functions are parsed lazily. Note that the
@@ -674,7 +668,7 @@ Parser<ParseHandler>::~Parser()
      */
     alloc.freeAllIfHugeAndUnused();
 
-    context->perThreadData->frontendMapPool.removeActiveCompilation();
+    context->perThreadData->frontendCollectionPool.removeActiveCompilation();
 }
 
 template <typename ParseHandler>
@@ -1182,11 +1176,6 @@ Parser<ParseHandler>::noteUsedName(HandlePropertyName name)
     // optimization.
     ParseContext::Scope* scope = pc->innermostScope();
     if (pc->sc()->isGlobalContext() && scope == &pc->varScope())
-        return true;
-
-    // The same name is often used multiple times in succession. Optimize for
-    // this case.
-    if (usedNames.hasRecentNote(name, scope->id()))
         return true;
 
     return usedNames.note(context, name, pc->scriptId(), scope->id());
@@ -1981,9 +1970,9 @@ Parser<SyntaxParseHandler>::finishFunction()
 
     FunctionBox* funbox = pc->functionBox();
     RootedFunction fun(context, funbox->function());
-    LazyScript* lazy = LazyScript::Create(context, fun,
-                                          pc->closedOverBindingsForLazy(), pc->innerFunctionsForLazy,
-                                          versionNumber(), funbox->bufStart, funbox->bufEnd,
+    LazyScript* lazy = LazyScript::Create(context, fun, pc->closedOverBindingsForLazy(),
+                                          pc->innerFunctionsForLazy, versionNumber(),
+                                          funbox->bufStart, funbox->bufEnd,
                                           funbox->startLine, funbox->startColumn);
     if (!lazy)
         return false;

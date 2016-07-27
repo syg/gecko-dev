@@ -3654,7 +3654,7 @@ GCRuntime::purgeRuntime(AutoLockForExclusiveAccess& lock)
     rt->nativeIterCache.purge();
     rt->uncompressedSourceCache.purge();
     rt->evalCache.clear();
-    rt->mainThread.frontendMapPool.purge();
+    rt->mainThread.frontendCollectionPool.purge();
 }
 
 bool

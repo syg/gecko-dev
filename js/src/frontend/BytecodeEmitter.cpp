@@ -71,7 +71,7 @@ class BytecodeEmitter::TDZCheckCache : public Nestable<BytecodeEmitter::TDZCheck
 
     MOZ_MUST_USE bool ensureCache() {
         if (!cache_) {
-            cache_ = cx_->frontendMapPool().acquire<CheckTDZMap>(cx_);
+            cache_ = cx_->frontendCollectionPool().acquire<CheckTDZMap>(cx_);
             if (!cache_)
                 return false;
         }
@@ -92,7 +92,7 @@ class BytecodeEmitter::TDZCheckCache : public Nestable<BytecodeEmitter::TDZCheck
 
     ~TDZCheckCache() {
         if (cache_)
-            cx_->frontendMapPool().release(&cache_);
+            cx_->frontendCollectionPool().release(&cache_);
     }
 
     Maybe<MaybeCheckTDZ> needsTDZCheck(JSAtom* name);
@@ -362,7 +362,7 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
 
     MOZ_MUST_USE bool ensureCache(BytecodeEmitter* bce) {
         MOZ_ASSERT(!nameCache_);
-        nameCache_ = bce->cx->frontendMapPool().acquire<NameLocationMap>(bce->cx);
+        nameCache_ = bce->cx->frontendCollectionPool().acquire<NameLocationMap>(bce->cx);
         return !!nameCache_;
     }
 
@@ -1332,7 +1332,7 @@ BytecodeEmitter::EmitterScope::leave(BytecodeEmitter* bce, bool nonLocal)
             bce->scopeNoteList.recordEnd(noteIndex_, bce->offset(), bce->inPrologue());
 
         // Release the name cache.
-        bce->cx->frontendMapPool().release(&nameCache_);
+        bce->cx->frontendCollectionPool().release(&nameCache_);
     }
 
     return true;
@@ -1437,13 +1437,13 @@ BytecodeEmitter::BytecodeEmitter(BytecodeEmitter* parent,
 
 BytecodeEmitter::~BytecodeEmitter()
 {
-    cx->frontendMapPool().release(&atomIndices);
+    cx->frontendCollectionPool().release(&atomIndices);
 }
 
 bool
 BytecodeEmitter::init()
 {
-    atomIndices = cx->frontendMapPool().acquire<AtomIndexMap>(cx);
+    atomIndices = cx->frontendCollectionPool().acquire<AtomIndexMap>(cx);
     return !!atomIndices;
 }
 
