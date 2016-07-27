@@ -66,37 +66,20 @@ class TryFinallyControl;
 // subclasses contain a TDZCheckCache.
 class BytecodeEmitter::TDZCheckCache : public Nestable<BytecodeEmitter::TDZCheckCache>
 {
-    ExclusiveContext* cx_;
-    CheckTDZMap* cache_;
+    PooledMapPtr<CheckTDZMap> cache_;
 
-    MOZ_MUST_USE bool ensureCache() {
-        if (!cache_) {
-            cache_ = cx_->frontendCollectionPool().acquire<CheckTDZMap>(cx_);
-            if (!cache_)
-                return false;
-        }
-        return true;
-    }
-
-    CheckTDZMap& cache() {
-        MOZ_ASSERT(cache_);
-        return *cache_;
+    MOZ_MUST_USE bool ensureCache(BytecodeEmitter* bce) {
+        return cache_ || cache_.acquire(bce->cx);
     }
 
   public:
     explicit TDZCheckCache(BytecodeEmitter* bce)
       : Nestable<TDZCheckCache>(&bce->innermostTDZCheckCache),
-        cx_(bce->cx),
-        cache_(nullptr)
+        cache_(bce->cx->frontendCollectionPool())
     { }
 
-    ~TDZCheckCache() {
-        if (cache_)
-            cx_->frontendCollectionPool().release(&cache_);
-    }
-
-    Maybe<MaybeCheckTDZ> needsTDZCheck(JSAtom* name);
-    MOZ_MUST_USE bool noteEmittedTDZCheck(JSAtom* name);
+    Maybe<MaybeCheckTDZ> needsTDZCheck(BytecodeEmitter* bce, JSAtom* name);
+    MOZ_MUST_USE bool noteEmittedTDZCheck(BytecodeEmitter* bce, JSAtom* name);
 };
 
 class BytecodeEmitter::NestableControl : public Nestable<BytecodeEmitter::NestableControl>
@@ -331,7 +314,7 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
     // scope. Initially populated as the set of names this scope binds. As
     // names are looked up in enclosing scopes, they are cached on the
     // current scope.
-    NameLocationMap* nameCache_;
+    PooledMapPtr<NameLocationMap> nameCache_;
 
     // If this scope's cache does not include free names, such as the
     // global scope, the NameLocation to return.
@@ -361,14 +344,7 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
     uint32_t noteIndex_;
 
     MOZ_MUST_USE bool ensureCache(BytecodeEmitter* bce) {
-        MOZ_ASSERT(!nameCache_);
-        nameCache_ = bce->cx->frontendCollectionPool().acquire<NameLocationMap>(bce->cx);
-        return !!nameCache_;
-    }
-
-    NameLocationMap& nameCache() {
-        MOZ_ASSERT(nameCache_);
-        return *nameCache_;
+        return nameCache_.acquire(bce->cx);
     }
 
     template <typename BindingIter>
@@ -400,7 +376,7 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
     }
 
     MOZ_MUST_USE bool putNameInCache(BytecodeEmitter* bce, JSAtom* name, NameLocation loc) {
-        NameLocationMap& cache = nameCache();
+        NameLocationMap& cache = *nameCache_;
         NameLocationMap::AddPtr p = cache.lookupForAdd(name);
         MOZ_ASSERT(!p);
         if (!cache.add(p, name, loc)) {
@@ -411,7 +387,7 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
     }
 
     Maybe<NameLocation> lookupInCache(JSAtom* name) {
-        if (NameLocationMap::Ptr p = nameCache().lookup(name))
+        if (NameLocationMap::Ptr p = nameCache_->lookup(name))
             return Some(p->value().wrapped);
         if (fallbackFreeNameLocation_)
             return fallbackFreeNameLocation_;
@@ -459,7 +435,7 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
   public:
     EmitterScope(BytecodeEmitter* bce)
       : Nestable<EmitterScope>(&bce->innermostEmitterScope),
-        nameCache_(nullptr),
+        nameCache_(bce->cx->frontendCollectionPool()),
         hasEnvironment_(false),
         environmentChainLength_(0),
         nextFrameSlot_(0),
@@ -534,7 +510,7 @@ BytecodeEmitter::EmitterScope::dump(BytecodeEmitter* bce)
 {
     fprintf(stdout, "EmitterScope [%s] %p\n", ScopeKindString(scope(bce)->kind()), this);
 
-    for (NameLocationMap::Range r = nameCache().all(); !r.empty(); r.popFront()) {
+    for (NameLocationMap::Range r = nameCache_->all(); !r.empty(); r.popFront()) {
         NameLocation& l = r.front().value();
 
         JSAutoByteString bytes;
@@ -812,7 +788,7 @@ BytecodeEmitter::EmitterScope::locationBoundInScope(BytecodeEmitter* bce, JSAtom
     // particular scope, it must already be in the cache. Furthermore, don't
     // consult the fallback location as we only care about binding names.
     Maybe<NameLocation> loc;
-    if (NameLocationMap::Ptr p = target->nameCache().lookup(name)) {
+    if (NameLocationMap::Ptr p = target->nameCache_->lookup(name)) {
         NameLocation l = p->value().wrapped;
         if (l.kind() == NameLocation::Kind::EnvironmentCoordinate)
             loc = Some(l.addHops(extraHops));
@@ -997,7 +973,7 @@ BytecodeEmitter::EmitterScope::enterFunctionBody(BytecodeEmitter* bce, FunctionB
     uint32_t firstFrameSlot = frameSlotStart();
     if (funbox->varScopeBindings()) {
         Handle<FunctionScope::BindingData*> bindings = funbox->varScopeBindings();
-        NameLocationMap& cache = nameCache();
+        NameLocationMap& cache = *nameCache_;
 
         BindingIter bi(*bindings, firstFrameSlot, funbox->hasDefaults());
         for (; bi; bi++) {
@@ -1330,36 +1306,33 @@ BytecodeEmitter::EmitterScope::leave(BytecodeEmitter* bce, bool nonLocal)
         // notes are not finished here but in emitFunctionFormalParametersAndBody.
         if (ScopeKindIsInBody(kind) && kind != ScopeKind::ParameterDefaults)
             bce->scopeNoteList.recordEnd(noteIndex_, bce->offset(), bce->inPrologue());
-
-        // Release the name cache.
-        bce->cx->frontendCollectionPool().release(&nameCache_);
     }
 
     return true;
 }
 
 Maybe<MaybeCheckTDZ>
-BytecodeEmitter::TDZCheckCache::needsTDZCheck(JSAtom* name)
+BytecodeEmitter::TDZCheckCache::needsTDZCheck(BytecodeEmitter* bce, JSAtom* name)
 {
-    if (!ensureCache())
+    if (!ensureCache(bce))
         return Nothing();
 
-    CheckTDZMap::AddPtr p = cache().lookupForAdd(name);
+    CheckTDZMap::AddPtr p = cache_->lookupForAdd(name);
     if (p)
         return Some(p->value().wrapped);
 
     MaybeCheckTDZ rv = CheckTDZ;
     for (TDZCheckCache* it = enclosing(); it; it = it->enclosing()) {
         if (it->cache_) {
-            if (CheckTDZMap::Ptr p = it->cache().lookup(name)) {
+            if (CheckTDZMap::Ptr p = it->cache_->lookup(name)) {
                 rv = p->value();
                 break;
             }
         }
     }
 
-    if (!cache().add(p, name, rv)) {
-        ReportOutOfMemory(cx_);
+    if (!cache_->add(p, name, rv)) {
+        ReportOutOfMemory(bce->cx);
         return Nothing();
     }
 
@@ -1367,16 +1340,16 @@ BytecodeEmitter::TDZCheckCache::needsTDZCheck(JSAtom* name)
 }
 
 bool
-BytecodeEmitter::TDZCheckCache::noteEmittedTDZCheck(JSAtom* name)
+BytecodeEmitter::TDZCheckCache::noteEmittedTDZCheck(BytecodeEmitter* bce, JSAtom* name)
 {
-    if (!ensureCache())
+    if (!ensureCache(bce))
         return false;
 
-    CheckTDZMap::AddPtr p = cache().lookupForAdd(name);
+    CheckTDZMap::AddPtr p = cache_->lookupForAdd(name);
     if (p) {
         p->value() = DontCheckTDZ;
     } else {
-        if (!cache().add(p, name, DontCheckTDZ))
+        if (!cache_->add(p, name, DontCheckTDZ))
             return false;
     }
 
@@ -1396,7 +1369,7 @@ BytecodeEmitter::BytecodeEmitter(BytecodeEmitter* parent,
     main(cx, lineNum),
     current(&main),
     parser(parser),
-    atomIndices(nullptr),
+    atomIndices(cx->frontendCollectionPool()),
     firstLine(lineNum),
     maxFixedSlots(0),
     maxStackDepth(0),
@@ -1435,16 +1408,10 @@ BytecodeEmitter::BytecodeEmitter(BytecodeEmitter* parent,
     setFunctionBodyEndPos(bodyPosition);
 }
 
-BytecodeEmitter::~BytecodeEmitter()
-{
-    cx->frontendCollectionPool().release(&atomIndices);
-}
-
 bool
 BytecodeEmitter::init()
 {
-    atomIndices = cx->frontendCollectionPool().acquire<AtomIndexMap>(cx);
-    return !!atomIndices;
+    return atomIndices.acquire(cx);
 }
 
 template <typename Predicate /* (NestableControl*) -> bool */>
@@ -3014,7 +2981,7 @@ BytecodeEmitter::emitSetOrInitializeNameAtLocation(JSAtom* name, const NameLocat
             return false;
         if (!emitLocalOp(op, loc.frameSlot()))
             return false;
-        if (op == JSOP_INITLEXICAL && !innermostTDZCheckCache->noteEmittedTDZCheck(name))
+        if (op == JSOP_INITLEXICAL && !innermostTDZCheckCache->noteEmittedTDZCheck(this, name))
             return false;
         break;
       }
@@ -3046,7 +3013,7 @@ BytecodeEmitter::emitSetOrInitializeNameAtLocation(JSAtom* name, const NameLocat
                 return false;
         }
         if (op == JSOP_INITALIASEDLEXICAL &&
-            !innermostTDZCheckCache->noteEmittedTDZCheck(name))
+            !innermostTDZCheckCache->noteEmittedTDZCheck(this, name))
         {
             return false;
         }
@@ -3064,7 +3031,7 @@ BytecodeEmitter::emitTDZCheckIfNeeded(JSAtom* name, const NameLocation& loc)
     // never emit explicit TDZ checks.
     MOZ_ASSERT(loc.hasKnownSlot() && loc.isLexical());
 
-    Maybe<MaybeCheckTDZ> check = innermostTDZCheckCache->needsTDZCheck(name);
+    Maybe<MaybeCheckTDZ> check = innermostTDZCheckCache->needsTDZCheck(this, name);
     if (!check)
         return false;
 
@@ -3080,7 +3047,7 @@ BytecodeEmitter::emitTDZCheckIfNeeded(JSAtom* name, const NameLocation& loc)
             return false;
     }
 
-    return innermostTDZCheckCache->noteEmittedTDZCheck(name);
+    return innermostTDZCheckCache->noteEmittedTDZCheck(this, name);
 }
 
 bool

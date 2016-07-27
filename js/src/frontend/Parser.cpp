@@ -135,7 +135,7 @@ ParseContext::Scope::dump(ParseContext* pc)
     fprintf(stdout, "ParseScope %p", this);
 
     fprintf(stdout, "\n  decls:\n");
-    for (DeclaredNameMap::Range r = declared().all(); !r.empty(); r.popFront()) {
+    for (DeclaredNameMap::Range r = declared_->all(); !r.empty(); r.popFront()) {
         JSAutoByteString bytes;
         if (!AtomToPrintableString(cx, r.front().key(), &bytes))
             return;
@@ -160,7 +160,7 @@ ParseContext::Scope::moveFormalParameterDeclaredNamesForDefaults(ParseContext* p
     Scope& defaultsScope = pc->defaultsScope();
     Vector<JSAtom*> paramNames(pc->sc()->context);
 
-    for (DeclaredNameMap::Range r = varScope.declared().all(); !r.empty(); r.popFront()) {
+    for (DeclaredNameMap::Range r = varScope.declared_->all(); !r.empty(); r.popFront()) {
         DeclarationKind declKind = r.front().value()->kind();
         if (declKind == DeclarationKind::PositionalFormalParameter ||
             declKind == DeclarationKind::FormalParameter)
@@ -177,7 +177,7 @@ ParseContext::Scope::moveFormalParameterDeclaredNamesForDefaults(ParseContext* p
     }
 
     for (uint32_t i = 0; i < paramNames.length(); i++)
-        varScope.declared().remove(paramNames[i]);
+        varScope.declared_->remove(paramNames[i]);
 
     return true;
 }
@@ -191,9 +191,9 @@ ParseContext::Scope::removeVarForAnnexBLexicalFunction(ParseContext* pc, JSAtom*
          scope != pc->varScope().enclosing();
          scope = scope->enclosing())
     {
-        if (DeclaredNamePtr p = scope->declared().lookup(name)) {
+        if (DeclaredNamePtr p = scope->declared_->lookup(name)) {
             if (p->value()->kind() == DeclarationKind::VarForAnnexBLexicalFunction)
-                scope->declared().remove(p);
+                scope->declared_->remove(p);
         }
     }
 
@@ -205,9 +205,9 @@ ParseContext::Scope::removeVarForAnnexBLexicalFunction(ParseContext* pc, JSAtom*
 void
 ParseContext::Scope::removeSimpleCatchParameter(JSAtom* name)
 {
-    DeclaredNamePtr p = declared().lookup(name);
+    DeclaredNamePtr p = declared_->lookup(name);
     MOZ_ASSERT(p && p->value()->kind() == DeclarationKind::SimpleCatchParameter);
-    declared().remove(p);
+    declared_->remove(p);
 }
 
 void
@@ -305,6 +305,8 @@ ParseContext::init()
         return false;
     }
 
+    ExclusiveContext* cx = sc()->context;
+
     if (isFunctionBox()) {
         // Named lambdas always need a binding for their own name. If this
         // binding is closed over when we finish parsing the function in
@@ -323,17 +325,16 @@ ParseContext::init()
         if (!defaultsScope_->init(this))
             return false;
 
-        ExclusiveContext* cx = sc()->context;
-        positionalFormalParameterNames_ = cx->frontendCollectionPool().acquire<AtomVector>(cx);
-        if (!positionalFormalParameterNames_)
+        if (!positionalFormalParameterNames_.acquire(cx))
             return false;
-
-        closedOverBindingsForLazy_ = cx->frontendCollectionPool().acquire<AtomVector>(cx);
-        if (!closedOverBindingsForLazy_)
+        if (!closedOverBindingsForLazy_.acquire(cx))
             return false;
     }
 
     if (!varScope_->init(this))
+        return false;
+
+    if (!innerFunctionBoxesForAnnexB_.acquire(cx))
         return false;
 
     return true;
@@ -342,19 +343,19 @@ ParseContext::init()
 bool
 ParseContext::addInnerFunctionBoxForAnnexB(FunctionBox* funbox)
 {
-    for (uint32_t i = 0; i < innerFunctionBoxesForAnnexB_.length(); i++) {
+    for (uint32_t i = 0; i < innerFunctionBoxesForAnnexB_->length(); i++) {
         if (!innerFunctionBoxesForAnnexB_[i]) {
             innerFunctionBoxesForAnnexB_[i] = funbox;
             return true;
         }
     }
-    return innerFunctionBoxesForAnnexB_.append(funbox);
+    return innerFunctionBoxesForAnnexB_->append(funbox);
 }
 
 void
 ParseContext::removeInnerFunctionBoxesForAnnexB(JSAtom* name)
 {
-    for (uint32_t i = 0; i < innerFunctionBoxesForAnnexB_.length(); i++) {
+    for (uint32_t i = 0; i < innerFunctionBoxesForAnnexB_->length(); i++) {
         if (FunctionBox* funbox = innerFunctionBoxesForAnnexB_[i]) {
             if (funbox->function()->name() == name)
                 innerFunctionBoxesForAnnexB_[i] = nullptr;
@@ -369,7 +370,7 @@ ParseContext::finishInnerFunctionBoxesForAnnexB()
     if (sc()->strict())
         return;
 
-    for (uint32_t i = 0; i < innerFunctionBoxesForAnnexB_.length(); i++) {
+    for (uint32_t i = 0; i < innerFunctionBoxesForAnnexB_->length(); i++) {
         if (FunctionBox* funbox = innerFunctionBoxesForAnnexB_[i])
             funbox->isAnnexB = true;
     }
@@ -381,10 +382,6 @@ ParseContext::~ParseContext()
     // error would have occurred for declaring a binding in the nearest var
     // scope. Mark them as needing extra assignments to this var binding.
     finishInnerFunctionBoxesForAnnexB();
-
-    ExclusiveContext* cx = sc()->context;
-    cx->frontendCollectionPool().release(&positionalFormalParameterNames_);
-    cx->frontendCollectionPool().release(&closedOverBindingsForLazy_);
 }
 
 bool
@@ -885,8 +882,10 @@ Parser<ParseHandler>::notePositionalFormalParameter(Node fn, HandlePropertyName 
             return false;
     }
 
-    if (!pc->positionalFormalParameterNames().append(name))
+    if (!pc->positionalFormalParameterNames().append(name)) {
+        ReportOutOfMemory(context);
         return false;
+    }
 
     Node paramNode = newName(name);
     if (!paramNode)
@@ -906,7 +905,11 @@ Parser<ParseHandler>::noteDestructuredPositionalFormalParameter()
 {
     // Append an empty name to the positional formals vector to keep track of
     // argument slots when making FunctionScope::BindingData.
-    return pc->positionalFormalParameterNames().append(nullptr);
+    if (!pc->positionalFormalParameterNames().append(nullptr)) {
+        ReportOutOfMemory(context);
+        return false;
+    }
+    return true;
 }
 
 static bool
@@ -1212,18 +1215,18 @@ Parser<ParseHandler>::propagateFreeNamesAndMarkClosedOverBindings(ParseContext::
             if (closedOver) {
                 bi.setClosedOver();
 
-                if (isSyntaxParser) {
-                    if (!pc->closedOverBindingsForLazy().append(bi.name()))
-                        return false;
+                if (isSyntaxParser && !pc->closedOverBindingsForLazy().append(bi.name())) {
+                    ReportOutOfMemory(context);
+                    return false;
                 }
             }
         }
     }
 
     // Append a nullptr to denote end-of-scope.
-    if (isSyntaxParser) {
-        if (!pc->closedOverBindingsForLazy().append(nullptr))
-            return false;
+    if (isSyntaxParser && !pc->closedOverBindingsForLazy().append(nullptr)) {
+        ReportOutOfMemory(context);
+        return false;
     }
 
     return true;

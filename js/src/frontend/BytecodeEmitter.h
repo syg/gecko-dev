@@ -204,7 +204,7 @@ struct MOZ_STACK_CLASS BytecodeEmitter
 
     Parser<FullParseHandler>* const parser;
 
-    AtomIndexMap*   atomIndices;    /* literals indexed for mapping */
+    PooledMapPtr<AtomIndexMap> atomIndices; /* literals indexed for mapping */
     unsigned        firstLine;      /* first line, for JSScript::initFromEmitter */
 
     uint32_t        maxFixedSlots;  /* maximum number of fixed frame slots so far */
@@ -287,8 +287,6 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     BytecodeEmitter(BytecodeEmitter* parent, Parser<FullParseHandler>* parser, SharedContext* sc,
                     HandleScript script, Handle<LazyScript*> lazyScript,
                     TokenPos bodyPosition, EmitterMode emitterMode = Normal);
-
-    ~BytecodeEmitter();
 
     MOZ_MUST_USE bool init();
 

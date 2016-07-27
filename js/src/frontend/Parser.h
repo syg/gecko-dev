@@ -94,9 +94,6 @@ class ParseContext : public Nestable<ParseContext>
     // Tracks declared and used names within a scope.
     class Scope : public Nestable<Scope>
     {
-        // The pool we acquired declared_ from.
-        NameCollectionPool& pool_;
-
         // Names declared in this scope. Corresponds to the union of
         // VarDeclaredNames and LexicallyDeclaredNames in the ES spec.
         //
@@ -105,15 +102,10 @@ class ParseContext : public Nestable<ParseContext>
         //
         // A lexically declared name is a member only of the declared name set of
         // the scope in which it is declared.
-        DeclaredNameMap* declared_;
+        PooledMapPtr<DeclaredNameMap> declared_;
 
         // Monotonically increasing id.
         uint32_t id_;
-
-        DeclaredNameMap& declared() {
-            MOZ_ASSERT(declared_);
-            return *declared_;
-        }
 
         bool maybeReportOOM(ParseContext* pc, bool result) {
             if (!result)
@@ -130,14 +122,9 @@ class ParseContext : public Nestable<ParseContext>
         template <typename ParseHandler>
         explicit Scope(Parser<ParseHandler>* parser)
           : Nestable<Scope>(&parser->pc->innermostScope_),
-            pool_(parser->context->frontendCollectionPool()),
-            declared_(nullptr),
+            declared_(parser->context->frontendCollectionPool()),
             id_(parser->usedNames.nextScopeId())
         { }
-
-        ~Scope() {
-            pool_.release(&declared_);
-        }
 
         void dump(ParseContext* pc);
 
@@ -151,24 +138,21 @@ class ParseContext : public Nestable<ParseContext>
                 return false;
             }
 
-            MOZ_ASSERT(!declared_);
-            ExclusiveContext* cx = pc->sc()->context;
-            declared_ = pool_.acquire<DeclaredNameMap>(cx);
-            return declared_;
+            return declared_.acquire(pc->sc()->context);
         }
 
         DeclaredNamePtr lookupDeclaredName(JSAtom* name) {
-            return declared().lookup(name);
+            return declared_->lookup(name);
         }
 
         AddDeclaredNamePtr lookupDeclaredNameForAdd(JSAtom* name) {
-            return declared().lookupForAdd(name);
+            return declared_->lookupForAdd(name);
         }
 
         MOZ_MUST_USE bool addDeclaredName(ParseContext* pc, AddDeclaredNamePtr& p, JSAtom* name,
                                           DeclarationKind kind)
         {
-            return maybeReportOOM(pc, declared().add(p, name, DeclaredNameInfo(kind)));
+            return maybeReportOOM(pc, declared_->add(p, name, DeclaredNameInfo(kind)));
         }
 
         // Move all declared parameter names to the parameter default
@@ -195,7 +179,7 @@ class ParseContext : public Nestable<ParseContext>
 
             BindingIter(Scope& scope, bool isVarScope)
               : isVarScope_(isVarScope),
-                declaredRange_(scope.declared().all())
+                declaredRange_(scope.declared_->all())
             {
                 settle();
             }
@@ -291,15 +275,15 @@ class ParseContext : public Nestable<ParseContext>
 
     // Inner function boxes in this context to try Annex B.3.3 semantics
     // on. Only used when full parsing.
-    Vector<FunctionBox*> innerFunctionBoxesForAnnexB_;
+    PooledVectorPtr<FunctionBoxVector> innerFunctionBoxesForAnnexB_;
 
     // Simple formal parameter names, in order of appearance. Only used when
     // isFunctionBox().
-    AtomVector* positionalFormalParameterNames_;
+    PooledVectorPtr<AtomVector> positionalFormalParameterNames_;
 
     // Closed over binding names, in order of appearance. Null-delimited
     // between scopes. Only used when syntax parsing.
-    AtomVector* closedOverBindingsForLazy_;
+    PooledVectorPtr<AtomVector> closedOverBindingsForLazy_;
 
     // Monotonically increasing id.
     uint32_t scriptId_;
@@ -353,9 +337,9 @@ class ParseContext : public Nestable<ParseContext>
         tokenStream_(prs->tokenStream),
         innermostStatement_(nullptr),
         innermostScope_(nullptr),
-        innerFunctionBoxesForAnnexB_(prs->context),
-        positionalFormalParameterNames_(nullptr),
-        closedOverBindingsForLazy_(nullptr),
+        innerFunctionBoxesForAnnexB_(prs->context->frontendCollectionPool()),
+        positionalFormalParameterNames_(prs->context->frontendCollectionPool()),
+        closedOverBindingsForLazy_(prs->context->frontendCollectionPool()),
         scriptId_(prs->usedNames.nextScriptId()),
         isStandaloneFunctionBody_(false),
         superScopeNeedsHomeObject_(false),
@@ -530,7 +514,7 @@ inline uint32_t
 ParseContext::Scope::computeNumBindings(ParseContext* pc)
 {
     if (&pc->varScope() == this)
-        return declared().count();
+        return declared_->count();
     uint32_t count = 0;
     for (BindingIter bi = bindings(pc); bi; bi++)
         count++;

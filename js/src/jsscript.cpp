@@ -2500,12 +2500,12 @@ JSScript::initFunctionPrototype(ExclusiveContext* cx, Handle<JSScript*> script,
 }
 
 static void
-InitAtomMap(frontend::AtomIndexMap* indices, GCPtrAtom* atoms)
+InitAtomMap(frontend::AtomIndexMap& indices, GCPtrAtom* atoms)
 {
-    for (AtomIndexMap::Range r = indices->all(); !r.empty(); r.popFront()) {
+    for (AtomIndexMap::Range r = indices.all(); !r.empty(); r.popFront()) {
         JSAtom* atom = r.front().key();
         uint32_t index = r.front().value();
-        MOZ_ASSERT(index < indices->count());
+        MOZ_ASSERT(index < indices.count());
         atoms[index].init(atom);
     }
 }
@@ -2602,7 +2602,7 @@ JSScript::fullyInitFromEmitter(ExclusiveContext* cx, HandleScript script, Byteco
     PodCopy<jsbytecode>(code, bce->prologue.code.begin(), prologueLength);
     PodCopy<jsbytecode>(code + prologueLength, bce->main.code.begin(), mainLength);
     bce->copySrcNotes((jssrcnote*)(code + script->length()), nsrcnotes);
-    InitAtomMap(bce->atomIndices, ssd->atoms());
+    InitAtomMap(*bce->atomIndices, ssd->atoms());
 
     if (!SaveSharedScriptData(cx, script, ssd, nsrcnotes))
         return false;

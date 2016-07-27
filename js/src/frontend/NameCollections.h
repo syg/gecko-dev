@@ -172,20 +172,28 @@ class InlineTablePool
     }
 };
 
-class AtomVectorPool : public CollectionPool<AtomVector, AtomVectorPool>
+using FunctionBoxVector = Vector<FunctionBox*, 24, SystemAllocPolicy>;
+
+template <typename RepresentativeVector>
+class VectorPool : public CollectionPool<RepresentativeVector, VectorPool<RepresentativeVector>>
 {
   public:
     template <typename Vector>
     static void assertInvariants() {
-        static_assert(mozilla::IsSame<Vector, AtomVector>::value,
-                      "Only AtomVectors are usable in the pool.");
+        static_assert(Vector::sMaxInlineStorage == RepresentativeVector::sMaxInlineStorage,
+                      "Only vectors with the same size for inline entries are usable in the pool.");
+        static_assert(mozilla::IsPod<typename Vector::ElementType>::value,
+                      "Only vectors of POD values are usable in the pool.");
+        static_assert(sizeof(typename Vector::ElementType) ==
+                      sizeof(typename RepresentativeVector::ElementType),
+                      "Only vectors with same-sized elements are usable in the pool.");
     }
 };
 
 class NameCollectionPool
 {
     InlineTablePool<AtomIndexMap> mapPool_;
-    AtomVectorPool vectorPool_;
+    VectorPool<AtomVector> vectorPool_;
     uint32_t activeCompilations_;
 
   public:
@@ -207,17 +215,31 @@ class NameCollectionPool
     }
 
     template <typename Map>
-    inline Map* acquire(ExclusiveContext* cx) {
+    Map* acquireMap(ExclusiveContext* cx) {
         MOZ_ASSERT(hasActiveCompilation());
         return mapPool_.acquire<Map>(cx);
     }
 
     template <typename Map>
-    inline void release(Map** map) {
+    void releaseMap(Map** map) {
         MOZ_ASSERT(hasActiveCompilation());
         MOZ_ASSERT(map);
         if (*map)
             mapPool_.release(map);
+    }
+
+    template <typename Vector>
+    Vector* acquireVector(ExclusiveContext* cx) {
+        MOZ_ASSERT(hasActiveCompilation());
+        return vectorPool_.acquire<Vector>(cx);
+    }
+
+    template <typename Vector>
+    void releaseVector(Vector** vec) {
+        MOZ_ASSERT(hasActiveCompilation());
+        MOZ_ASSERT(vec);
+        if (*vec)
+            vectorPool_.release(vec);
     }
 
     void purge() {
@@ -228,23 +250,77 @@ class NameCollectionPool
     }
 };
 
-template <>
-inline AtomVector*
-NameCollectionPool::acquire<AtomVector>(ExclusiveContext* cx)
-{
-    MOZ_ASSERT(hasActiveCompilation());
-    return vectorPool_.acquire<AtomVector>(cx);
-}
+#define POOLED_COLLECTION_PTR_METHODS(N, T)                       \
+    NameCollectionPool& pool_;                                    \
+    T* collection_;                                               \
+                                                                  \
+    T& collection() {                                             \
+        MOZ_ASSERT(collection_);                                  \
+        return *collection_;                                      \
+    }                                                             \
+                                                                  \
+    const T& collection() const {                                 \
+        MOZ_ASSERT(collection_);                                  \
+        return *collection_;                                      \
+    }                                                             \
+                                                                  \
+  public:                                                         \
+    explicit N(NameCollectionPool& pool)                          \
+      : pool_(pool),                                              \
+        collection_(nullptr)                                      \
+    { }                                                           \
+                                                                  \
+    ~N() {                                                        \
+        pool_.release##T(&collection_);                           \
+    }                                                             \
+                                                                  \
+    bool acquire(ExclusiveContext* cx) {                          \
+        MOZ_ASSERT(!collection_);                                 \
+        collection_ = pool_.acquire##T<T>(cx);                    \
+        return !!collection_;                                     \
+    }                                                             \
+                                                                  \
+    explicit operator bool() const {                              \
+        return !!collection_;                                     \
+    }                                                             \
+                                                                  \
+    T* operator->() {                                             \
+        return &collection();                                     \
+    }                                                             \
+                                                                  \
+    const T* operator->() const {                                 \
+        return &collection();                                     \
+    }                                                             \
+                                                                  \
+    T& operator*() {                                              \
+        return collection();                                      \
+    }                                                             \
+                                                                  \
+    const T& operator*() const {                                  \
+        return collection();                                      \
+    }
 
-template <>
-inline void
-NameCollectionPool::release<AtomVector>(AtomVector** vec)
+template <typename Map>
+class PooledMapPtr
 {
-    MOZ_ASSERT(hasActiveCompilation());
-    MOZ_ASSERT(vec);
-    if (*vec)
-        vectorPool_.release(vec);
-}
+    POOLED_COLLECTION_PTR_METHODS(PooledMapPtr, Map)
+};
+
+template <typename Vector>
+class PooledVectorPtr
+{
+    POOLED_COLLECTION_PTR_METHODS(PooledVectorPtr, Vector)
+
+    typename Vector::ElementType& operator[](size_t index) {
+        return collection()[index];
+    }
+
+    const typename Vector::ElementType& operator[](size_t index) const {
+        return collection()[index];
+    }
+};
+
+#undef POOLED_COLLECTION_PTR_METHODS
 
 } // namespace frontend
 } // namespace js
