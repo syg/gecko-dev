@@ -598,6 +598,8 @@ class UsedNameTracker
   public:
     class UsedNameInfo
     {
+        friend class UsedNameTracker;
+
         struct Use
         {
             uint32_t scriptId;
@@ -605,6 +607,8 @@ class UsedNameTracker
         };
 
         Vector<Use, 6> uses_;
+
+        void resetToScope(uint32_t scriptId, uint32_t scopeId);
 
       public:
         explicit UsedNameInfo(ExclusiveContext* cx)
@@ -666,37 +670,6 @@ class UsedNameTracker
     uint32_t scopeCounter_;
 
   public:
-    // Reset counters unless released. Used when attempting to syntax parse an
-    // inner function, which may fail.
-    class MOZ_STACK_CLASS AutoResetCounters
-    {
-        UsedNameTracker& usedNames_;
-        uint32_t savedScriptCounter_;
-        uint32_t savedScopeCounter_;
-        bool resetOnDestruction_;
-
-      public:
-        explicit AutoResetCounters(UsedNameTracker& usedNames)
-          : usedNames_(usedNames),
-            savedScriptCounter_(usedNames.scriptCounter_),
-            savedScopeCounter_(usedNames.scopeCounter_),
-            resetOnDestruction_(true)
-        { }
-
-        ~AutoResetCounters() {
-            if (resetOnDestruction_) {
-                MOZ_ASSERT(savedScriptCounter_ <= usedNames_.scriptCounter_);
-                MOZ_ASSERT(savedScopeCounter_ <= usedNames_.scopeCounter_);
-                usedNames_.scriptCounter_ = savedScriptCounter_;
-                usedNames_.scopeCounter_ = savedScopeCounter_;
-            }
-        }
-
-        void release() {
-            resetOnDestruction_ = false;
-        }
-    };
-
     explicit UsedNameTracker(ExclusiveContext* cx)
       : map_(cx),
         scriptCounter_(0),
@@ -722,6 +695,16 @@ class UsedNameTracker
     }
 
     MOZ_MUST_USE bool note(ExclusiveContext* cx, JSAtom* name, uint32_t scriptId, uint32_t scopeId);
+
+    // Resets state so that scriptId and scopeId are the innermost script and
+    // scope, respectively. Used for rewinding state on syntax parse failure.
+    void reset(uint32_t scriptId, uint32_t scopeId);
+
+    // Resets state to beginning of compilation.
+    void reset() {
+        map_.clear();
+        reset(0, 0);
+    }
 };
 
 template <typename ParseHandler>

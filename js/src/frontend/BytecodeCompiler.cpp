@@ -372,8 +372,6 @@ BytecodeCompiler::compileScript(HandleObject environment, SharedContext* sc)
         return nullptr;
 
     for (;;) {
-        UsedNameTracker::AutoResetCounters resetCounters(*usedNames);
-
         ParseNode* pn;
         if (sc->isEvalContext())
             pn = parser->evalBody(sc->asEvalContext());
@@ -395,7 +393,6 @@ BytecodeCompiler::compileScript(HandleObject environment, SharedContext* sc)
             if (!emitter->emitScript(pn))
                 return nullptr;
             parser->handler.freeTree(pn);
-            resetCounters.release();
 
             break;
         }
@@ -403,6 +400,9 @@ BytecodeCompiler::compileScript(HandleObject environment, SharedContext* sc)
         // Maybe we aborted a syntax parse. See if we can try again.
         if (!handleParseFailure(directives))
             return nullptr;
+
+        // Reset UsedNameTracker state before trying again.
+        usedNames->reset();
     }
 
     if (!maybeSetDisplayURL(parser->tokenStream) ||

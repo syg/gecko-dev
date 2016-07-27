@@ -402,6 +402,28 @@ UsedNameTracker::note(ExclusiveContext* cx, JSAtom* name, uint32_t scriptId, uin
     return true;
 }
 
+void
+UsedNameTracker::UsedNameInfo::resetToScope(uint32_t scriptId, uint32_t scopeId)
+{
+    while (!uses_.empty()) {
+        Use& innermost = uses_.back();
+        if (innermost.scopeId <= scopeId)
+            break;
+        MOZ_ASSERT(innermost.scriptId >= scriptId);
+        uses_.popBack();
+    }
+}
+
+void
+UsedNameTracker::reset(uint32_t scriptId, uint32_t scopeId)
+{
+    scriptCounter_ = scriptId + 1;
+    scopeCounter_ = scopeId + 1;
+
+    for (UsedNameMap::Range r = map_.all(); !r.empty(); r.popFront())
+        r.front().value().resetToScope(scriptId, scopeId);
+}
+
 FunctionBox::FunctionBox(ExclusiveContext* cx, LifoAlloc& alloc, ObjectBox* traceListHead,
                          JSFunction* fun, Directives directives, bool extraWarnings,
                          GeneratorKind generatorKind)
@@ -2901,7 +2923,8 @@ Parser<FullParseHandler>::trySyntaxParseInnerFunction(ParseNode* pn, HandleFunct
         if (!parser)
             break;
 
-        UsedNameTracker::AutoResetCounters resetCounters(usedNames);
+        uint32_t savedScriptId = pc->scriptId();
+        uint32_t savedScopeId = pc->innermostScope()->id();
 
         // Move the syntax parser to the current position in the stream.
         TokenStream::Position position(keepAtoms);
@@ -2922,8 +2945,11 @@ Parser<FullParseHandler>::trySyntaxParseInnerFunction(ParseNode* pn, HandleFunct
                                    kind, generatorKind, inheritedDirectives, newDirectives))
         {
             if (parser->hadAbortedSyntaxParse()) {
-                // Try again with a full parse.
+                // Try again with a full parse. UsedNameTracker needs to be
+                // rewound to just before we tried the syntax parse for
+                // correctness.
                 parser->clearAbortedSyntaxParse();
+                usedNames.reset(savedScriptId, savedScopeId);
                 MOZ_ASSERT_IF(parser->context->isJSContext(),
                               !parser->context->asJSContext()->isExceptionPending());
                 break;
@@ -2938,10 +2964,6 @@ Parser<FullParseHandler>::trySyntaxParseInnerFunction(ParseNode* pn, HandleFunct
 
         // Update the end position of the parse node.
         pn->pn_pos.end = tokenStream.currentToken().pos.end;
-
-        // Don't need to reset counters as we successfully syntax parsed.
-        resetCounters.release();
-
         return true;
     } while (false);
 
