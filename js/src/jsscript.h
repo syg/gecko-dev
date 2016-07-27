@@ -1805,9 +1805,10 @@ class LazyScript : public gc::TenuredCell
 
     // Create a LazyScript and initialize closedOverBindings and innerFunctions
     // with the provided vectors.
+    using AtomVector = Vector<JSAtom*, 24, SystemAllocPolicy>;
     static LazyScript* Create(ExclusiveContext* cx, HandleFunction fun,
-                              Handle<GCVector<JSAtom*>> closedOverBindings,
-                              Handle<GCVector<JSFunction*>> innerFunctions,
+                              AtomVector& closedOverBindings,
+                              Handle<GCVector<JSFunction*, 8>> innerFunctions,
                               JSVersion version, uint32_t begin, uint32_t end,
                               uint32_t lineno, uint32_t column);
 

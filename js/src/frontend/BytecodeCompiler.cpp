@@ -218,7 +218,7 @@ BytecodeCompiler::canLazilyParse()
 bool
 BytecodeCompiler::createParser()
 {
-    usedNames.emplace(alloc);
+    usedNames.emplace(cx);
     if (!usedNames->init())
         return false;
 
@@ -372,6 +372,8 @@ BytecodeCompiler::compileScript(HandleObject environment, SharedContext* sc)
         return nullptr;
 
     for (;;) {
+        UsedNameTracker::AutoResetCounters resetCounters(*usedNames);
+
         ParseNode* pn;
         if (sc->isEvalContext())
             pn = parser->evalBody(sc->asEvalContext());
@@ -393,6 +395,7 @@ BytecodeCompiler::compileScript(HandleObject environment, SharedContext* sc)
             if (!emitter->emitScript(pn))
                 return nullptr;
             parser->handler.freeTree(pn);
+            resetCounters.release();
 
             break;
         }
@@ -709,7 +712,7 @@ frontend::CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy, const cha
 
     AutoCompilationTraceLogger traceLogger(cx, TraceLogger_ParserCompileLazy, options);
 
-    UsedNameTracker usedNames(cx->tempLifoAlloc());
+    UsedNameTracker usedNames(cx);
     if (!usedNames.init())
         return false;
     Parser<FullParseHandler> parser(cx, cx->tempLifoAlloc(), options, chars, length,

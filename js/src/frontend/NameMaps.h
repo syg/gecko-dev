@@ -166,9 +166,87 @@ class InlineTablePool
     }
 };
 
+using AtomVector = Vector<JSAtom*, 24, SystemAllocPolicy>;
+
+class AtomVectorPool
+{
+    using RecyclableVectors = Vector<AtomVector*, 32, SystemAllocPolicy>;
+
+    RecyclableVectors all_;
+    RecyclableVectors recyclable_;
+
+    AtomVector* allocate() {
+        size_t newAllLength = all_.length() + 1;
+        if (!all_.reserve(newAllLength) || !recyclable_.reserve(newAllLength))
+            return nullptr;
+
+        AtomVector* table = js_new<AtomVector>();
+        if (table)
+            all_.infallibleAppend(table);
+        return table;
+    }
+
+  public:
+    ~AtomVectorPool() {
+        purgeAll();
+    }
+
+    bool empty() const {
+        return all_.empty();
+    }
+
+    void purgeAll() {
+        AtomVector** end = all_.end();
+        for (AtomVector** it = all_.begin(); it != end; ++it)
+            js_delete(*it);
+
+        all_.clearAndFree();
+        recyclable_.clearAndFree();
+    }
+
+    // Fallibly aquire one of the supported table types from the pool.
+    AtomVector* acquire(ExclusiveContext* cx) {
+        AtomVector* table;
+        if (recyclable_.empty()) {
+            table = allocate();
+            if (!table)
+                ReportOutOfMemory(cx);
+        } else {
+            table = recyclable_.popCopy();
+            table->clear();
+        }
+        return table;
+    }
+
+    // Release a table back to the pool.
+    void release(AtomVector** table) {
+        MOZ_ASSERT(*table);
+
+#ifdef DEBUG
+        bool ok = false;
+        // Make sure the table is in |all_| but not already in |recyclable_|.
+        for (AtomVector** it = all_.begin(); it != all_.end(); ++it) {
+            if (*it == *table) {
+                ok = true;
+                break;
+            }
+        }
+        MOZ_ASSERT(ok);
+        for (AtomVector** it = recyclable_.begin(); it != recyclable_.end(); ++it)
+            MOZ_ASSERT(*it != *table);
+#endif
+
+        MOZ_ASSERT(recyclable_.length() < all_.length());
+        // Reserved in allocateFresh.
+        recyclable_.infallibleAppend(*table);
+        *table = nullptr;
+    }
+};
+
 class NameMapPool
 {
     InlineTablePool<AtomIndexMap> pool_;
+    AtomVectorPool vpool_;
     uint32_t activeCompilations_;
 
   public:
@@ -203,9 +281,23 @@ class NameMapPool
             pool_.release(map);
     }
 
+    AtomVector* acquireVector(ExclusiveContext* cx) {
+        MOZ_ASSERT(hasActiveCompilation());
+        return vpool_.acquire(cx);
+    }
+
+    void release(AtomVector** v) {
+        MOZ_ASSERT(hasActiveCompilation());
+        MOZ_ASSERT(v);
+        if (*v)
+            vpool_.release(v);
+    }
+
     void purge() {
-        if (!hasActiveCompilation())
+        if (!hasActiveCompilation()) {
             pool_.purgeAll();
+            vpool_.purgeAll();
+        }
     }
 };
 

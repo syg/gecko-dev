@@ -3656,7 +3656,7 @@ Parse(JSContext* cx, unsigned argc, Value* vp)
     CompileOptions options(cx);
     options.setIntroductionType("js shell parse")
            .setFileAndLine("<string>", 1);
-    UsedNameTracker usedNames(cx->tempLifoAlloc());
+    UsedNameTracker usedNames(cx);
     if (!usedNames.init())
         return false;
     Parser<FullParseHandler> parser(cx, cx->tempLifoAlloc(), options, chars, length,
@@ -3706,7 +3706,7 @@ SyntaxParse(JSContext* cx, unsigned argc, Value* vp)
 
     const char16_t* chars = stableChars.twoByteRange().start().get();
     size_t length = scriptContents->length();
-    UsedNameTracker usedNames(cx->tempLifoAlloc());
+    UsedNameTracker usedNames(cx);
     if (!usedNames.init())
         return false;
     Parser<frontend::SyntaxParseHandler> parser(cx, cx->tempLifoAlloc(),

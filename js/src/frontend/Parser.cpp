@@ -322,6 +322,15 @@ ParseContext::init()
 
         if (!defaultsScope_->init(this))
             return false;
+
+        ExclusiveContext* cx = sc()->context;
+        positionalFormalParameterNames_ = cx->frontendMapPool().acquireVector(cx);
+        if (!positionalFormalParameterNames_)
+            return false;
+
+        closedOverBindingsForLazy_ = cx->frontendMapPool().acquireVector(cx);
+        if (!closedOverBindingsForLazy_)
+            return false;
     }
 
     if (!varScope_->init(this))
@@ -372,28 +381,21 @@ ParseContext::~ParseContext()
     // error would have occurred for declaring a binding in the nearest var
     // scope. Mark them as needing extra assignments to this var binding.
     finishInnerFunctionBoxesForAnnexB();
+
+    ExclusiveContext* cx = sc()->context;
+    cx->frontendMapPool().release(&positionalFormalParameterNames_);
+    cx->frontendMapPool().release(&closedOverBindingsForLazy_);
 }
 
 bool
-UsedNameTracker::note(LifoAlloc& alloc, JSAtom* name, uint32_t scriptId, uint32_t scopeId)
+UsedNameTracker::note(ExclusiveContext* cx, JSAtom* name, uint32_t scriptId, uint32_t scopeId)
 {
-    // The same name is often used multiple times in succession. Optimize for
-    // this case.
-    for (size_t i = 0; i < mozilla::ArrayLength(recents_); i++) {
-        if ((recents_[i].name == name &&
-             recents_[i].use.scriptId == scriptId &&
-             recents_[i].use.scopeId == scopeId))
-        {
-            return true;
-        }
-    }
-
     UsedNameMap::AddPtr p = map_.lookupForAdd(name);
     if (p) {
         if (!p->value().noteUsedInScope(scriptId, scopeId))
             return false;
     } else {
-        UsedNameInfo info(alloc);
+        UsedNameInfo info(cx);
         if (!info.noteUsedInScope(scriptId, scopeId))
             return false;
         if (!map_.add(p, name, Move(info)))
@@ -404,8 +406,7 @@ UsedNameTracker::note(LifoAlloc& alloc, JSAtom* name, uint32_t scriptId, uint32_
     for (size_t i = mozilla::ArrayLength(recents_) - 1; i != 0; i--)
         recents_[i] = recents_[i - 1];
     recents_[0].name = name;
-    recents_[0].use.scriptId = scriptId;
-    recents_[0].use.scopeId = scopeId;
+    recents_[0].scopeId = scopeId;
 
     return true;
 }
@@ -890,7 +891,7 @@ Parser<ParseHandler>::notePositionalFormalParameter(Node fn, HandlePropertyName 
             return false;
     }
 
-    if (!pc->positionalFormalParameterNames.append(name))
+    if (!pc->positionalFormalParameterNames().append(name))
         return false;
 
     Node paramNode = newName(name);
@@ -911,7 +912,7 @@ Parser<ParseHandler>::noteDestructuredPositionalFormalParameter()
 {
     // Append an empty name to the positional formals vector to keep track of
     // argument slots when making FunctionScope::BindingData.
-    return pc->positionalFormalParameterNames.append(nullptr);
+    return pc->positionalFormalParameterNames().append(nullptr);
 }
 
 static bool
@@ -1183,7 +1184,12 @@ Parser<ParseHandler>::noteUsedName(HandlePropertyName name)
     if (pc->sc()->isGlobalContext() && scope == &pc->varScope())
         return true;
 
-    return usedNames.note(alloc, name, pc->scriptId(), scope->id());
+    // The same name is often used multiple times in succession. Optimize for
+    // this case.
+    if (usedNames.hasRecentNote(name, scope->id()))
+        return true;
+
+    return usedNames.note(context, name, pc->scriptId(), scope->id());
 }
 
 template <typename ParseHandler>
@@ -1218,7 +1224,7 @@ Parser<ParseHandler>::propagateFreeNamesAndMarkClosedOverBindings(ParseContext::
                 bi.setClosedOver();
 
                 if (isSyntaxParser) {
-                    if (!pc->closedOverBindingsForLazy.append(bi.name()))
+                    if (!pc->closedOverBindingsForLazy().append(bi.name()))
                         return false;
                 }
             }
@@ -1227,7 +1233,7 @@ Parser<ParseHandler>::propagateFreeNamesAndMarkClosedOverBindings(ParseContext::
 
     // Append a nullptr to denote end-of-scope.
     if (isSyntaxParser) {
-        if (!pc->closedOverBindingsForLazy.append(nullptr))
+        if (!pc->closedOverBindingsForLazy().append(nullptr))
             return false;
     }
 
@@ -1467,8 +1473,8 @@ Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope, bool 
     // These are added to the FunctionScope even when there is a defaults
     // scope and parameter names are not in the FunctionScope proper. These
     // are used for decompiling argument names.
-    for (size_t i = 0; i < pc->positionalFormalParameterNames.length(); i++) {
-        JSAtom* name = pc->positionalFormalParameterNames[i];
+    for (size_t i = 0; i < pc->positionalFormalParameterNames().length(); i++) {
+        JSAtom* name = pc->positionalFormalParameterNames()[i];
 
         BindingName bindName;
         if (name) {
@@ -1966,7 +1972,7 @@ Parser<SyntaxParseHandler>::finishFunction()
 
     // There are too many bindings or inner functions to be saved into the
     // LazyScript. Do a full parse.
-    if (pc->closedOverBindingsForLazy.length() >= LazyScript::NumClosedOverBindingsLimit ||
+    if (pc->closedOverBindingsForLazy().length() >= LazyScript::NumClosedOverBindingsLimit ||
         pc->innerFunctionsForLazy.length() >= LazyScript::NumInnerFunctionsLimit)
     {
         MOZ_ALWAYS_FALSE(abortIfSyntaxParser());
@@ -1976,7 +1982,7 @@ Parser<SyntaxParseHandler>::finishFunction()
     FunctionBox* funbox = pc->functionBox();
     RootedFunction fun(context, funbox->function());
     LazyScript* lazy = LazyScript::Create(context, fun,
-                                          pc->closedOverBindingsForLazy, pc->innerFunctionsForLazy,
+                                          pc->closedOverBindingsForLazy(), pc->innerFunctionsForLazy,
                                           versionNumber(), funbox->bufStart, funbox->bufEnd,
                                           funbox->startLine, funbox->startColumn);
     if (!lazy)
@@ -2432,7 +2438,7 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
         bool hasDefaults = false;
         bool duplicatedParam = false;
         bool disallowDuplicateParams = kind == Arrow || kind == Method || kind == ClassConstructor;
-        Vector<JSAtom*>& positionalFormals = pc->positionalFormalParameterNames;
+        AtomVector& positionalFormals = pc->positionalFormalParameterNames();
 
         if (IsGetterKind(kind)) {
             report(ParseError, false, null(), JSMSG_ACCESSOR_WRONG_ARGS, "getter", "no", "s");

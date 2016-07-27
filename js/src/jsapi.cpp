@@ -4135,7 +4135,7 @@ JS_BufferIsCompilableUnit(JSContext* cx, HandleObject obj, const char* utf8, siz
     bool result = true;
 
     CompileOptions options(cx);
-    frontend::UsedNameTracker usedNames(cx->tempLifoAlloc());
+    frontend::UsedNameTracker usedNames(cx);
     if (!usedNames.init())
         return false;
     frontend::Parser<frontend::FullParseHandler> parser(cx, cx->tempLifoAlloc(),

@@ -4923,7 +4923,7 @@ Debugger::isCompilableUnit(JSContext* cx, unsigned argc, Value* vp)
     bool result = true;
 
     CompileOptions options(cx);
-    frontend::UsedNameTracker usedNames(cx->tempLifoAlloc());
+    frontend::UsedNameTracker usedNames(cx);
     if (!usedNames.init())
         return false;
     frontend::Parser<frontend::FullParseHandler> parser(cx, cx->tempLifoAlloc(),

@@ -3656,7 +3656,7 @@ reflect_parse(JSContext* cx, uint32_t argc, Value* vp)
     options.setFileAndLine(filename, lineno);
     options.setCanLazilyParse(false);
     mozilla::Range<const char16_t> chars = linearChars.twoByteRange();
-    UsedNameTracker usedNames(cx->tempLifoAlloc());
+    UsedNameTracker usedNames(cx);
     if (!usedNames.init())
         return false;
     Parser<FullParseHandler> parser(cx, cx->tempLifoAlloc(), options, chars.start().get(),

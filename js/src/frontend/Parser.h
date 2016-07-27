@@ -311,14 +311,14 @@ class ParseContext : public Nestable<ParseContext>
 
     // Simple formal parameter names, in order of appearance. Only used when
     // isFunctionBox().
-    Vector<JSAtom*> positionalFormalParameterNames;
+    AtomVector* positionalFormalParameterNames_;
 
     // All inner functions in this context. Only used when syntax parsing.
-    Rooted<GCVector<JSFunction*>> innerFunctionsForLazy;
+    Rooted<GCVector<JSFunction*, 8>> innerFunctionsForLazy;
 
     // Closed over binding names, in order of appearance. Null-delimited
     // between scopes. Only used when syntax parsing.
-    Rooted<GCVector<JSAtom*>> closedOverBindingsForLazy;
+    AtomVector* closedOverBindingsForLazy_;
 
     // In a function context, points to a Directive struct that can be updated
     // to reflect new directives encountered in the Directive Prologue that
@@ -357,9 +357,9 @@ class ParseContext : public Nestable<ParseContext>
         isStandaloneFunctionBody_(false),
         superScopeNeedsHomeObject_(false),
         lastYieldOffset(NoYieldOffset),
-        positionalFormalParameterNames(prs->context),
-        innerFunctionsForLazy(prs->context, GCVector<JSFunction*>(prs->context)),
-        closedOverBindingsForLazy(prs->context, GCVector<JSAtom*>(prs->context)),
+      positionalFormalParameterNames_(nullptr),
+        innerFunctionsForLazy(prs->context, GCVector<JSFunction*, 8>(prs->context)),
+        closedOverBindingsForLazy_(nullptr),
         newDirectives(newDirectives),
         inDeclDestructuring(false),
         funHasReturnExpr(false),
@@ -376,6 +376,14 @@ class ParseContext : public Nestable<ParseContext>
     ~ParseContext();
 
     MOZ_MUST_USE bool init();
+
+    AtomVector& positionalFormalParameterNames() {
+        return *positionalFormalParameterNames_;
+    }
+
+    AtomVector& closedOverBindingsForLazy() {
+        return *closedOverBindingsForLazy_;
+    }
 
     SharedContext* sc() {
         return sc_;
@@ -602,20 +610,20 @@ enum TripledotHandling { TripledotAllowed, TripledotProhibited };
 // Parser::propagateFreeNamesAndMarkClosedOverBindings.
 class UsedNameTracker
 {
-    struct Use
-    {
-        uint32_t scriptId;
-        uint32_t scopeId;
-    };
-
   public:
     class UsedNameInfo
     {
-        Vector<Use, 4, LifoAllocPolicy<Fallible>> uses_;
+        struct Use
+        {
+            uint32_t scriptId;
+            uint32_t scopeId;
+        };
+
+        Vector<Use, 6> uses_;
 
       public:
-        explicit UsedNameInfo(LifoAlloc& alloc)
-          : uses_(alloc)
+        explicit UsedNameInfo(ExclusiveContext* cx)
+          : uses_(cx)
         { }
 
         UsedNameInfo(UsedNameInfo&& other)
@@ -658,7 +666,9 @@ class UsedNameTracker
         }
     };
 
-    using UsedNameMap = HashMap<JSAtom*, UsedNameInfo, DefaultHasher<JSAtom*>, LifoAllocPolicy<Fallible>>;
+    using UsedNameMap = HashMap<JSAtom*,
+                                UsedNameInfo,
+                                DefaultHasher<JSAtom*>>;
 
   private:
     // The map of names to chains of uses.
@@ -668,12 +678,13 @@ class UsedNameTracker
     struct RecentNote
     {
         JSAtom* name;
-        Use use;
+        uint32_t scopeId;
 
         RecentNote()
           : name(nullptr)
         { }
     };
+
     mozilla::Array<RecentNote, 2> recents_;
 
     // Monotonically increasing id for all nested scripts.
@@ -714,8 +725,8 @@ class UsedNameTracker
         }
     };
 
-    explicit UsedNameTracker(LifoAlloc& alloc)
-      : map_(alloc),
+    explicit UsedNameTracker(ExclusiveContext* cx)
+      : map_(cx),
         scriptCounter_(0),
         scopeCounter_(0)
     { }
@@ -738,7 +749,15 @@ class UsedNameTracker
         return map_.lookup(name);
     }
 
-    MOZ_MUST_USE bool note(LifoAlloc& alloc, JSAtom* name, uint32_t scriptId, uint32_t scopeId);
+    bool hasRecentNote(JSAtom* name, uint32_t scopeId) {
+        for (size_t i = 0; i < mozilla::ArrayLength(recents_); i++) {
+            if (recents_[i].name == name && recents_[i].scopeId == scopeId)
+                return true;
+        }
+        return false;
+    }
+
+    MOZ_MUST_USE bool note(ExclusiveContext* cx, JSAtom* name, uint32_t scriptId, uint32_t scopeId);
 };
 
 template <typename ParseHandler>
