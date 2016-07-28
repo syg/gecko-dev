@@ -52,7 +52,7 @@ function PrintScore(score) {
 
 
 BenchmarkSuite.config.doWarmup = undefined;
-BenchmarkSuite.config.doDeterministic = undefined;
+BenchmarkSuite.config.doDeterministic = true;
 
 BenchmarkSuite.RunSuites({ NotifyResult: PrintResult,
                            NotifyError: PrintError,

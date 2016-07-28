@@ -9,13 +9,14 @@
 #ifndef frontend_Parser_h
 #define frontend_Parser_h
 
+#include "mozilla/Array.h"
 #include "mozilla/Maybe.h"
 
 #include "jspubtd.h"
 
 #include "frontend/BytecodeCompiler.h"
 #include "frontend/FullParseHandler.h"
-#include "frontend/NameMaps.h"
+#include "frontend/NameCollections.h"
 #include "frontend/SharedContext.h"
 #include "frontend/SyntaxParseHandler.h"
 
@@ -101,20 +102,10 @@ class ParseContext : public Nestable<ParseContext>
         //
         // A lexically declared name is a member only of the declared name set of
         // the scope in which it is declared.
-        DeclaredNameMap* declared_;
+        PooledMapPtr<DeclaredNameMap> declared_;
 
-        // Names used in this scope.
-        UsedNameSet* used_;
-
-        DeclaredNameMap& declared() {
-            MOZ_ASSERT(declared_);
-            return *declared_;
-        }
-
-        UsedNameSet& used() {
-            MOZ_ASSERT(used_);
-            return *used_;
-        }
+        // Monotonically increasing id.
+        uint32_t id_;
 
         bool maybeReportOOM(ParseContext* pc, bool result) {
             if (!result)
@@ -128,55 +119,40 @@ class ParseContext : public Nestable<ParseContext>
 
         using Nestable<Scope>::enclosing;
 
-        explicit Scope(ParseContext* pc)
-          : Nestable<Scope>(&pc->innermostScope_),
-            declared_(nullptr),
-            used_(nullptr)
+        template <typename ParseHandler>
+        explicit Scope(Parser<ParseHandler>* parser)
+          : Nestable<Scope>(&parser->pc->innermostScope_),
+            declared_(parser->context->frontendCollectionPool()),
+            id_(parser->usedNames.nextScopeId())
         { }
-
-        void release(ParseContext* pc) {
-            ExclusiveContext* cx = pc->sc()->context;
-            cx->frontendMapPool().release(&declared_);
-            cx->frontendMapPool().release(&used_);
-        }
 
         void dump(ParseContext* pc);
 
+        uint32_t id() const {
+            return id_;
+        }
+
         MOZ_MUST_USE bool init(ParseContext* pc) {
-            MOZ_ASSERT(!declared_);
-            MOZ_ASSERT(!used_);
-            ExclusiveContext* cx = pc->sc()->context;
-            declared_ = cx->frontendMapPool().acquire<DeclaredNameMap>(cx);
-            used_ = cx->frontendMapPool().acquire<UsedNameSet>(cx);
-            return declared_ && used_;
+            if (id_ == UINT32_MAX) {
+                pc->tokenStream_.reportError(JSMSG_NEED_DIET, js_script_str);
+                return false;
+            }
+
+            return declared_.acquire(pc->sc()->context);
         }
 
         DeclaredNamePtr lookupDeclaredName(JSAtom* name) {
-            return declared().lookup(name);
+            return declared_->lookup(name);
         }
 
         AddDeclaredNamePtr lookupDeclaredNameForAdd(JSAtom* name) {
-            return declared().lookupForAdd(name);
+            return declared_->lookupForAdd(name);
         }
 
         MOZ_MUST_USE bool addDeclaredName(ParseContext* pc, AddDeclaredNamePtr& p, JSAtom* name,
                                           DeclarationKind kind)
         {
-            return maybeReportOOM(pc, declared().add(p, name, DeclaredNameInfo(kind)));
-        }
-
-        MOZ_MUST_USE bool addUsedName(ParseContext* pc, JSAtom* name, UsedNameInfo info) {
-            UsedNameSet::AddPtr p = used().lookupForAdd(name);
-            if (p) {
-                if (info == UsedNameInfo::FromInnerFunction)
-                    p->value() = info;
-                return true;
-            }
-            return maybeReportOOM(pc, used().add(p, name, info));
-        }
-
-        bool hasUsedName(JSAtom* name) {
-            return used().has(name);
+            return maybeReportOOM(pc, declared_->add(p, name, DeclaredNameInfo(kind)));
         }
 
         // Move all declared parameter names to the parameter default
@@ -191,91 +167,6 @@ class ParseContext : public Nestable<ParseContext>
         // semantics of Annex B.3.5.
         void removeSimpleCatchParameter(JSAtom* name);
 
-        // An iterator for the set of used names in the current scope.
-        class UsedNameIter
-        {
-            friend class Scope;
-
-            bool isVarScope_;
-            Scope& scope_;
-            UsedNameSet::Range usedRange_;
-            DeclaredNameMap::Ptr declaredPtr_;
-
-            UsedNameIter(Scope& scope, bool isVarScope)
-              : isVarScope_(isVarScope),
-                scope_(scope),
-                usedRange_(scope.used().all()),
-                declaredPtr_()
-            {
-                lookupDeclaredPtr();
-            }
-
-            void lookupDeclaredPtr() {
-                if (!done())
-                    declaredPtr_ = scope_.declared().lookup(name());
-            }
-
-          public:
-            bool done() const {
-                return usedRange_.empty();
-            }
-
-            explicit operator bool() const {
-                return !done();
-            }
-
-            JSAtom* name() {
-                MOZ_ASSERT(!done());
-                return usedRange_.front().key();
-            }
-
-            UsedNameInfo usedNameInfo() {
-                return usedRange_.front().value();
-            }
-
-            void operator++(int) {
-                MOZ_ASSERT(!done());
-                usedRange_.popFront();
-                lookupDeclaredPtr();
-            }
-
-            bool isFree() {
-                MOZ_ASSERT(!done());
-
-                if (!declaredPtr_)
-                    return true;
-
-                // A use of a var-scoped name declared in a lexical scope
-                // is considered free, as it's not binding in that lexical
-                // scope.
-                if (!isVarScope_ && !DeclarationKindIsLexical(declaredPtr_->value()->kind()))
-                    return true;
-
-                return false;
-            }
-
-            void maybeMarkClosedOverBinding() {
-                MOZ_ASSERT(!isFree());
-                if (declaredPtr_ && usedNameInfo() == UsedNameInfo::FromInnerFunction)
-                    declaredPtr_->value()->setClosedOver();
-            }
-        };
-
-        inline UsedNameIter usedNames(ParseContext* pc);
-
-        // Propagate all free names from the current scope to the enclosing
-        // scope. Binding names that are used names from an inner function are
-        // marked as closed over. Required on scope exit.
-        MOZ_MUST_USE bool propagateFreeNamesAndMarkClosedOverBindings(ParseContext* pc,
-                                                                      Scope* target);
-        MOZ_MUST_USE bool propagateFreeNamesAndMarkClosedOverBindings(ParseContext* pc) {
-            return propagateFreeNamesAndMarkClosedOverBindings(pc, enclosing());
-        }
-
-        // Add the free names from an inner function as used names.
-        template <typename NameRange>
-        MOZ_MUST_USE bool addClosedOverNames(ParseContext* pc, NameRange r);
-
         // An iterator for the set of names a scope binds: the set of all
         // declared names for 'var' scopes, and the set of lexically declared
         // names for non-'var' scopes.
@@ -288,7 +179,7 @@ class ParseContext : public Nestable<ParseContext>
 
             BindingIter(Scope& scope, bool isVarScope)
               : isVarScope_(isVarScope),
-                declaredRange_(scope.declared().all())
+                declaredRange_(scope.declared_->all())
             {
                 settle();
             }
@@ -331,6 +222,11 @@ class ParseContext : public Nestable<ParseContext>
                 return declaredRange_.front().value()->closedOver();
             }
 
+            void setClosedOver() {
+                MOZ_ASSERT(!done());
+                return declaredRange_.front().value()->setClosedOver();
+            }
+
             void operator++(int) {
                 MOZ_ASSERT(!done());
                 declaredRange_.popFront();
@@ -338,6 +234,7 @@ class ParseContext : public Nestable<ParseContext>
             }
         };
 
+        inline uint32_t computeNumBindings(ParseContext* pc);
         inline BindingIter bindings(ParseContext* pc);
     };
 
@@ -352,6 +249,9 @@ class ParseContext : public Nestable<ParseContext>
   private:
     // Context shared between parsing and bytecode generation.
     SharedContext* sc_;
+
+    // TokenStream used for error reporting.
+    TokenStream& tokenStream_;
 
     // The innermost statement, i.e., top of the statement stack.
     Statement* innermostStatement_;
@@ -375,7 +275,18 @@ class ParseContext : public Nestable<ParseContext>
 
     // Inner function boxes in this context to try Annex B.3.3 semantics
     // on. Only used when full parsing.
-    Vector<FunctionBox*> innerFunctionBoxesForAnnexB_;
+    PooledVectorPtr<FunctionBoxVector> innerFunctionBoxesForAnnexB_;
+
+    // Simple formal parameter names, in order of appearance. Only used when
+    // isFunctionBox().
+    PooledVectorPtr<AtomVector> positionalFormalParameterNames_;
+
+    // Closed over binding names, in order of appearance. Null-delimited
+    // between scopes. Only used when syntax parsing.
+    PooledVectorPtr<AtomVector> closedOverBindingsForLazy_;
+
+    // Monotonically increasing id.
+    uint32_t scriptId_;
 
     // Set when compiling a function using Parser::standaloneFunctionBody via
     // the Function or Generator constructor.
@@ -391,12 +302,8 @@ class ParseContext : public Nestable<ParseContext>
     static const uint32_t NoYieldOffset = UINT32_MAX;
     uint32_t lastYieldOffset;
 
-    // Simple formal parameter names, in order of appearance. Only used when
-    // isFunctionBox().
-    Vector<JSAtom*> positionalFormalParameterNames;
-
     // All inner functions in this context. Only used when syntax parsing.
-    Rooted<GCVector<JSFunction*>> innerFunctions;
+    Rooted<GCVector<JSFunction*, 8>> innerFunctionsForLazy;
 
     // In a function context, points to a Directive struct that can be updated
     // to reflect new directives encountered in the Directive Prologue that
@@ -427,14 +334,17 @@ class ParseContext : public Nestable<ParseContext>
     ParseContext(Parser<ParseHandler>* prs, SharedContext* sc, Directives* newDirectives)
       : Nestable<ParseContext>(&prs->pc),
         sc_(sc),
+        tokenStream_(prs->tokenStream),
         innermostStatement_(nullptr),
         innermostScope_(nullptr),
-        innerFunctionBoxesForAnnexB_(prs->context),
+        innerFunctionBoxesForAnnexB_(prs->context->frontendCollectionPool()),
+        positionalFormalParameterNames_(prs->context->frontendCollectionPool()),
+        closedOverBindingsForLazy_(prs->context->frontendCollectionPool()),
+        scriptId_(prs->usedNames.nextScriptId()),
         isStandaloneFunctionBody_(false),
         superScopeNeedsHomeObject_(false),
         lastYieldOffset(NoYieldOffset),
-        positionalFormalParameterNames(prs->context),
-        innerFunctions(prs->context, GCVector<JSFunction*>(prs->context)),
+        innerFunctionsForLazy(prs->context, GCVector<JSFunction*, 8>(prs->context)),
         newDirectives(newDirectives),
         inDeclDestructuring(false),
         funHasReturnExpr(false),
@@ -442,17 +352,15 @@ class ParseContext : public Nestable<ParseContext>
     {
         if (isFunctionBox()) {
             if (functionBox()->function()->isNamedLambda())
-                namedLambdaScope_.emplace(this);
-            defaultsScope_.emplace(this);
+                namedLambdaScope_.emplace(prs);
+            defaultsScope_.emplace(prs);
         }
-        varScope_.emplace(this);
+        varScope_.emplace(prs);
     }
 
     ~ParseContext();
 
     MOZ_MUST_USE bool init();
-    MOZ_MUST_USE bool finishFunctionBodyScope();
-    MOZ_MUST_USE bool finishExtraFunctionScopes();
 
     SharedContext* sc() {
         return sc_;
@@ -508,6 +416,14 @@ class ParseContext : public Nestable<ParseContext>
     template <typename T, typename Predicate /* (Statement*) -> bool */>
     T* findInnermostStatement(Predicate predicate) {
         return Statement::findNearest<T>(innermostStatement_, predicate);
+    }
+
+    AtomVector& positionalFormalParameterNames() {
+        return *positionalFormalParameterNames_;
+    }
+
+    AtomVector& closedOverBindingsForLazy() {
+        return *closedOverBindingsForLazy_;
     }
 
     MOZ_MUST_USE bool addInnerFunctionBoxForAnnexB(FunctionBox* funbox);
@@ -581,6 +497,10 @@ class ParseContext : public Nestable<ParseContext>
     bool isMethod() const {
         return sc_->isFunctionBox() && sc_->asFunctionBox()->function()->isMethod();
     }
+
+    uint32_t scriptId() const {
+        return scriptId_;
+    }
 };
 
 template <>
@@ -590,10 +510,15 @@ ParseContext::Statement::is<ParseContext::LabelStatement>() const
     return kind_ == StatementKind::Label;
 }
 
-inline ParseContext::Scope::UsedNameIter
-ParseContext::Scope::usedNames(ParseContext* pc)
+inline uint32_t
+ParseContext::Scope::computeNumBindings(ParseContext* pc)
 {
-    return UsedNameIter(*this, &pc->varScope() == this);
+    if (&pc->varScope() == this)
+        return declared_->count();
+    uint32_t count = 0;
+    for (BindingIter bi = bindings(pc); bi; bi++)
+        count++;
+    return count;
 }
 
 inline ParseContext::Scope::BindingIter
@@ -632,6 +557,155 @@ enum YieldHandling { YieldIsName, YieldIsKeyword };
 enum InHandling { InAllowed, InProhibited };
 enum DefaultHandling { NameRequired, AllowDefaultName };
 enum TripledotHandling { TripledotAllowed, TripledotProhibited };
+
+// A data structure for tracking used names per parsing session in order
+// compute which bindings are closed over. Scripts and scopes are numbered
+// monotonically in textual order and name uses are tracked by lists of
+// (script id, scope id) pairs of their use sites.
+//
+// Intuitively, in a pair (P,S), P tracks the most nested function that has a
+// use of u, and S tracks the most nested scope that is still being parsed.
+//
+// P is used to answer the question "is u used by a nested function?"
+// S is used to answer the question "is u used in any scopes currently being
+//                                   parsed?"
+//
+// The algorithm:
+//
+// 1. Number all scopes in monotonic increasing order in textual order.
+// 2. Number all scripts in monotonic increasing order in textual order.
+// 3. When an identifier u is used in scope numbered S in script numbered P,
+// 3a. If u is found in Used, let (P_u,S_u) be the final item in the list
+//     Used[u]. Append (max(P,P_u),S) to Used[u].
+//
+//     NOTE: max(P,P_u) guarantees that a live use of a name across function
+//     boundaries can be determined by only inspecting the last pair of the
+//     list in Used[u].
+//
+// 3b. Otherwise, assign the the list [(P,S)] to Used[u].
+// 4. When we finish parsing a scope S in script P, for each declared name d in
+//    Declared(S):
+// 4a. If d is found in Used, mark d as closed over if there is a value
+//     (P_d, S_d) in Used[d] such that P_d > P and S_d > S.
+// 4b. Remove all values (P_d, S_d) in Used[d] such that S_d are >= S.
+//
+// Steps 1 and 2 are implemented by UsedNameTracker::next{Script,Scope}Id.
+// Step 3 is implemented by UsedNameTracker::noteUsedInScope.
+// Step 4 is implemented by UsedNameTracker::noteBoundInScope and
+// Parser::propagateFreeNamesAndMarkClosedOverBindings.
+class UsedNameTracker
+{
+  public:
+    class UsedNameInfo
+    {
+        friend class UsedNameTracker;
+
+        struct Use
+        {
+            uint32_t scriptId;
+            uint32_t scopeId;
+        };
+
+        Vector<Use, 6> uses_;
+
+        void resetToScope(uint32_t scriptId, uint32_t scopeId);
+
+      public:
+        explicit UsedNameInfo(ExclusiveContext* cx)
+          : uses_(cx)
+        { }
+
+        UsedNameInfo(UsedNameInfo&& other)
+          : uses_(mozilla::Move(other.uses_))
+        { }
+
+        bool noteUsedInScope(uint32_t scriptId, uint32_t scopeId) {
+            if (uses_.empty()) {
+                Use use;
+                use.scriptId = scriptId;
+                use.scopeId = scopeId;
+                return uses_.append(use);
+            }
+
+            Use& innermost = uses_.back();
+            if (innermost.scopeId < scopeId) {
+                Use use;
+                use.scriptId = (std::max)(innermost.scriptId, scriptId);
+                use.scopeId = scopeId;
+                return uses_.append(use);
+            }
+
+            return true;
+        }
+
+        void noteBoundInScope(uint32_t scriptId, uint32_t scopeId, bool* closedOver) {
+            *closedOver = false;
+            while (!uses_.empty()) {
+                Use& innermost = uses_.back();
+                if (innermost.scopeId < scopeId)
+                    break;
+                if (innermost.scriptId > scriptId)
+                    *closedOver = true;
+                uses_.popBack();
+            }
+        }
+
+        bool isUsedInScript(uint32_t scriptId) const {
+            return !uses_.empty() && uses_.back().scriptId >= scriptId;
+        }
+    };
+
+    using UsedNameMap = HashMap<JSAtom*,
+                                UsedNameInfo,
+                                DefaultHasher<JSAtom*>>;
+
+  private:
+    // The map of names to chains of uses.
+    UsedNameMap map_;
+
+    // Monotonically increasing id for all nested scripts.
+    uint32_t scriptCounter_;
+
+    // Monotonically increasing id for all nested scopes.
+    uint32_t scopeCounter_;
+
+  public:
+    explicit UsedNameTracker(ExclusiveContext* cx)
+      : map_(cx),
+        scriptCounter_(0),
+        scopeCounter_(0)
+    { }
+
+    MOZ_MUST_USE bool init() {
+        return map_.init();
+    }
+
+    uint32_t nextScriptId() {
+        MOZ_ASSERT(scriptCounter_ != UINT32_MAX);
+        return scriptCounter_++;
+    }
+
+    uint32_t nextScopeId() {
+        MOZ_ASSERT(scopeCounter_ != UINT32_MAX);
+        return scopeCounter_++;
+    }
+
+    UsedNameMap::Ptr lookup(JSAtom* name) {
+        return map_.lookup(name);
+    }
+
+    MOZ_MUST_USE bool note(ExclusiveContext* cx, JSAtom* name, uint32_t scriptId, uint32_t scopeId);
+
+    // Resets state so that scriptId and scopeId are the innermost script and
+    // scope, respectively. Used for rewinding state on syntax parse failure.
+    void reset(uint32_t scriptId, uint32_t scopeId);
+
+    // Resets state to beginning of compilation.
+    void reset() {
+        map_.clear();
+        reset(0, 0);
+    }
+};
 
 template <typename ParseHandler>
 class Parser : private JS::AutoGCRooter, public StrictModeGetter
@@ -719,6 +793,9 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     /* innermost parse context (stack-allocated) */
     ParseContext* pc;
 
+    // For tracking used names in this parsing session.
+    UsedNameTracker& usedNames;
+
     /* Compression token for aborting. */
     SourceCompressionTask* sct;
 
@@ -764,8 +841,8 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     bool reportWithOffset(ParseReportKind kind, bool strict, uint32_t offset, unsigned errorNumber,
                           ...);
 
-    Parser(ExclusiveContext* cx, LifoAlloc* alloc, const ReadOnlyCompileOptions& options,
-           const char16_t* chars, size_t length, bool foldConstants,
+    Parser(ExclusiveContext* cx, LifoAlloc& alloc, const ReadOnlyCompileOptions& options,
+           const char16_t* chars, size_t length, bool foldConstants, UsedNameTracker& usedNames,
            Parser<SyntaxParseHandler>* syntaxParser, LazyScript* lazyOuterFunction);
     ~Parser();
 
@@ -1149,6 +1226,8 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
                                      FunctionSyntaxKind kind, GeneratorKind generatorKind,
                                      bool tryAnnexB, Directives inheritedDirectives,
                                      Directives* newDirectives);
+    bool finishFunctionBodyScope();
+    bool finishExtraFunctionScopes();
     bool finishFunction();
     bool leaveInnerFunction(ParseContext* outerpc);
 
@@ -1189,7 +1268,11 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     bool checkLexicalDeclarationDirectlyWithinBlock(ParseContext::Statement& stmt,
                                                     DeclarationKind kind, TokenPos pos);
     bool noteDeclaredName(HandlePropertyName name, DeclarationKind kind, TokenPos pos);
-    bool noteUsedName(HandlePropertyName name, UsedNameInfo info);
+    bool noteUsedName(HandlePropertyName name);
+    bool hasUsedName(HandlePropertyName name);
+
+    // Required on Scope exit.
+    bool propagateFreeNamesAndMarkClosedOverBindings(ParseContext::Scope& scope);
 
     mozilla::Maybe<GlobalScope::BindingData*> newGlobalScopeData(ParseContext::Scope& scope,
                                                                  uint32_t* functionBindingEnd);
@@ -1199,7 +1282,6 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     mozilla::Maybe<FunctionScope::BindingData*> newFunctionScopeData(ParseContext::Scope& scope,
                                                                      bool hasDefaults);
     mozilla::Maybe<LexicalScope::BindingData*> newLexicalScopeData(ParseContext::Scope& scope);
-    Node makeFunctionBodyLexicalScope(Node body);
     Node finishLexicalScope(ParseContext::Scope& scope, Node body);
 
     Node propertyName(YieldHandling yieldHandling, Node propList,

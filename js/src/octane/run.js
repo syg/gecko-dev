@@ -28,7 +28,6 @@
 
 var base_dir = '';
 load(base_dir + 'base.js');
-/*
 load(base_dir + 'richards.js');
 load(base_dir + 'deltablue.js');
 load(base_dir + 'crypto.js');
@@ -48,8 +47,7 @@ load(base_dir + 'zlib-data.js');
 load(base_dir + 'typescript.js');
 load(base_dir + 'typescript-input.js');
 load(base_dir + 'typescript-compiler.js');
-*/
-load(base_dir + 'earley-boyer.js');
+
 var success = true;
 
 function PrintResult(name, result) {

@@ -723,6 +723,9 @@ class Shape : public gc::TenuredCell
         /* Flags used to speed up isBigEnoughForAShapeTable(). */
         HAS_CACHED_BIG_ENOUGH_FOR_SHAPE_TABLE = 0x08,
         CACHED_BIG_ENOUGH_FOR_SHAPE_TABLE = 0x10,
+
+        // A 'var' binding.
+        VAR_BINDING = 0x20
     };
 
     /* Get a shape identical to this one, without parent/kids information. */
@@ -791,6 +794,13 @@ class Shape : public gc::TenuredCell
     }
     bool hadOverwrite() const {
         return flags & OVERWRITTEN;
+    }
+
+    void setIsVarBinding() {
+        flags |= VAR_BINDING;
+    }
+    bool isVarBinding() const {
+        return flags & VAR_BINDING;
     }
 
     void update(GetterOp getter, SetterOp setter, uint8_t attrs);
@@ -1189,6 +1199,10 @@ struct StackShape
         return flags & Shape::ACCESSOR_SHAPE;
     }
 
+    void setIsVarBinding() {
+        flags |= Shape::VAR_BINDING;
+    }
+
     HashNumber hash() const {
         HashNumber hash = uintptr_t(base);
 
@@ -1231,6 +1245,7 @@ class MutableStackShapeOperations : public StackShapeOperations<Outer> {
     void setSlot(uint32_t slot) { ss().setSlot(slot); }
     void setBase(UnownedBaseShape* base) { ss().base = base; }
     void setAttrs(uint8_t attrs) { ss().attrs = attrs; }
+    void setIsVarBinding() { ss().setIsVarBinding(); }
 };
 
 template <>

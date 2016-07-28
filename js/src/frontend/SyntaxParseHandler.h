@@ -540,6 +540,12 @@ class SyntaxParseHandler
     bool canSkipLazyInnerFunctions() {
         return false;
     }
+    bool canSkipLazyClosedOverBindings() {
+        return false;
+    }
+    JSAtom* nextLazyClosedOverBinding() {
+        MOZ_CRASH("SyntaxParseHandler::canSkipLazyClosedOverBindings must return false");
+    }
 
     void adjustGetToSet(Node node) {}
 

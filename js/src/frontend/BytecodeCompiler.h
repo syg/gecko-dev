@@ -25,14 +25,14 @@ struct SourceCompressionTask;
 namespace frontend {
 
 JSScript*
-CompileGlobalScript(ExclusiveContext* cx, LifoAlloc* alloc, ScopeKind scopeKind,
+CompileGlobalScript(ExclusiveContext* cx, LifoAlloc& alloc, ScopeKind scopeKind,
                     const ReadOnlyCompileOptions& options,
                     SourceBufferHolder& srcBuf,
                     SourceCompressionTask* extraSct = nullptr,
                     ScriptSourceObject** sourceObjectOut = nullptr);
 
 JSScript*
-CompileEvalScript(ExclusiveContext* cx, LifoAlloc* alloc,
+CompileEvalScript(ExclusiveContext* cx, LifoAlloc& alloc,
                   HandleObject scopeChain, HandleScope enclosingScope,
                   const ReadOnlyCompileOptions& options,
                   SourceBufferHolder& srcBuf,
@@ -45,7 +45,7 @@ CompileModule(JSContext* cx, const ReadOnlyCompileOptions& options,
 
 ModuleObject*
 CompileModule(ExclusiveContext* cx, const ReadOnlyCompileOptions& options,
-              SourceBufferHolder& srcBuf, LifoAlloc* alloc,
+              SourceBufferHolder& srcBuf, LifoAlloc& alloc,
               ScriptSourceObject** sourceObjectOut = nullptr);
 
 MOZ_MUST_USE bool

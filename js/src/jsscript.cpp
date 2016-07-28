@@ -191,24 +191,30 @@ js::XDRScriptConst(XDRState<XDR_ENCODE>*, MutableHandleValue);
 template bool
 js::XDRScriptConst(XDRState<XDR_DECODE>*, MutableHandleValue);
 
-// Code LazyScript's free variables.
+// Code LazyScript's closed over bindings.
 template<XDRMode mode>
 static bool
-XDRLazyFreeVariables(XDRState<mode>* xdr, MutableHandle<LazyScript*> lazy)
+XDRLazyClosedOverBindings(XDRState<mode>* xdr, MutableHandle<LazyScript*> lazy)
 {
     JSContext* cx = xdr->cx();
     RootedAtom atom(cx);
-    JSAtom** freeVariables = lazy->freeVariables();
-    size_t numFreeVariables = lazy->numFreeVariables();
-    for (size_t i = 0; i < numFreeVariables; i++) {
-        if (mode == XDR_ENCODE)
-            atom = freeVariables[i];
+    for (size_t i = 0; i < lazy->numClosedOverBindings(); i++) {
+        uint8_t endOfScopeSentinel;
+        if (mode == XDR_ENCODE) {
+            atom = lazy->closedOverBindings()[i];
+            endOfScopeSentinel = !atom;
+        }
 
-        if (!XDRAtom(xdr, &atom))
+        if (!xdr->codeUint8(&endOfScopeSentinel))
+            return false;
+
+        if (endOfScopeSentinel)
+            atom = nullptr;
+        else if (!XDRAtom(xdr, &atom))
             return false;
 
         if (mode == XDR_DECODE)
-            freeVariables[i] = atom;
+            lazy->closedOverBindings()[i] = atom;
     }
 
     return true;
@@ -258,8 +264,8 @@ XDRRelazificationInfo(XDRState<mode>* xdr, HandleFunction fun, HandleScript scri
         }
     }
 
-    // Code free variables.
-    if (!XDRLazyFreeVariables(xdr, lazy))
+    // Code binding names.
+    if (!XDRLazyClosedOverBindings(xdr, lazy))
         return false;
 
     // No need to do anything with inner functions, since we asserted we don't
@@ -932,7 +938,7 @@ js::XDRLazyScript(XDRState<mode>* xdr, HandleScope enclosingScope, HandleScript 
     }
 
     // Code free variables.
-    if (!XDRLazyFreeVariables(xdr, lazy))
+    if (!XDRLazyClosedOverBindings(xdr, lazy))
         return false;
 
     // Code inner functions.
@@ -2494,12 +2500,12 @@ JSScript::initFunctionPrototype(ExclusiveContext* cx, Handle<JSScript*> script,
 }
 
 static void
-InitAtomMap(frontend::AtomIndexMap* indices, GCPtrAtom* atoms)
+InitAtomMap(frontend::AtomIndexMap& indices, GCPtrAtom* atoms)
 {
-    for (AtomIndexMap::Range r = indices->all(); !r.empty(); r.popFront()) {
+    for (AtomIndexMap::Range r = indices.all(); !r.empty(); r.popFront()) {
         JSAtom* atom = r.front().key();
         uint32_t index = r.front().value();
-        MOZ_ASSERT(index < indices->count());
+        MOZ_ASSERT(index < indices.count());
         atoms[index].init(atom);
     }
 }
@@ -2596,7 +2602,7 @@ JSScript::fullyInitFromEmitter(ExclusiveContext* cx, HandleScript script, Byteco
     PodCopy<jsbytecode>(code, bce->prologue.code.begin(), prologueLength);
     PodCopy<jsbytecode>(code + prologueLength, bce->main.code.begin(), mainLength);
     bce->copySrcNotes((jssrcnote*)(code + script->length()), nsrcnotes);
-    InitAtomMap(bce->atomIndices, ssd->atoms());
+    InitAtomMap(*bce->atomIndices, ssd->atoms());
 
     if (!SaveSharedScriptData(cx, script, ssd, nsrcnotes))
         return false;
@@ -3887,7 +3893,7 @@ LazyScript::CreateRaw(ExclusiveContext* cx, HandleFunction fun,
     p.hasBeenCloned = false;
     p.treatAsRunOnce = false;
 
-    size_t bytes = (p.numFreeVariables * sizeof(JSAtom*))
+    size_t bytes = (p.numClosedOverBindings * sizeof(JSAtom*))
                  + (p.numInnerFunctions * sizeof(GCPtrFunction));
 
     ScopedJSFreePtr<uint8_t> table(bytes ? fun->zone()->pod_malloc<uint8_t>(bytes) : nullptr);
@@ -3907,8 +3913,8 @@ LazyScript::CreateRaw(ExclusiveContext* cx, HandleFunction fun,
 
 /* static */ LazyScript*
 LazyScript::Create(ExclusiveContext* cx, HandleFunction fun,
-                   Handle<GCVector<JSAtom*>> freeVariables,
-                   Handle<GCVector<JSFunction*>> innerFunctions,
+                   const frontend::AtomVector& closedOverBindings,
+                   Handle<GCVector<JSFunction*, 8>> innerFunctions,
                    JSVersion version,
                    uint32_t begin, uint32_t end, uint32_t lineno, uint32_t column)
 {
@@ -3918,7 +3924,7 @@ LazyScript::Create(ExclusiveContext* cx, HandleFunction fun,
     };
 
     p.version = version;
-    p.numFreeVariables = freeVariables.length();
+    p.numClosedOverBindings = closedOverBindings.length();
     p.numInnerFunctions = innerFunctions.length();
     p.generatorKindBits = GeneratorKindAsBits(NotGenerator);
     p.strict = false;
@@ -3933,9 +3939,9 @@ LazyScript::Create(ExclusiveContext* cx, HandleFunction fun,
     if (!res)
         return nullptr;
 
-    JSAtom** resFreeVariables = res->freeVariables();
-    for (size_t i = 0; i < res->numFreeVariables(); i++)
-        resFreeVariables[i] = freeVariables[i];
+    JSAtom** resClosedOverBindings = res->closedOverBindings();
+    for (size_t i = 0; i < res->numClosedOverBindings(); i++)
+        resClosedOverBindings[i] = closedOverBindings[i];
 
     GCPtrFunction* resInnerFunctions = res->innerFunctions();
     for (size_t i = 0; i < res->numInnerFunctions(); i++)
@@ -3966,9 +3972,9 @@ LazyScript::Create(ExclusiveContext* cx, HandleFunction fun,
     // Fill with dummies, to be GC-safe after the initialization of the free
     // variables and inner functions.
     size_t i, num;
-    JSAtom** variables = res->freeVariables();
-    for (i = 0, num = res->numFreeVariables(); i < num; i++)
-        variables[i] = dummyAtom;
+    JSAtom** closedOverBindings = res->closedOverBindings();
+    for (i = 0, num = res->numClosedOverBindings(); i < num; i++)
+        closedOverBindings[i] = dummyAtom;
 
     GCPtrFunction* functions = res->innerFunctions();
     for (i = 0, num = res->numInnerFunctions(); i < num; i++)

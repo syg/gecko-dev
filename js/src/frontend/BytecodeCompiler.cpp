@@ -47,7 +47,7 @@ class MOZ_STACK_CLASS BytecodeCompiler
   public:
     // Construct an object passing mandatory arguments.
     BytecodeCompiler(ExclusiveContext* cx,
-                     LifoAlloc* alloc,
+                     LifoAlloc& alloc,
                      const ReadOnlyCompileOptions& options,
                      SourceBufferHolder& sourceBuffer,
                      HandleScope enclosingScope,
@@ -86,7 +86,7 @@ class MOZ_STACK_CLASS BytecodeCompiler
     AutoKeepAtoms keepAtoms;
 
     ExclusiveContext* cx;
-    LifoAlloc* alloc;
+    LifoAlloc& alloc;
     const ReadOnlyCompileOptions& options;
     SourceBufferHolder& sourceBuffer;
 
@@ -99,6 +99,7 @@ class MOZ_STACK_CLASS BytecodeCompiler
     Maybe<SourceCompressionTask> maybeSourceCompressor;
     SourceCompressionTask* sourceCompressor;
 
+    Maybe<UsedNameTracker> usedNames;
     Maybe<Parser<SyntaxParseHandler>> syntaxParser;
     Maybe<Parser<FullParseHandler>> parser;
 
@@ -118,7 +119,7 @@ AutoCompilationTraceLogger::AutoCompilationTraceLogger(ExclusiveContext* cx,
 {}
 
 BytecodeCompiler::BytecodeCompiler(ExclusiveContext* cx,
-                                   LifoAlloc* alloc,
+                                   LifoAlloc& alloc,
                                    const ReadOnlyCompileOptions& options,
                                    SourceBufferHolder& sourceBuffer,
                                    HandleScope enclosingScope,
@@ -217,17 +218,21 @@ BytecodeCompiler::canLazilyParse()
 bool
 BytecodeCompiler::createParser()
 {
+    usedNames.emplace(cx);
+    if (!usedNames->init())
+        return false;
+
     if (canLazilyParse()) {
         syntaxParser.emplace(cx, alloc, options, sourceBuffer.get(), sourceBuffer.length(),
-                             /* foldConstants = */ false, (Parser<SyntaxParseHandler>*) nullptr,
-                             (LazyScript*) nullptr);
+                             /* foldConstants = */ false, *usedNames,
+                             (Parser<SyntaxParseHandler>*) nullptr, (LazyScript*) nullptr);
 
         if (!syntaxParser->checkOptions())
             return false;
     }
 
     parser.emplace(cx, alloc, options, sourceBuffer.get(), sourceBuffer.length(),
-                   /* foldConstants = */ true, syntaxParser.ptrOr(nullptr), nullptr);
+                   /* foldConstants = */ true, *usedNames, syntaxParser.ptrOr(nullptr), nullptr);
     parser->sct = sourceCompressor;
     parser->ss = scriptSource;
     if (!parser->checkOptions())
@@ -395,6 +400,9 @@ BytecodeCompiler::compileScript(HandleObject environment, SharedContext* sc)
         // Maybe we aborted a syntax parse. See if we can try again.
         if (!handleParseFailure(directives))
             return nullptr;
+
+        // Reset UsedNameTracker state before trying again.
+        usedNames->reset();
     }
 
     if (!maybeSetDisplayURL(parser->tokenStream) ||
@@ -622,7 +630,7 @@ struct AutoTimer
 };
 
 JSScript*
-frontend::CompileGlobalScript(ExclusiveContext* cx, LifoAlloc* alloc, ScopeKind scopeKind,
+frontend::CompileGlobalScript(ExclusiveContext* cx, LifoAlloc& alloc, ScopeKind scopeKind,
                               const ReadOnlyCompileOptions& options,
                               SourceBufferHolder& srcBuf,
                               SourceCompressionTask* extraSct,
@@ -637,7 +645,7 @@ frontend::CompileGlobalScript(ExclusiveContext* cx, LifoAlloc* alloc, ScopeKind 
 }
 
 JSScript*
-frontend::CompileEvalScript(ExclusiveContext* cx, LifoAlloc* alloc,
+frontend::CompileEvalScript(ExclusiveContext* cx, LifoAlloc& alloc,
                             HandleObject environment, HandleScope enclosingScope,
                             const ReadOnlyCompileOptions& options,
                             SourceBufferHolder& srcBuf,
@@ -653,11 +661,10 @@ frontend::CompileEvalScript(ExclusiveContext* cx, LifoAlloc* alloc,
 
 ModuleObject*
 frontend::CompileModule(ExclusiveContext* cx, const ReadOnlyCompileOptions& optionsInput,
-                        SourceBufferHolder& srcBuf, LifoAlloc* alloc,
+                        SourceBufferHolder& srcBuf, LifoAlloc& alloc,
                         ScriptSourceObject** sourceObjectOut /* = nullptr */)
 {
     MOZ_ASSERT(srcBuf.get());
-    MOZ_ASSERT(alloc);
     MOZ_ASSERT_IF(sourceObjectOut, *sourceObjectOut == nullptr);
 
     CompileOptions options(cx, optionsInput);
@@ -678,7 +685,7 @@ frontend::CompileModule(JSContext* cx, const ReadOnlyCompileOptions& options,
     if (!GlobalObject::ensureModulePrototypesCreated(cx, cx->global()))
         return nullptr;
 
-    LifoAlloc* alloc = &cx->asJSContext()->tempLifoAlloc();
+    LifoAlloc& alloc = cx->asJSContext()->tempLifoAlloc();
     RootedModuleObject module(cx, CompileModule(cx, options, srcBuf, alloc));
     if (!module)
         return nullptr;
@@ -705,8 +712,11 @@ frontend::CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy, const cha
 
     AutoCompilationTraceLogger traceLogger(cx, TraceLogger_ParserCompileLazy, options);
 
-    Parser<FullParseHandler> parser(cx, &cx->tempLifoAlloc(), options, chars, length,
-                                    /* foldConstants = */ true, nullptr, lazy);
+    UsedNameTracker usedNames(cx);
+    if (!usedNames.init())
+        return false;
+    Parser<FullParseHandler> parser(cx, cx->tempLifoAlloc(), options, chars, length,
+                                    /* foldConstants = */ true, usedNames, nullptr, lazy);
     if (!parser.checkOptions())
         return false;
 
@@ -752,7 +762,7 @@ CompileFunctionBody(JSContext* cx, MutableHandleFunction fun, const ReadOnlyComp
     // FIXME: make Function pass in two strings and parse them as arguments and
     // ProgramElements respectively.
 
-    BytecodeCompiler compiler(cx, &cx->tempLifoAlloc(), options, srcBuf, enclosingScope,
+    BytecodeCompiler compiler(cx, cx->tempLifoAlloc(), options, srcBuf, enclosingScope,
                               TraceLogger_ParserCompileFunction);
     compiler.setSourceArgumentsNotIncluded();
     return compiler.compileFunctionBody(fun, formals, generatorKind);

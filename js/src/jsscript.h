@@ -19,6 +19,7 @@
 #include "jsopcode.h"
 #include "jstypes.h"
 
+#include "frontend/NameAnalysisTypes.h"
 #include "gc/Barrier.h"
 #include "gc/Rooting.h"
 #include "jit/IonCode.h"
@@ -1751,13 +1752,15 @@ class LazyScript : public gc::TenuredCell
 #if JS_BITS_PER_WORD == 32
     uint32_t padding;
 #endif
-  private:
 
+  private:
     struct PackedView {
         // Assorted bits that should really be in ScriptSourceObject.
         uint32_t version : 8;
 
-        uint32_t numFreeVariables : 24;
+        uint32_t shouldDeclareArguments : 1;
+        uint32_t hasThisBinding : 1;
+        uint32_t numClosedOverBindings : 22;
         uint32_t numInnerFunctions : 20;
 
         uint32_t generatorKindBits : 2;
@@ -1790,7 +1793,7 @@ class LazyScript : public gc::TenuredCell
     LazyScript(JSFunction* fun, void* table, uint64_t packedFields,
                uint32_t begin, uint32_t end, uint32_t lineno, uint32_t column);
 
-    // Create a LazyScript without initializing the freeVariables and the
+    // Create a LazyScript without initializing the closedOverBindings and the
     // innerFunctions. To be GC-safe, the caller must initialize both vectors
     // with valid atoms and functions.
     static LazyScript* CreateRaw(ExclusiveContext* cx, HandleFunction fun,
@@ -1798,15 +1801,18 @@ class LazyScript : public gc::TenuredCell
                                  uint32_t lineno, uint32_t column);
 
   public:
-    // Create a LazyScript and initialize freeVariables and innerFunctions
+    static const uint32_t NumClosedOverBindingsLimit = 1 << 22;
+    static const uint32_t NumInnerFunctionsLimit = 1 << 20;
+
+    // Create a LazyScript and initialize closedOverBindings and innerFunctions
     // with the provided vectors.
     static LazyScript* Create(ExclusiveContext* cx, HandleFunction fun,
-                              Handle<GCVector<JSAtom*>> freeVariables,
-                              Handle<GCVector<JSFunction*>> innerFunctions,
+                              const frontend::AtomVector& closedOverBindings,
+                              Handle<GCVector<JSFunction*, 8>> innerFunctions,
                               JSVersion version, uint32_t begin, uint32_t end,
                               uint32_t lineno, uint32_t column);
 
-    // Create a LazyScript and initialize the freeVariables and the
+    // Create a LazyScript and initialize the closedOverBindings and the
     // innerFunctions with dummy values to be replaced in a later initialization
     // phase.
     //
@@ -1860,10 +1866,10 @@ class LazyScript : public gc::TenuredCell
 
     void setEnclosingScopeAndSource(Scope* enclosingScope, ScriptSourceObject* sourceObject);
 
-    uint32_t numFreeVariables() const {
-        return p_.numFreeVariables;
+    uint32_t numClosedOverBindings() const {
+        return p_.numClosedOverBindings;
     }
-    JSAtom** freeVariables() {
+    JSAtom** closedOverBindings() {
         return (JSAtom**)table_;
     }
 
@@ -1871,7 +1877,7 @@ class LazyScript : public gc::TenuredCell
         return p_.numInnerFunctions;
     }
     GCPtrFunction* innerFunctions() {
-        return (GCPtrFunction*)&freeVariables()[numFreeVariables()];
+        return (GCPtrFunction*)&closedOverBindings()[numClosedOverBindings()];
     }
 
     GeneratorKind generatorKind() const { return GeneratorKindFromBits(p_.generatorKindBits); }
@@ -1952,6 +1958,20 @@ class LazyScript : public gc::TenuredCell
     }
     void setNeedsHomeObject() {
         p_.needsHomeObject = true;
+    }
+
+    bool shouldDeclareArguments() const {
+        return p_.shouldDeclareArguments;
+    }
+    void setShouldDeclareArguments() {
+        p_.shouldDeclareArguments = true;
+    }
+
+    bool hasThisBinding() const {
+        return p_.hasThisBinding;
+    }
+    void setHasThisBinding() {
+        p_.hasThisBinding = true;
     }
 
     const char* filename() const {

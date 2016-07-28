@@ -151,12 +151,6 @@ class DeclaredNameInfo
     }
 };
 
-enum class UsedNameInfo
-{
-    FromSameFunction,
-    FromInnerFunction
-};
-
 // Used in BytecodeEmitter to map names to locations.
 class NameLocation
 {
@@ -345,6 +339,9 @@ class NameLocation
     }
 };
 
+// This type is declared here for LazyScript::Create.
+using AtomVector = Vector<JSAtom*, 24, SystemAllocPolicy>;
+
 } // namespace frontend
 } // namespace js
 
@@ -352,9 +349,6 @@ namespace mozilla {
 
 template <>
 struct IsPod<js::frontend::DeclaredNameInfo> : TrueType {};
-
-template <>
-struct IsPod<js::frontend::UsedNameInfo> : TrueType {};
 
 template <>
 struct IsPod<js::frontend::NameLocation> : TrueType {};

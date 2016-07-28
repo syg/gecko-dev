@@ -4923,10 +4923,13 @@ Debugger::isCompilableUnit(JSContext* cx, unsigned argc, Value* vp)
     bool result = true;
 
     CompileOptions options(cx);
-    frontend::Parser<frontend::FullParseHandler> parser(cx, &cx->tempLifoAlloc(),
+    frontend::UsedNameTracker usedNames(cx);
+    if (!usedNames.init())
+        return false;
+    frontend::Parser<frontend::FullParseHandler> parser(cx, cx->tempLifoAlloc(),
                                                         options, chars.twoByteChars(),
                                                         length, /* foldConstants = */ true,
-                                                        nullptr, nullptr);
+                                                        usedNames, nullptr, nullptr);
     JS::WarningReporter older = JS::SetWarningReporter(cx->runtime(), nullptr);
     if (!parser.checkOptions() || !parser.parse()) {
         // We ran into an error. If it was because we ran out of memory we report
@@ -7572,7 +7575,7 @@ EvaluateInEnv(JSContext* cx, Handle<Env*> env, AbstractFramePtr frame,
         RootedScope scope(cx, GlobalScope::createEmpty(cx, ScopeKind::NonSyntactic));
         if (!scope)
             return false;
-        script = frontend::CompileEvalScript(cx, &cx->tempLifoAlloc(), env, scope,
+        script = frontend::CompileEvalScript(cx, cx->tempLifoAlloc(), env, scope,
                                              options, srcBuf);
         if (script)
             script->setActiveEval();
@@ -7582,7 +7585,7 @@ EvaluateInEnv(JSContext* cx, Handle<Env*> env, AbstractFramePtr frame,
         // circumvent the fresh lexical scope that all eval have, so that the
         // users of executeInGlobal, like the web console, may add new bindings to
         // the global scope.
-        script = frontend::CompileGlobalScript(cx, &cx->tempLifoAlloc(), scopeKind, options,
+        script = frontend::CompileGlobalScript(cx, cx->tempLifoAlloc(), scopeKind, options,
                                                srcBuf);
     }
 
