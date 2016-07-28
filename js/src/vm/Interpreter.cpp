@@ -4337,7 +4337,12 @@ js::DefFunOperation(JSContext* cx, HandleScript script, HandleObject envChain,
         if (!DefineProperty(cx, parent, name, rval, nullptr, nullptr, attrs))
             return false;
 
-        return parent->is<GlobalObject>() ? parent->compartment()->addToVarNames(cx, name) : true;
+        if (parent->is<GlobalObject>()) {
+            shape = parent->as<GlobalObject>().lookup(cx, name);
+            MOZ_ASSERT(shape);
+            shape->setIsVarBinding();
+            return true;
+        }
     }
 
     /*
@@ -4366,10 +4371,7 @@ js::DefFunOperation(JSContext* cx, HandleScript script, HandleObject envChain,
             }
         }
 
-        // Careful: the presence of a shape, even one appearing to derive from
-        // a variable declaration, doesn't mean it's in [[VarNames]].
-        if (!parent->compartment()->addToVarNames(cx, name))
-            return false;
+        shape->setIsVarBinding();
     }
 
     /*
@@ -4581,9 +4583,12 @@ js::DeleteNameOperation(JSContext* cx, HandlePropertyName name, HandleObject sco
     res.setBoolean(status);
 
     if (status) {
-        // Deleting a name from the global object removes it from [[VarNames]].
+        // ES 8.1.1.4.7 step 7.b.
+        //
+        // Deleting a name from the global object via 'delete name' removes it
+        // from [[VarNames]].
         if (pobj == scope && scope->is<GlobalObject>())
-            scope->compartment()->removeFromVarNames(name);
+            scope->compartment()->removeVarNameDeletedViaProperty(name);
     }
 
     return true;

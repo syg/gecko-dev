@@ -103,6 +103,8 @@ NextEnvironmentShape(ExclusiveContext* cx, JSAtom* name, BindingKind bindKind, u
 
     jsid id = NameToId(name->asPropertyName());
     Rooted<StackShape> child(cx, StackShape(base, id, slot, attrs, 0));
+    if (bindKind == BindingKind::Var)
+        child.setIsVarBinding();
     return cx->compartment()->propertyTree.getChild(cx, shape, child);
 }
 

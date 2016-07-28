@@ -144,7 +144,7 @@ JSCompartment::init(JSContext* maybecx)
     if (!enumerators)
         return false;
 
-    if (!savedStacks_.init() || !varNames_.init()) {
+    if (!savedStacks_.init() || !varNamesDeletedViaProperty_.init()) {
         if (maybecx)
             ReportOutOfMemory(maybecx);
         return false;
@@ -568,9 +568,9 @@ JSCompartment::getNonSyntacticLexicalEnvironment(JSObject* enclosing) const
 }
 
 bool
-JSCompartment::addToVarNames(JSContext* cx, JS::Handle<JSAtom*> name)
+JSCompartment::addVarNameDeletedViaProperty(JSContext* cx, JS::Handle<JSAtom*> name)
 {
-    if (varNames_.put(name.get()))
+    if (varNamesDeletedViaProperty_.put(name))
         return true;
 
     ReportOutOfMemory(cx);
@@ -612,7 +612,10 @@ void
 JSCompartment::trace(JSTracer* trc)
 {
     savedStacks_.trace(trc);
-    varNames_.trace(trc);
+
+    // Atoms are never nursery-allocated.
+    if (!trc->runtime()->isHeapMinorCollecting())
+        varNamesDeletedViaProperty_.trace(trc);
 }
 
 void
@@ -930,8 +933,8 @@ JSCompartment::clearTables()
         wasmInstances.clear();
     if (savedStacks_.initialized())
         savedStacks_.clear();
-    if (varNames_.initialized())
-        varNames_.clear();
+    if (varNamesDeletedViaProperty_.initialized())
+        varNamesDeletedViaProperty_.clear();
 }
 
 void
@@ -1210,7 +1213,7 @@ JSCompartment::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
     *crossCompartmentWrappersArg += crossCompartmentWrappers.sizeOfExcludingThis(mallocSizeOf);
     *regexpCompartment += regExps.sizeOfExcludingThis(mallocSizeOf);
     *savedStacksSet += savedStacks_.sizeOfExcludingThis(mallocSizeOf);
-    *varNamesSet += varNames_.sizeOfExcludingThis(mallocSizeOf);
+    *varNamesSet += varNamesDeletedViaProperty_.sizeOfExcludingThis(mallocSizeOf);
     if (nonSyntacticLexicalEnvironments_)
         *nonSyntacticLexicalEnvironmentsArg +=
             nonSyntacticLexicalEnvironments_->sizeOfIncludingThis(mallocSizeOf);
