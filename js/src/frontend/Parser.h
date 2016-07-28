@@ -157,7 +157,8 @@ class ParseContext : public Nestable<ParseContext>
 
         // Move all declared parameter names to the parameter default
         // expression scope.
-        static MOZ_MUST_USE bool moveFormalParameterDeclaredNamesForDefaults(ParseContext* pc);
+        template <typename ParseHandler>
+        static MOZ_MUST_USE bool moveFormalParameterNamesForDefaults(Parser<ParseHandler>* parser);
 
         // Remove all VarForAnnexBLexicalFunction declarations of a certain
         // name from all scopes in pc's scope stack.
@@ -596,15 +597,15 @@ enum TripledotHandling { TripledotAllowed, TripledotProhibited };
 class UsedNameTracker
 {
   public:
+    struct Use
+    {
+        uint32_t scriptId;
+        uint32_t scopeId;
+    };
+
     class UsedNameInfo
     {
         friend class UsedNameTracker;
-
-        struct Use
-        {
-            uint32_t scriptId;
-            uint32_t scopeId;
-        };
 
         Vector<Use, 6> uses_;
 
@@ -690,8 +691,20 @@ class UsedNameTracker
         return scopeCounter_++;
     }
 
-    UsedNameMap::Ptr lookup(JSAtom* name) {
+    UsedNameMap::Ptr lookup(JSAtom* name) const {
         return map_.lookup(name);
+    }
+
+    template <typename Predicate /* (JSAtom*, Use) -> bool */>
+    bool hasUse(Predicate p) const {
+        for (UsedNameMap::Range r = map_.all(); !r.empty(); r.popFront()) {
+            JSAtom* name = r.front().key();
+            for (const Use& use : r.front().value().uses_) {
+                if (p(name, use))
+                    return true;
+            }
+        }
+        return false;
     }
 
     MOZ_MUST_USE bool note(ExclusiveContext* cx, JSAtom* name, uint32_t scriptId, uint32_t scopeId);

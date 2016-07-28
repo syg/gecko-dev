@@ -149,13 +149,15 @@ ParseContext::Scope::dump(ParseContext* pc)
     fprintf(stdout, "\n");
 }
 
+template <typename ParseHandler>
 /* static */ bool
-ParseContext::Scope::moveFormalParameterDeclaredNamesForDefaults(ParseContext* pc)
+ParseContext::Scope::moveFormalParameterNamesForDefaults(Parser<ParseHandler>* parser)
 {
     // If we had default expressions, move all all formal parameter
     // declarations from the var scope to the defaults scope as 'let'
     // bindings, as the defaults scope has TDZ.
 
+    ParseContext* pc = parser->pc;
     Scope& varScope = pc->varScope();
     Scope& defaultsScope = pc->defaultsScope();
     Vector<JSAtom*> paramNames(pc->sc()->context);
@@ -178,6 +180,21 @@ ParseContext::Scope::moveFormalParameterDeclaredNamesForDefaults(ParseContext* p
 
     for (uint32_t i = 0; i < paramNames.length(); i++)
         varScope.declared_->remove(paramNames[i]);
+
+    // It is an invariant of scope numbering that scopes must be numbered in
+    // order of appearance in the text. Because it is not known at the start
+    // of parsing a function whether there will be a defaults scope, the var
+    // scope needs to be renumbered to preserve this invariant.
+
+#ifdef DEBUG
+    // First verify that we have not noted any uses in the old varScope id.
+    auto hasUseExactlyInScope = [&varScope](JSAtom*, const UsedNameTracker::Use& use) {
+        return use.scopeId == varScope.id();
+    };
+    MOZ_ASSERT(!parser->usedNames.hasUse(hasUseExactlyInScope));
+#endif
+
+    varScope.id_ = parser->usedNames.nextScopeId();
 
     return true;
 }
@@ -2627,7 +2644,7 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
         }
 
         if (hasDefaults) {
-            if (!ParseContext::Scope::moveFormalParameterDeclaredNamesForDefaults(pc))
+            if (!ParseContext::Scope::moveFormalParameterNamesForDefaults(this))
                 return false;
         } else {
             funbox->length = positionalFormals.length() - hasRest;
