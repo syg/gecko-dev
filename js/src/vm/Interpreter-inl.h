@@ -372,15 +372,12 @@ DefVarOperation(JSContext* cx, HandleObject varobj, HandlePropertyName dn, unsig
     if (!prop || (obj2 != varobj && varobj->is<GlobalObject>())) {
         if (!DefineProperty(cx, varobj, dn, UndefinedHandleValue, nullptr, nullptr, attrs))
             return false;
-
-        // Get the shape if we're defining the var in order to mark it as a
-        // var binding.
-        if (!prop)
-            prop = varobj->as<GlobalObject>().lookup(cx, dn);
     }
 
-    MOZ_ASSERT(prop);
-    prop->setIsVarBinding();
+    if (varobj->is<GlobalObject>()) {
+        if (!varobj->compartment()->addToVarNames(cx, dn))
+            return false;
+    }
 
     return true;
 }

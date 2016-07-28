@@ -413,21 +413,15 @@ struct JSCompartment
 
     js::WrapperMap               crossCompartmentWrappers;
 
-    // The global environment record's [[VarNames]] list contains all names
-    // declared using FunctionDeclaration, GeneratorDeclaration, and
-    // VariableDeclaration declarations in global code in this
-    // compartment. This set of name is used for redeclaration checks.
-    //
-    // Normally this set is the same as the set of shapes on the global object
-    // for which isVarBinding() is true. However, a var name 'foo' may be
-    // deleted via property reference, e.g., delete global.foo, in which case,
-    // per spec, 'foo' is not removed from [[VarNames]] and remains unable to
-    // be redeclared as a lexical binding. This set tracks names which are in
-    // [[VarNames]] but for which there is no shape on the global object that
-    // isVarBinding().
+    // The global environment record's [[VarNames]] list that contains all
+    // names declared using FunctionDeclaration, GeneratorDeclaration, and
+    // VariableDeclaration declarations in global code in this compartment.
+    // Names are only added to this list, never removed -- not even if the
+    // property was created as configurable by eval code, then subsequently
+    // deleted.
     JS::GCHashSet<JSAtom*,
                   js::DefaultHasher<JSAtom*>,
-                  js::SystemAllocPolicy> varNamesDeletedViaProperty_;
+                  js::SystemAllocPolicy> varNames_;
 
   public:
     /* Last time at which an animation was played for a global in this compartment. */
@@ -669,14 +663,16 @@ struct JSCompartment
 
     js::SavedStacks& savedStacks() { return savedStacks_; }
 
-    MOZ_MUST_USE bool addVarNameDeletedViaProperty(JSContext* cx, JS::Handle<JSAtom*> name);
+    // Add a name to [[VarNames]].  Reports OOM on failure.
+    MOZ_MUST_USE bool addToVarNames(JSContext* cx, JS::Handle<JSAtom*> name);
 
-    void removeVarNameDeletedViaProperty(JS::Handle<JSAtom*> name) {
-        varNamesDeletedViaProperty_.remove(name);
+    void removeFromVarNames(JS::Handle<JSAtom*> name) {
+        varNames_.remove(name);
     }
 
-    bool isVarNameDeletedViaProperty(JS::Handle<JSAtom*> name) {
-        return varNamesDeletedViaProperty_.has(name);
+    // Whether the given name is in [[VarNames]].
+    bool isInVarNames(JS::Handle<JSAtom*> name) {
+        return varNames_.has(name);
     }
 
     void findOutgoingEdges(js::gc::ZoneComponentFinder& finder);

@@ -2487,23 +2487,5 @@ js::NativeDeleteProperty(JSContext* cx, HandleNativeObject obj, HandleId id,
             return false;
     }
 
-    if (!SuppressDeletedProperty(cx, obj, id))
-        return false;
-
-    // Global environment records have [[VarNames]], a set of names for
-    // declared var bindings.  Usually this set is tracked via Shapes for
-    // which isVarBinding() is true.
-    //
-    // When a global var is deleted via 'delete name', ES 8.1.1.4.7 step 7.b
-    // says the name is removed from [[VarNames]].  However, when a global var
-    // is deleted via 'delete globalObj.name', the name is *not* removed from
-    // [[VarNames]]. The latter case is tracked here, because the Shape for
-    // the var binding is now deleted.
-    if (shape->isVarBinding() && obj->is<GlobalObject>()) {
-        RootedAtom name(cx, JSID_TO_ATOM(id));
-        if (!obj->compartment()->addVarNameDeletedViaProperty(cx, name))
-            return false;
-    }
-
-    return true;
+    return SuppressDeletedProperty(cx, obj, id);
 }
