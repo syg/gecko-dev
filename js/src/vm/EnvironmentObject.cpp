@@ -2986,13 +2986,6 @@ js::CheckLexicalNameConflict(JSContext* cx, Handle<LexicalEnvironmentObject*> le
     if ((shape = lexicalEnv->lookup(cx, name))) {
         // ES 15.1.11 step 5.b
         redeclKind = shape->writable() ? "let" : "const";
-    } else if (varObj->isNative() && (shape = varObj->as<NativeObject>().lookup(cx, name))) {
-        // Faster path for ES 15.1.11 step 5.a and 5.c-d when the shape can be
-        // found without going through a resolve hook.
-        if (shape->isVarBinding())
-            redeclKind = "var";
-        else if (!shape->configurable())
-            redeclKind = "non-configurable global property";
     } else if (varObj->is<GlobalObject>() &&
                varObj->compartment()->isVarNameDeletedViaProperty(name))
     {
@@ -3000,7 +2993,23 @@ js::CheckLexicalNameConflict(JSContext* cx, Handle<LexicalEnvironmentObject*> le
         //
         // A configurable global var binding deleted via a property
         // reference, e.g. global.x, are not removed from [[VarNames]].
+        //
+        // This step must be checked before the shape lookups below for the
+        // following corner case at the global level:
+        //
+        //   eval('var x');
+        //   delete this.x;
+        //   this.x = 42;
+        //   evaluate('let x'); // SyntaxError despite this.x existing
+        //
         redeclKind = "var";
+    } else if (varObj->isNative() && (shape = varObj->as<NativeObject>().lookup(cx, name))) {
+        // Faster path for ES 15.1.11 step 5.a and 5.c-d when the shape can be
+        // found without going through a resolve hook.
+        if (shape->isVarBinding())
+            redeclKind = "var";
+        else if (!shape->configurable())
+            redeclKind = "non-configurable global property";
     } else {
         // ES 15.1.11 step 5.c-d
         Rooted<PropertyDescriptor> desc(cx);
