@@ -2966,6 +2966,8 @@ BytecodeEmitter::emitSetOrInitializeNameAtLocation(JSAtom* name, const NameLocat
 
       case NameLocation::Kind::FrameSlot: {
         JSOp op = JSOP_SETLOCAL;
+        if (!emitRhs(this, loc, emittedBindOp))
+            return false;
         if (loc.isLexical()) {
             if (initialize) {
                 op = JSOP_INITLEXICAL;
@@ -2977,8 +2979,6 @@ BytecodeEmitter::emitSetOrInitializeNameAtLocation(JSAtom* name, const NameLocat
                     return false;
             }
         }
-        if (!emitRhs(this, loc, emittedBindOp))
-            return false;
         if (!emitLocalOp(op, loc.frameSlot()))
             return false;
         if (op == JSOP_INITLEXICAL && !innermostTDZCheckCache->noteEmittedTDZCheck(this, name))
@@ -2988,6 +2988,8 @@ BytecodeEmitter::emitSetOrInitializeNameAtLocation(JSAtom* name, const NameLocat
 
       case NameLocation::Kind::EnvironmentCoordinate: {
         JSOp op = JSOP_SETALIASEDVAR;
+        if (!emitRhs(this, loc, emittedBindOp))
+            return false;
         if (loc.isLexical()) {
             if (initialize) {
                 MOZ_ASSERT(loc.environmentCoordinate().hops() == 0);
@@ -3000,8 +3002,6 @@ BytecodeEmitter::emitSetOrInitializeNameAtLocation(JSAtom* name, const NameLocat
                     return false;
             }
         }
-        if (!emitRhs(this, loc, emittedBindOp))
-            return false;
         if (loc.bindingKind() == BindingKind::NamedLambdaCallee) {
             // Assigning to the named lambda is a no-op in sloppy mode and throws
             // in strict mode.

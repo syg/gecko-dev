@@ -3924,6 +3924,8 @@ LazyScript::Create(ExclusiveContext* cx, HandleFunction fun,
     };
 
     p.version = version;
+    p.shouldDeclareArguments = false;
+    p.hasThisBinding = false;
     p.numClosedOverBindings = closedOverBindings.length();
     p.numInnerFunctions = innerFunctions.length();
     p.generatorKindBits = GeneratorKindAsBits(NotGenerator);
