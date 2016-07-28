@@ -612,7 +612,10 @@ void
 JSCompartment::trace(JSTracer* trc)
 {
     savedStacks_.trace(trc);
-    varNames_.trace(trc);
+
+    // Atoms are always tenured.
+    if (!trc->runtime()->isHeapMinorCollecting())
+        varNames_.trace(trc);
 }
 
 void
