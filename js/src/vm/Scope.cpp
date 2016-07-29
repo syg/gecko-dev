@@ -131,7 +131,11 @@ template <typename BindingData>
 static BindingData*
 CopyBindingData(ExclusiveContext* cx, Handle<BindingData*> data, size_t dataSize)
 {
-    MOZ_ASSERT(!data->notLifoAllocated);
+    if (data->notLifoAllocated) {
+        data->addRef();
+        return data;
+    }
+
     uint8_t* copyBytes = cx->zone()->pod_malloc<uint8_t>(dataSize);
     if (!copyBytes) {
         ReportOutOfMemory(cx);

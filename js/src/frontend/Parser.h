@@ -748,14 +748,32 @@ class UsedNameTracker
 
     MOZ_MUST_USE bool note(ExclusiveContext* cx, JSAtom* name, uint32_t scriptId, uint32_t scopeId);
 
+    struct RewindToken
+    {
+      private:
+        friend class UsedNameTracker;
+        uint32_t scriptId;
+        uint32_t scopeId;
+    };
+
+    RewindToken getRewindToken() const {
+        RewindToken token;
+        token.scriptId = scriptCounter_;
+        token.scopeId = scopeCounter_;
+        return token;
+    }
+
     // Resets state so that scriptId and scopeId are the innermost script and
     // scope, respectively. Used for rewinding state on syntax parse failure.
-    void reset(uint32_t scriptId, uint32_t scopeId);
+    void rewind(RewindToken token);
 
     // Resets state to beginning of compilation.
     void reset() {
         map_.clear();
-        reset(0, 0);
+        RewindToken token;
+        token.scriptId = 0;
+        token.scopeId = 0;
+        rewind(token);
     }
 };
 

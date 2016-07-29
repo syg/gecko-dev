@@ -1098,7 +1098,7 @@ class BindingIter
 
     bool hasArgumentSlot() const {
         MOZ_ASSERT(!done());
-        return index_ < nonPositionalFormalStart_;
+        return index_ >= positionalFormalStart_ && index_ < nonPositionalFormalStart_;
     }
 
     uint16_t argumentSlot() const {

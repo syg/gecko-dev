@@ -424,7 +424,7 @@ UsedNameTracker::UsedNameInfo::resetToScope(uint32_t scriptId, uint32_t scopeId)
 {
     while (!uses_.empty()) {
         Use& innermost = uses_.back();
-        if (innermost.scopeId <= scopeId)
+        if (innermost.scopeId < scopeId)
             break;
         MOZ_ASSERT(innermost.scriptId >= scriptId);
         uses_.popBack();
@@ -432,13 +432,13 @@ UsedNameTracker::UsedNameInfo::resetToScope(uint32_t scriptId, uint32_t scopeId)
 }
 
 void
-UsedNameTracker::reset(uint32_t scriptId, uint32_t scopeId)
+UsedNameTracker::rewind(RewindToken token)
 {
-    scriptCounter_ = scriptId + 1;
-    scopeCounter_ = scopeId + 1;
+    scriptCounter_ = token.scriptId;
+    scopeCounter_ = token.scopeId;
 
     for (UsedNameMap::Range r = map_.all(); !r.empty(); r.popFront())
-        r.front().value().resetToScope(scriptId, scopeId);
+        r.front().value().resetToScope(token.scriptId, token.scopeId);
 }
 
 FunctionBox::FunctionBox(ExclusiveContext* cx, LifoAlloc& alloc, ObjectBox* traceListHead,
@@ -2948,8 +2948,7 @@ Parser<FullParseHandler>::trySyntaxParseInnerFunction(ParseNode* pn, HandleFunct
         if (!parser)
             break;
 
-        uint32_t savedScriptId = pc->scriptId();
-        uint32_t savedScopeId = pc->innermostScope()->id();
+        UsedNameTracker::RewindToken token = usedNames.getRewindToken();
 
         // Move the syntax parser to the current position in the stream.
         TokenStream::Position position(keepAtoms);
@@ -2974,7 +2973,7 @@ Parser<FullParseHandler>::trySyntaxParseInnerFunction(ParseNode* pn, HandleFunct
                 // rewound to just before we tried the syntax parse for
                 // correctness.
                 parser->clearAbortedSyntaxParse();
-                usedNames.reset(savedScriptId, savedScopeId);
+                usedNames.rewind(token);
                 MOZ_ASSERT_IF(parser->context->isJSContext(),
                               !parser->context->asJSContext()->isExceptionPending());
                 break;
