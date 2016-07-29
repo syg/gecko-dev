@@ -693,8 +693,14 @@ class ParseNode
 
     ParseNode* generatorExpr() const {
         MOZ_ASSERT(isKind(PNK_GENEXP));
+
         ParseNode* callee = this->pn_head;
-        ParseNode* body = callee->pn_body;
+        MOZ_ASSERT(callee->isKind(PNK_FUNCTION));
+
+        ParseNode* paramsBody = callee->pn_body;
+        MOZ_ASSERT(paramsBody->isKind(PNK_PARAMSBODY));
+
+        ParseNode* body = paramsBody->last();
         MOZ_ASSERT(body->isKind(PNK_STATEMENTLIST));
         MOZ_ASSERT(body->last()->isKind(PNK_LEXICALSCOPE) ||
                    body->last()->isKind(PNK_COMPREHENSIONFOR));
