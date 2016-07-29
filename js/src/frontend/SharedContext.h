@@ -60,16 +60,11 @@ StatementKindIsUnlabeledBreakTarget(StatementKind kind)
     return StatementKindIsLoop(kind) || kind == StatementKind::Switch;
 }
 
-template <typename Concrete>
-class TemporarilyPopNestable;
-
 // A base class for nestable structures in the frontend, such as statements
 // and scopes.
 template <typename Concrete>
 class MOZ_STACK_CLASS Nestable
 {
-    friend class TemporarilyPopNestable<Concrete>;
-
     Concrete** stack_;
     Concrete*  enclosing_;
 
@@ -112,28 +107,6 @@ class MOZ_STACK_CLASS Nestable
     ~Nestable() {
         MOZ_ASSERT(*stack_ == static_cast<Concrete*>(this));
         *stack_ = enclosing_;
-    }
-};
-
-// Scoped pop the top of the nestable stack.
-template <typename Concrete>
-class TemporarilyPopNestable
-{
-    Concrete** stack_;
-    Concrete*  oldInnermost_;
-
-  public:
-    explicit TemporarilyPopNestable(Concrete** stack)
-      : stack_(stack),
-        oldInnermost_(*stack)
-    {
-        MOZ_ASSERT(oldInnermost_->enclosing_);
-        *stack_ = oldInnermost_->enclosing_;
-    }
-
-    ~TemporarilyPopNestable() {
-        MOZ_ASSERT(*stack_ == oldInnermost_->enclosing_);
-        *stack_ = oldInnermost_;
     }
 };
 

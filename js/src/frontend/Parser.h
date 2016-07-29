@@ -94,6 +94,8 @@ class ParseContext : public Nestable<ParseContext>
     // Tracks declared and used names within a scope.
     class Scope : public Nestable<Scope>
     {
+        ParseContext* pc_;
+
         // Names declared in this scope. Corresponds to the union of
         // VarDeclaredNames and LexicallyDeclaredNames in the ES spec.
         //
@@ -122,9 +124,17 @@ class ParseContext : public Nestable<ParseContext>
         template <typename ParseHandler>
         explicit Scope(Parser<ParseHandler>* parser)
           : Nestable<Scope>(&parser->pc->innermostScope_),
+            pc_(parser->pc),
             declared_(parser->context->frontendCollectionPool()),
             id_(parser->usedNames.nextScopeId())
-        { }
+        {
+            pc_->scopeForUsedNames_ = this;
+        }
+
+        ~Scope() {
+            MOZ_ASSERT(pc_->scopeForUsedNames_ == this);
+            pc_->scopeForUsedNames_ = enclosing();
+        }
 
         void dump(ParseContext* pc);
 
@@ -239,12 +249,25 @@ class ParseContext : public Nestable<ParseContext>
         inline BindingIter bindings(ParseContext* pc);
     };
 
-    class TemporarilyPopScope : public TemporarilyPopNestable<Scope>
+    class MOZ_STACK_CLASS AutoOverrideScopeForUsedNames
     {
+        ParseContext* pc_;
+        Scope* savedScopeForUsedNames_;
+        mozilla::DebugOnly<Scope*> overrideScope_;
+
       public:
-        explicit TemporarilyPopScope(ParseContext* pc)
-          : TemporarilyPopNestable<Scope>(&pc->innermostScope_)
-        { }
+        AutoOverrideScopeForUsedNames(ParseContext* pc, Scope* overrideScope)
+          : pc_(pc),
+            savedScopeForUsedNames_(pc->scopeForUsedNames_),
+            overrideScope_(overrideScope)
+        {
+            pc->scopeForUsedNames_ = overrideScope;
+        }
+
+        ~AutoOverrideScopeForUsedNames() {
+            MOZ_ASSERT(pc_->scopeForUsedNames_ == overrideScope_);
+            pc_->scopeForUsedNames_ = savedScopeForUsedNames_;
+        }
     };
 
   private:
@@ -261,6 +284,10 @@ class ParseContext : public Nestable<ParseContext>
     //
     // The outermost scope in the stack is varScope_.
     Scope* innermostScope_;
+
+    // Scope for used names. When parsing function arguments, this is
+    // defaultsScope_.  Otherwise, this is innermostScope_.
+    Scope* scopeForUsedNames_;
 
     // If isFunctionBox() and the function is a named lambda, the DeclEnv
     // scope for named lambdas.
@@ -338,6 +365,7 @@ class ParseContext : public Nestable<ParseContext>
         tokenStream_(prs->tokenStream),
         innermostStatement_(nullptr),
         innermostScope_(nullptr),
+        scopeForUsedNames_(nullptr),
         innerFunctionBoxesForAnnexB_(prs->context->frontendCollectionPool()),
         positionalFormalParameterNames_(prs->context->frontendCollectionPool()),
         closedOverBindingsForLazy_(prs->context->frontendCollectionPool()),
@@ -382,6 +410,12 @@ class ParseContext : public Nestable<ParseContext>
         // There is always at least one scope: the 'var' scope.
         MOZ_ASSERT(innermostScope_);
         return innermostScope_;
+    }
+
+    Scope* scopeForUsedNames() {
+        // There is always at least one scope, per above.
+        MOZ_ASSERT(scopeForUsedNames_);
+        return scopeForUsedNames_;
     }
 
     Scope& namedLambdaScope() {
@@ -1118,11 +1152,6 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     Node assignExpr(InHandling inHandling, YieldHandling yieldHandling,
                     TripledotHandling tripledotHandling,
                     InvokedPrediction invoked = PredictUninvoked);
-    Node assignExprMaybeInDestructuringDecl(InHandling inHandling, YieldHandling yieldHandling,
-                                            TripledotHandling tripledotHandling,
-                                            PossibleError* possibleError);
-    Node assignExprMaybeInDestructuringDecl(InHandling inHandling, YieldHandling yieldHandling,
-                                            TripledotHandling tripledotHandling);
     Node assignExprWithoutYield(YieldHandling yieldHandling, unsigned err);
     Node yieldExpression(InHandling inHandling);
     Node condExpr1(InHandling inHandling, YieldHandling yieldHandling,

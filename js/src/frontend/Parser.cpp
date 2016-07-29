@@ -1217,7 +1217,7 @@ Parser<ParseHandler>::noteUsedName(HandlePropertyName name)
     // to know if they are closed over. So no need to track used name at the
     // global scope. It is not incorrect to track them, this is an
     // optimization.
-    ParseContext::Scope* scope = pc->innermostScope();
+    ParseContext::Scope* scope = pc->scopeForUsedNames();
     if (pc->sc()->isGlobalContext() && scope == &pc->varScope())
         return true;
 
@@ -2472,6 +2472,22 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
         bool disallowDuplicateParams = kind == Arrow || kind == Method || kind == ClassConstructor;
         AtomVector& positionalFormals = pc->positionalFormalParameterNames();
 
+        // Expressions in function arguments have their own scope to ensure
+        // that any closures created by those expressions do not have
+        // visibility of any bindings in the function body.
+        //
+        // Used names while parsing arguments always go onto the defaults
+        // scope. Used names arise in parameter default expressions and
+        // computed property names in destructured arguments, so having a used
+        // name at all means we need the defaults scope.
+        //
+        // Declared names go on the var scope, because it is unknown if a
+        // defaults scope will be needed until we parse the first default
+        // expression or computed property name. If a defaults scope is
+        // needed, the declared formal parameters will be moved to the
+        // defaults scope. See moveFormalParameterNamesForDefaults.
+        ParseContext::AutoOverrideScopeForUsedNames overrideScope(pc, &pc->defaultsScope());
+
         if (IsGetterKind(kind)) {
             report(ParseError, false, null(), JSMSG_ACCESSOR_WRONG_ARGS, "getter", "no", "s");
             return false;
@@ -2580,15 +2596,6 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
             if (!tokenStream.matchToken(&matched, TOK_ASSIGN))
                 return false;
             if (matched) {
-                // Default expressions have their own scope to ensure that
-                // closures created by default expressions do not have
-                // visibility of any bindings in the function body.
-                //
-                // The default expression scope encloses the body scope, so
-                // pop the body scope while parsing default expressions.
-                ParseContext::TemporarilyPopScope popBodyScope(pc);
-                MOZ_ASSERT(pc->innermostScope() == &pc->defaultsScope());
-
                 // A default argument without parentheses would look like:
                 // a = expr => body, but both operators are right-associative, so
                 // that would have been parsed as a = (expr => body) instead.
@@ -6873,6 +6880,26 @@ Parser<ParseHandler>::checkAndMarkAsAssignmentLhs(Node target, AssignmentFlavor 
     return makeSetCall(target, JSMSG_BAD_LEFTSIDE_OF_ASS);
 }
 
+class AutoClearInDestructuringDecl
+{
+    ParseContext* pc_;
+    Maybe<DeclarationKind> saved_;
+
+  public:
+    explicit AutoClearInDestructuringDecl(ParseContext* pc)
+      : pc_(pc),
+        saved_(pc->inDestructuringDecl)
+    {
+        pc->inDestructuringDecl = Nothing();
+        if (saved_ && *saved_ == DeclarationKind::FormalParameter)
+            pc->functionBox()->hasDefaultsScope = true;
+    }
+
+    ~AutoClearInDestructuringDecl() {
+        pc_->inDestructuringDecl = saved_;
+    }
+};
+
 template <typename ParseHandler>
 typename ParseHandler::Node
 Parser<ParseHandler>::assignExpr(InHandling inHandling, YieldHandling yieldHandling,
@@ -7034,43 +7061,15 @@ Parser<ParseHandler>::assignExpr(InHandling inHandling, YieldHandling yieldHandl
     if (!possibleErrorInner.checkForExprErrors())
         return null();
 
-    Node rhs = assignExprMaybeInDestructuringDecl(inHandling, yieldHandling, TripledotProhibited,
-                                                  possibleError);
-    if (!rhs)
-        return null();
-    return handler.newAssignment(kind, lhs, rhs, op);
-}
-
-template <typename ParseHandler>
-typename ParseHandler::Node
-Parser<ParseHandler>::assignExprMaybeInDestructuringDecl(InHandling inHandling,
-                                                         YieldHandling yieldHandling,
-                                                         TripledotHandling tripledotHandling,
-                                                         PossibleError* possibleError)
-{
-    Node expr = null();
-    Maybe<DeclarationKind> saved = pc->inDestructuringDecl;
-    pc->inDestructuringDecl = Nothing();
-
-    // Used names in expressions in destructured formal parameters go on the
-    // defaults scope. Since we don't know at start of parsing arguments if
-    // there are any such names, pop body scope if needed here so name uses
-    // are recorded on the defaults scope.
-    if (saved && *saved == DeclarationKind::FormalParameter &&
-        pc->innermostScope() != &pc->defaultsScope())
+    Node rhs;
     {
-        ParseContext::TemporarilyPopScope popBodyScope(pc);
-        MOZ_ASSERT(pc->innermostScope() == &pc->defaultsScope());
-        pc->functionBox()->hasDefaultsScope = true;
-        expr = assignExpr(inHandling, yieldHandling, tripledotHandling, possibleError,
-                          PredictUninvoked);
-    } else {
-        expr = assignExpr(inHandling, yieldHandling, tripledotHandling, possibleError,
-                          PredictUninvoked);
+        AutoClearInDestructuringDecl autoClear(pc);
+        rhs = assignExpr(inHandling, yieldHandling, TripledotProhibited, possibleError);
+        if (!rhs)
+            return null();
     }
 
-    pc->inDestructuringDecl = saved;
-    return expr;
+    return handler.newAssignment(kind, lhs, rhs, op);
 }
 
 template <typename ParseHandler>
@@ -7086,22 +7085,6 @@ Parser<ParseHandler>::assignExpr(InHandling inHandling, YieldHandling yieldHandl
 
     return expr;
 }
-
-template <typename ParseHandler>
-typename ParseHandler::Node
-Parser<ParseHandler>::assignExprMaybeInDestructuringDecl(InHandling inHandling,
-                                                         YieldHandling yieldHandling,
-                                                         TripledotHandling tripledotHandling)
-{
-    PossibleError possibleError(*this);
-    Node expr = assignExprMaybeInDestructuringDecl(inHandling, yieldHandling, tripledotHandling,
-                                                   &possibleError);
-    if (!expr || !possibleError.checkForExprErrors())
-        return null();
-
-    return expr;
-}
-
 
 template <typename ParseHandler>
 bool
@@ -8281,14 +8264,17 @@ Parser<ParseHandler>::computedPropertyName(YieldHandling yieldHandling, Node lit
 {
     uint32_t begin = pos().begin;
 
-    // Turn off the inDestructuringDecl flag when parsing computed property
-    // names. In short, when parsing 'let {[x + y]: z} = obj;', noteUsedName()
-    // should be called on x and y, but not on z. See the comment on
-    // Parser<>::checkDestructuringPattern() for details.
-    Node assignNode = assignExprMaybeInDestructuringDecl(InAllowed, yieldHandling,
-                                                         TripledotProhibited);
-    if (!assignNode)
-        return null();
+    Node assignNode;
+    {
+        // Turn off the inDestructuringDecl flag when parsing computed property
+        // names. In short, when parsing 'let {[x + y]: z} = obj;', noteUsedName()
+        // should be called on x and y, but not on z. See the comment on
+        // Parser<>::checkDestructuringPattern() for details.
+        AutoClearInDestructuringDecl autoClear(pc);
+        assignNode = assignExpr(InAllowed, yieldHandling, TripledotProhibited);
+        if (!assignNode)
+            return null();
+    }
 
     MUST_MATCH_TOKEN(TOK_RB, JSMSG_COMP_PROP_UNTERM_EXPR);
     Node propname = handler.newComputedName(assignNode, begin, pos().end);
@@ -8381,12 +8367,16 @@ Parser<ParseHandler>::objectLiteral(YieldHandling yieldHandling, PossibleError* 
                 return null();
 
             tokenStream.consumeKnownToken(TOK_ASSIGN);
-            // Setting `inDestructuringDecl` to false allows name use to be noted
-            // in `identifierName` See Bug: 1255167.
-            Node rhs = assignExprMaybeInDestructuringDecl(InAllowed, yieldHandling,
-                                                          TripledotProhibited);
-            if (!rhs)
-                return null();
+
+            Node rhs;
+            {
+                // Clearing `inDestructuringDecl` allows name use to be noted
+                // in `identifierName` See Bug: 1255167.
+                AutoClearInDestructuringDecl autoClear(pc);
+                rhs = assignExpr(InAllowed, yieldHandling, TripledotProhibited);
+                if (!rhs)
+                    return null();
+            }
 
             Node propExpr = handler.newAssignment(PNK_ASSIGN, lhs, rhs, JSOP_NOP);
             if (!propExpr)
