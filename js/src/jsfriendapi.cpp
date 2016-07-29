@@ -824,11 +824,8 @@ FormatFrame(JSContext* cx, const ScriptFrameIter& iter, char* buf, int num,
             RootedValue arg(cx);
             if (i < iter.numFormalArgs()) {
                 for (PositionalFormalParameterIter fi(script); ; fi++) {
-                    if (fi.argumentSlot() == i) {
-                        if (fi.closedOver())
-                            arg = iter.callObj(cx).aliasedBinding(fi);
-                        else
-                            arg = iter.unaliasedActual(i, DONT_CHECK_ALIASING);
+                    if (fi.argumentSlot() == i && fi.closedOver()) {
+                        arg = iter.callObj(cx).aliasedBinding(fi);
                         break;
                     }
                 }
