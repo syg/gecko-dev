@@ -3482,7 +3482,7 @@ CreateNonSyntacticEnvironmentChain(JSContext* cx, AutoObjectVector& envChain,
         env.set(cx->compartment()->getOrCreateNonSyntacticLexicalEnvironment(cx, env));
         if (!env)
             return false;
-    } else if (scope) {
+    } else {
         scope.set(&cx->global()->emptyGlobalScope());
     }
 
