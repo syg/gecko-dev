@@ -1342,6 +1342,14 @@ ExpressionDecompiler::getLocal(uint32_t local, jsbytecode* pc)
 {
     MOZ_ASSERT(local < script->nfixed());
 
+    // Look for it in the body scope first.
+    for (BindingIter bi(script->bodyScope()); bi; bi++) {
+        BindingLocation loc = bi.location();
+        if (loc.kind() == BindingLocation::Kind::Frame && loc.slot() == local)
+            return bi.name();
+    }
+
+    // If not found, look for it in a lexical scope.
     for (ScopeIter si(script->innermostScope(pc)); si; si++) {
         if (!si.scope()->is<LexicalScope>())
             continue;
