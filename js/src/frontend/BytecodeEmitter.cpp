@@ -3478,9 +3478,9 @@ BytecodeEmitter::emitSwitch(ParseNode* pn)
     if (!emitTree(pn->pn_left))
         return false;
 
-    BreakableControl controlInfo(this, StatementKind::Switch);
+    // Enter the scope before pushing the switch BreakableControl since all
+    // breaks are under the this scope.
     Maybe<EmitterScope> emitterScope;
-
     if (cases->isKind(PNK_LEXICALSCOPE)) {
         if (!cases->isEmptyScope()) {
             emitterScope.emplace(this);
@@ -3504,6 +3504,9 @@ BytecodeEmitter::emitSwitch(ParseNode* pn)
             }
         }
     }
+
+    // After entering the scope, push the switch control.
+    BreakableControl controlInfo(this, StatementKind::Switch);
 
     ptrdiff_t top = offset();
 
