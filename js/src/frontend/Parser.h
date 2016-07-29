@@ -94,8 +94,6 @@ class ParseContext : public Nestable<ParseContext>
     // Tracks declared and used names within a scope.
     class Scope : public Nestable<Scope>
     {
-        ParseContext* pc_;
-
         // Names declared in this scope. Corresponds to the union of
         // VarDeclaredNames and LexicallyDeclaredNames in the ES spec.
         //
@@ -105,6 +103,10 @@ class ParseContext : public Nestable<ParseContext>
         // A lexically declared name is a member only of the declared name set of
         // the scope in which it is declared.
         PooledMapPtr<DeclaredNameMap> declared_;
+
+        // Usually the scope stack and the scopeForUsedNames stack are the
+        // same, with the exception of when parsing function arguments.
+        Scope** scopeForUsedNamesStack_;
 
         // Monotonically increasing id.
         uint32_t id_;
@@ -124,16 +126,16 @@ class ParseContext : public Nestable<ParseContext>
         template <typename ParseHandler>
         explicit Scope(Parser<ParseHandler>* parser)
           : Nestable<Scope>(&parser->pc->innermostScope_),
-            pc_(parser->pc),
             declared_(parser->context->frontendCollectionPool()),
+            scopeForUsedNamesStack_(&parser->pc->scopeForUsedNames_),
             id_(parser->usedNames.nextScopeId())
         {
-            pc_->scopeForUsedNames_ = this;
+            *scopeForUsedNamesStack_ = this;
         }
 
         ~Scope() {
-            MOZ_ASSERT(pc_->scopeForUsedNames_ == this);
-            pc_->scopeForUsedNames_ = enclosing();
+            MOZ_ASSERT(*scopeForUsedNamesStack_ == this);
+            *scopeForUsedNamesStack_ = enclosing();
         }
 
         void dump(ParseContext* pc);
@@ -251,22 +253,26 @@ class ParseContext : public Nestable<ParseContext>
 
     class MOZ_STACK_CLASS AutoOverrideScopeForUsedNames
     {
-        ParseContext* pc_;
+#ifdef DEBUG
+        Scope* overrideScope_;
+#endif
+        Scope** scopeForUsedNamesStack_;
         Scope* savedScopeForUsedNames_;
-        mozilla::DebugOnly<Scope*> overrideScope_;
 
       public:
         AutoOverrideScopeForUsedNames(ParseContext* pc, Scope* overrideScope)
-          : pc_(pc),
-            savedScopeForUsedNames_(pc->scopeForUsedNames_),
-            overrideScope_(overrideScope)
+          : scopeForUsedNamesStack_(&pc->scopeForUsedNames_),
+            savedScopeForUsedNames_(pc->scopeForUsedNames_)
         {
-            pc->scopeForUsedNames_ = overrideScope;
+#ifdef DEBUG
+            overrideScope_ = overrideScope;
+#endif
+            *scopeForUsedNamesStack_ = overrideScope;
         }
 
         ~AutoOverrideScopeForUsedNames() {
-            MOZ_ASSERT(pc_->scopeForUsedNames_ == overrideScope_);
-            pc_->scopeForUsedNames_ = savedScopeForUsedNames_;
+            MOZ_ASSERT(*scopeForUsedNamesStack_ == overrideScope_);
+            *scopeForUsedNamesStack_ = savedScopeForUsedNames_;
         }
     };
 
