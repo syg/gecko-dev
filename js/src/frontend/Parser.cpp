@@ -385,8 +385,7 @@ ParseContext::finishInnerFunctionBoxesForAnnexB()
 {
     // Strict mode doesn't have wack Annex B function semantics. Or we
     // could've failed to initialize ParseContext.
-    MOZ_ASSERT_IF(sc()->strict(), !innerFunctionBoxesForAnnexB_);
-    if (!innerFunctionBoxesForAnnexB_)
+    if (sc()->strict() || !innerFunctionBoxesForAnnexB_)
         return;
 
     for (uint32_t i = 0; i < innerFunctionBoxesForAnnexB_->length(); i++) {
