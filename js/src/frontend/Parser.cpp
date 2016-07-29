@@ -351,7 +351,7 @@ ParseContext::init()
     if (!varScope_->init(this))
         return false;
 
-    if (!innerFunctionBoxesForAnnexB_.acquire(cx))
+    if (!sc()->strict() && !innerFunctionBoxesForAnnexB_.acquire(cx))
         return false;
 
     return true;
@@ -383,8 +383,10 @@ ParseContext::removeInnerFunctionBoxesForAnnexB(JSAtom* name)
 void
 ParseContext::finishInnerFunctionBoxesForAnnexB()
 {
-    // Strict mode doesn't have wack Annex B function semantics.
-    if (sc()->strict())
+    // Strict mode doesn't have wack Annex B function semantics. Or we
+    // could've failed to initialize ParseContext.
+    MOZ_ASSERT_IF(sc()->strict(), !innerFunctionBoxesForAnnexB_);
+    if (!innerFunctionBoxesForAnnexB_)
         return;
 
     for (uint32_t i = 0; i < innerFunctionBoxesForAnnexB_->length(); i++) {

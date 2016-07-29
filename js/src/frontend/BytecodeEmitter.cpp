@@ -3789,10 +3789,12 @@ BytecodeEmitter::emitSwitch(ParseNode* pn)
         }
     }
 
-    if (emitterScope && !emitterScope->leave(this))
+    // Patch breaks before leaving the scope, as all breaks are under the
+    // lexical scope if it exists.
+    if (!controlInfo.patchBreaks(this))
         return false;
 
-    if (!controlInfo.patchBreaks(this))
+    if (emitterScope && !emitterScope->leave(this))
         return false;
 
     return true;
