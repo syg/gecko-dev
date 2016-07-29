@@ -459,6 +459,7 @@ FunctionBox::FunctionBox(ExclusiveContext* cx, LifoAlloc& alloc, ObjectBox* trac
     generatorKindBits_(GeneratorKindAsBits(generatorKind)),
     isGenexpLambda(false),
     hasDestructuringArgs(false),
+    hasDefaultsScope(false),
     useAsm(false),
     insideUseAsm(false),
     isAnnexB(false),
@@ -1490,7 +1491,7 @@ Parser<FullParseHandler>::newEvalScopeData(ParseContext::Scope& scope,
 
 template <>
 Maybe<FunctionScope::BindingData*>
-Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope, bool hasDefaults)
+Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope, bool hasDefaultsScope)
 {
     Vector<BindingName> positionalFormals(context);
     Vector<BindingName> formals(context);
@@ -1510,15 +1511,16 @@ Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope, bool 
         BindingName bindName;
         if (name) {
             DeclaredNamePtr p = scope.lookupDeclaredName(name);
-            MOZ_ASSERT_IF(!hasDefaults,
+            MOZ_ASSERT_IF(!hasDefaultsScope,
                           p->value()->kind() == DeclarationKind::PositionalFormalParameter ||
                           DeclarationKindIsVar(p->value()->kind()));
 
             // Do not consider any positional formal parameters closed over if
             // there are parameter defaults. It is the binding in the defaults
             // scope that is closed over instead.
-            bindName = BindingName(name, !hasDefaults && (allBindingsClosedOver ||
-                                                          (p && p->value()->closedOver())));
+            bindName = BindingName(name, !hasDefaultsScope &&
+                                         (allBindingsClosedOver ||
+                                          (p && p->value()->closedOver())));
         }
 
         if (!positionalFormals.append(bindName))
@@ -1853,7 +1855,7 @@ Parser<ParseHandler>::targetScopeForFunctionSpecialName(DeclarationKind* declKin
     // defaults scope if there is one. For simplicity, since the defaults
     // scope is a lexical scope (it has TDZ), declare the name as a let if it
     // needs to go on the defaults scope.
-    if (pc->functionBox()->hasDefaults()) {
+    if (pc->functionBox()->hasDefaultsScope) {
         *declKind = DeclarationKind::Let;
         return pc->defaultsScope();
     }
@@ -1941,7 +1943,7 @@ Parser<ParseHandler>::finishExtraFunctionScopes()
 {
     FunctionBox* funbox = pc->functionBox();
 
-    if (funbox->hasDefaults()) {
+    if (funbox->hasDefaultsScope) {
         if (!propagateFreeNamesAndMarkClosedOverBindings(pc->defaultsScope()))
             return false;
     }
@@ -1962,17 +1964,17 @@ Parser<FullParseHandler>::finishFunction()
         return false;
 
     FunctionBox* funbox = pc->functionBox();
-    bool hasDefaults = funbox->hasDefaults();
+    bool hasDefaultsScope = funbox->hasDefaultsScope;
 
     {
         Maybe<FunctionScope::BindingData*> bindings = newFunctionScopeData(pc->varScope(),
-                                                                           hasDefaults);
+                                                                           hasDefaultsScope);
         if (!bindings)
             return false;
         funbox->varScopeBindings().set(*bindings);
     }
 
-    if (hasDefaults) {
+    if (hasDefaultsScope) {
         Maybe<LexicalScope::BindingData*> bindings = newLexicalScopeData(pc->defaultsScope());
         if (!bindings)
             return false;
@@ -2466,7 +2468,6 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
     }
     if (hasArguments) {
         bool hasRest = false;
-        bool hasDefaults = false;
         bool duplicatedParam = false;
         bool disallowDuplicateParams = kind == Arrow || kind == Method || kind == ClassConstructor;
         AtomVector& positionalFormals = pc->positionalFormalParameterNames();
@@ -2603,8 +2604,8 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
                     report(ParseError, false, null(), JSMSG_BAD_DUP_ARGS);
                     return false;
                 }
-                if (!hasDefaults) {
-                    hasDefaults = true;
+                if (!funbox->hasDefaultsScope) {
+                    funbox->hasDefaultsScope = true;
 
                     // The Function.length property is the number of formals
                     // before the first default argument.
@@ -2643,7 +2644,7 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
             }
         }
 
-        if (hasDefaults) {
+        if (funbox->hasDefaultsScope) {
             if (!ParseContext::Scope::moveFormalParameterNamesForDefaults(this))
                 return false;
         } else {
@@ -3816,7 +3817,7 @@ Parser<FullParseHandler>::checkDestructuringArray(ParseNode* arrayPattern,
  * that the tree is a valid AssignmentPattern or BindingPattern.
  *
  * In assignment-like contexts, we parse the pattern with
- * pc->inDeclDestructuring clear, so the lvalue expressions in the
+ * pc->inDestructuringDecl clear, so the lvalue expressions in the
  * pattern are parsed normally.  primaryExpr links variable references
  * into the appropriate use chains; creates placeholder definitions;
  * and so on.  checkDestructuringPattern is called with |data| nullptr
@@ -3827,7 +3828,7 @@ Parser<FullParseHandler>::checkDestructuringArray(ParseNode* arrayPattern,
  * processing would just be an obstruction, because we're going to
  * define the names that appear in the property value positions as new
  * variables anyway.  In this case, we parse the pattern with
- * pc->inDeclDestructuring set, which directs primaryExpr to leave
+ * pc->inDestructuringDecl set, which directs primaryExpr to leave
  * whatever name nodes it creates unconnected.  Then, here in
  * checkDestructuringPattern, we require the pattern's property value
  * positions to be simple names, and define them as appropriate to the
@@ -3864,7 +3865,7 @@ Parser<ParseHandler>::destructuringDeclaration(DeclarationKind kind, YieldHandli
 {
     MOZ_ASSERT(tokenStream.isCurrentTokenType(tt));
 
-    pc->inDeclDestructuring = true;
+    pc->inDestructuringDecl = Some(kind);
     PossibleError possibleError(*this);
     Node pn = primaryExpr(yieldHandling, TripledotProhibited,
                           &possibleError, tt);
@@ -3872,7 +3873,7 @@ Parser<ParseHandler>::destructuringDeclaration(DeclarationKind kind, YieldHandli
     // Resolve asap instead of checking since we already know that we are
     // destructuring.
     possibleError.setResolved();
-    pc->inDeclDestructuring = false;
+    pc->inDestructuringDecl = Nothing();
     if (!pn)
         return null();
     if (!checkDestructuringPattern(pn, Some(kind)))
@@ -3939,7 +3940,7 @@ Parser<ParseHandler>::declarationPattern(Node decl, DeclarationKind declKind, To
 
     Node pattern;
     {
-        pc->inDeclDestructuring = true;
+        pc->inDestructuringDecl = Some(declKind);
 
         PossibleError possibleError(*this);
         pattern = primaryExpr(yieldHandling, TripledotProhibited,
@@ -3948,7 +3949,7 @@ Parser<ParseHandler>::declarationPattern(Node decl, DeclarationKind declKind, To
         // Resolve asap instead of checking since we already know that we are
         // destructuring.
         possibleError.setResolved();
-        pc->inDeclDestructuring = false;
+        pc->inDestructuringDecl = Nothing();
     }
     if (!pattern)
         return null();
@@ -7033,14 +7034,43 @@ Parser<ParseHandler>::assignExpr(InHandling inHandling, YieldHandling yieldHandl
     if (!possibleErrorInner.checkForExprErrors())
         return null();
 
-    bool saved = pc->inDeclDestructuring;
-    pc->inDeclDestructuring = false;
-    Node rhs = assignExpr(inHandling, yieldHandling, TripledotProhibited,
-                          possibleError);
-    pc->inDeclDestructuring = saved;
+    Node rhs = assignExprMaybeInDestructuringDecl(inHandling, yieldHandling, TripledotProhibited,
+                                                  possibleError);
     if (!rhs)
         return null();
     return handler.newAssignment(kind, lhs, rhs, op);
+}
+
+template <typename ParseHandler>
+typename ParseHandler::Node
+Parser<ParseHandler>::assignExprMaybeInDestructuringDecl(InHandling inHandling,
+                                                         YieldHandling yieldHandling,
+                                                         TripledotHandling tripledotHandling,
+                                                         PossibleError* possibleError)
+{
+    Node expr = null();
+    Maybe<DeclarationKind> saved = pc->inDestructuringDecl;
+    pc->inDestructuringDecl = Nothing();
+
+    // Used names in expressions in destructured formal parameters go on the
+    // defaults scope. Since we don't know at start of parsing arguments if
+    // there are any such names, pop body scope if needed here so name uses
+    // are recorded on the defaults scope.
+    if (saved && *saved == DeclarationKind::FormalParameter &&
+        pc->innermostScope() != &pc->defaultsScope())
+    {
+        ParseContext::TemporarilyPopScope popBodyScope(pc);
+        MOZ_ASSERT(pc->innermostScope() == &pc->defaultsScope());
+        pc->functionBox()->hasDefaultsScope = true;
+        expr = assignExpr(inHandling, yieldHandling, tripledotHandling, possibleError,
+                          PredictUninvoked);
+    } else {
+        expr = assignExpr(inHandling, yieldHandling, tripledotHandling, possibleError,
+                          PredictUninvoked);
+    }
+
+    pc->inDestructuringDecl = saved;
+    return expr;
 }
 
 template <typename ParseHandler>
@@ -7051,6 +7081,21 @@ Parser<ParseHandler>::assignExpr(InHandling inHandling, YieldHandling yieldHandl
 {
     PossibleError possibleError(*this);
     Node expr = assignExpr(inHandling, yieldHandling, tripledotHandling, &possibleError, invoked);
+    if (!expr || !possibleError.checkForExprErrors())
+        return null();
+
+    return expr;
+}
+
+template <typename ParseHandler>
+typename ParseHandler::Node
+Parser<ParseHandler>::assignExprMaybeInDestructuringDecl(InHandling inHandling,
+                                                         YieldHandling yieldHandling,
+                                                         TripledotHandling tripledotHandling)
+{
+    PossibleError possibleError(*this);
+    Node expr = assignExprMaybeInDestructuringDecl(inHandling, yieldHandling, tripledotHandling,
+                                                   &possibleError);
     if (!expr || !possibleError.checkForExprErrors())
         return null();
 
@@ -7924,7 +7969,7 @@ Parser<ParseHandler>::identifierName(YieldHandling yieldHandling)
     if (!pn)
         return null();
 
-    if (!pc->inDeclDestructuring && !noteUsedName(name))
+    if (!pc->inDestructuringDecl && !noteUsedName(name))
         return null();
 
     return pn;
@@ -8236,14 +8281,12 @@ Parser<ParseHandler>::computedPropertyName(YieldHandling yieldHandling, Node lit
 {
     uint32_t begin = pos().begin;
 
-    // Turn off the inDeclDestructuring flag when parsing computed property
+    // Turn off the inDestructuringDecl flag when parsing computed property
     // names. In short, when parsing 'let {[x + y]: z} = obj;', noteUsedName()
     // should be called on x and y, but not on z. See the comment on
     // Parser<>::checkDestructuringPattern() for details.
-    bool saved = pc->inDeclDestructuring;
-    pc->inDeclDestructuring = false;
-    Node assignNode = assignExpr(InAllowed, yieldHandling, TripledotProhibited);
-    pc->inDeclDestructuring = saved;
+    Node assignNode = assignExprMaybeInDestructuringDecl(InAllowed, yieldHandling,
+                                                         TripledotProhibited);
     if (!assignNode)
         return null();
 
@@ -8338,12 +8381,10 @@ Parser<ParseHandler>::objectLiteral(YieldHandling yieldHandling, PossibleError* 
                 return null();
 
             tokenStream.consumeKnownToken(TOK_ASSIGN);
-            bool saved = pc->inDeclDestructuring;
-            // Setting `inDeclDestructuring` to false allows name use to be noted
+            // Setting `inDestructuringDecl` to false allows name use to be noted
             // in `identifierName` See Bug: 1255167.
-            pc->inDeclDestructuring = false;
-            Node rhs = assignExpr(InAllowed, yieldHandling, TripledotProhibited);
-            pc->inDeclDestructuring = saved;
+            Node rhs = assignExprMaybeInDestructuringDecl(InAllowed, yieldHandling,
+                                                          TripledotProhibited);
             if (!rhs)
                 return null();
 

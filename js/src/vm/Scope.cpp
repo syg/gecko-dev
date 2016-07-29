@@ -627,7 +627,7 @@ FunctionScope::XDR(XDRState<mode>* xdr, HandleFunction fun, HandleScope enclosin
     uint8_t hasDefaults;
     uint8_t needsEnvironment;
     if (mode == XDR_ENCODE) {
-        hasDefaults = fun->nonLazyScript()->hasDefaults();
+        hasDefaults = fun->nonLazyScript()->hasDefaultsScope();
         needsEnvironment = scope->hasEnvironment();
     }
     if (!xdr->codeUint8(&hasDefaults))
@@ -999,7 +999,7 @@ BindingIter::BindingIter(Scope* scope)
         break;
       case ScopeKind::Function: {
         uint8_t ignoreFlags = IgnoreDestructuredFormalParameters;
-        if (scope->as<FunctionScope>().canonicalFunction()->nonLazyScript()->hasDefaults())
+        if (scope->as<FunctionScope>().canonicalFunction()->nonLazyScript()->hasDefaultsScope())
             ignoreFlags |= IgnorePositionalFormalParameters;
         init(scope->as<FunctionScope>().bindingData(),
              scope->as<FunctionScope>().firstFrameSlot(),
@@ -1124,7 +1124,7 @@ BindingIter::init(ModuleScope::BindingData& data)
 
 PositionalFormalParameterIter::PositionalFormalParameterIter(JSScript* script)
   : BindingIter(script),
-    hasDefaults_(script->hasDefaults())
+    hasDefaults_(script->hasDefaultsScope())
 {
     // Reinit with flags = 0, i.e., iterate over all positional parameters.
     if (script->bodyScope()->is<FunctionScope>())
@@ -1163,7 +1163,7 @@ js::DumpBindings(JSContext* cx, Scope* scope) {
 
     if (scope->is<FunctionScope>()) {
         JSScript* script =  scope->as<FunctionScope>().canonicalFunction()->nonLazyScript();
-        if (script->hasDefaults()) {
+        if (script->hasDefaultsScope()) {
             for (PositionalFormalParameterIter fi(script); fi; fi++) {
                 JSAutoByteString bytes;
                 if (!AtomToPrintableString(cx, fi.name(), &bytes))

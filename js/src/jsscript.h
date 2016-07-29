@@ -1008,7 +1008,7 @@ class JSScript : public js::gc::TenuredCell
         return nullptr;
     }
 
-    bool hasDefaults() const {
+    bool hasDefaultsScope() const {
         // If the body scope is the outermost scope, there can't be a defaults
         // scope.
         if (bodyScopeIndex_ == 0)
@@ -1421,7 +1421,7 @@ class JSScript : public js::gc::TenuredCell
     }
 
     js::LexicalScope* defaultsScope() const {
-        MOZ_ASSERT(hasDefaults());
+        MOZ_ASSERT(hasDefaultsScope());
         return &bodyScope()->enclosing()->as<js::LexicalScope>();
     }
 

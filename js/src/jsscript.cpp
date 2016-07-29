@@ -3805,7 +3805,7 @@ JSScript::argumentsOptimizationFailed(JSContext* cx, HandleScript script)
 bool
 JSScript::formalIsAliased(unsigned argSlot)
 {
-    if (hasDefaults())
+    if (hasDefaultsScope())
         return false;
 
     for (PositionalFormalParameterIter fi(this); fi; fi++) {

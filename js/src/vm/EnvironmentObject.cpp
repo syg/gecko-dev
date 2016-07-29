@@ -244,7 +244,7 @@ CallObject::createForFunction(JSContext* cx, AbstractFramePtr frame)
     if (!callobj)
         return nullptr;
 
-    if (!frame.script()->hasDefaults()) {
+    if (!frame.script()->hasDefaultsScope()) {
         // If there are no defaults, copy the aliased arguments into the call
         // object manually. If there are defaults, bytecode is generated to do
         // the copying.

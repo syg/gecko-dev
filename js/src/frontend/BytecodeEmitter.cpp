@@ -604,7 +604,7 @@ NameIsOnEnvironment(Scope* scope, JSAtom* name)
 
             if (bi.hasArgumentSlot()) {
                 JSScript* script = scope->as<FunctionScope>().script();
-                if (!script->strict() && !script->hasDefaults()) {
+                if (!script->strict() && !script->hasDefaultsScope()) {
                     // Check for duplicate positional formal parameters.
                     for (BindingIter bi2(bi); bi2 && bi2.hasArgumentSlot(); bi2++) {
                         if (bi2.name() == name)
@@ -644,7 +644,7 @@ BytecodeEmitter::EmitterScope::searchInEnclosingScope(JSAtom* name, Scope* scope
                         continue;
 
                     BindingLocation bindLoc = bi.location();
-                    if (bi.hasArgumentSlot() && !script->strict() && !script->hasDefaults()) {
+                    if (bi.hasArgumentSlot() && !script->strict() && !script->hasDefaultsScope()) {
                         // Check for duplicate positional formal parameters.
                         for (BindingIter bi2(bi); bi2 && bi2.hasArgumentSlot(); bi2++) {
                             if (bi2.name() == name)
@@ -929,7 +929,7 @@ BytecodeEmitter::EmitterScope::enterNamedLambda(BytecodeEmitter* bce, FunctionBo
 bool
 BytecodeEmitter::EmitterScope::enterParameterDefaults(BytecodeEmitter* bce, FunctionBox* funbox)
 {
-    MOZ_ASSERT(funbox->hasDefaults() && funbox->defaultsScopeBindings());
+    MOZ_ASSERT(funbox->hasDefaultsScope && funbox->defaultsScopeBindings());
     return enterLexical(bce, ScopeKind::ParameterDefaults, funbox->defaultsScopeBindings());
 }
 
@@ -975,7 +975,7 @@ BytecodeEmitter::EmitterScope::enterFunctionBody(BytecodeEmitter* bce, FunctionB
         Handle<FunctionScope::BindingData*> bindings = funbox->varScopeBindings();
         NameLocationMap& cache = *nameCache_;
 
-        BindingIter bi(*bindings, firstFrameSlot, funbox->hasDefaults());
+        BindingIter bi(*bindings, firstFrameSlot, funbox->hasDefaultsScope);
         for (; bi; bi++) {
             if (!checkSlotLimits(bce, bi))
                 return false;
@@ -1014,7 +1014,7 @@ BytecodeEmitter::EmitterScope::enterFunctionBody(BytecodeEmitter* bce, FunctionB
     auto createScope = [funbox, firstFrameSlot](ExclusiveContext* cx, HandleScope enclosing) {
         RootedFunction fun(cx, funbox->function());
         return FunctionScope::create(cx, funbox->varScopeBindings(), firstFrameSlot,
-                                     funbox->hasDefaults(),
+                                     funbox->hasDefaultsScope,
                                      funbox->needsCallObjectRegardlessOfBindings(),
                                      fun, enclosing);
     };
@@ -8226,7 +8226,7 @@ BytecodeEmitter::emitFunctionFormalParametersAndBody(ParseNode *pn)
 
     TDZCheckCache tdzCache(this);
 
-    if (funbox->hasDefaults()) {
+    if (funbox->hasDefaultsScope) {
         // Parameter defaults have their own scope.
         EmitterScope defaultsEmitterScope(this);
         if (!defaultsEmitterScope.enterParameterDefaults(this, funbox))
@@ -8323,7 +8323,7 @@ BytecodeEmitter::emitFunctionFormalParameters(ParseNode* pn)
     ParseNode* funBody = pn->last();
     FunctionBox* funbox = sc->asFunctionBox();
 
-    bool hasDefaults = funbox->hasDefaults();
+    bool hasDefaultsScope = funbox->hasDefaultsScope;
     bool hasRest = funbox->function()->hasRest();
 
     uint16_t argSlot = 0;
@@ -8354,7 +8354,7 @@ BytecodeEmitter::emitFunctionFormalParameters(ParseNode* pn)
         if (initializer) {
             // If we have an initializer, emit the initializer and assign it
             // to the argument slot. TDZ is taken care of afterwards.
-            MOZ_ASSERT(hasDefaults);
+            MOZ_ASSERT(hasDefaultsScope);
             if (!emitArgOp(JSOP_GETARG, argSlot))
                 return false;
             if (!emit1(JSOP_DUP))
@@ -8392,7 +8392,7 @@ BytecodeEmitter::emitFunctionFormalParameters(ParseNode* pn)
                 return false;
             if (!emit1(JSOP_POP))
                 return false;
-        } else if (hasDefaults) {
+        } else if (hasDefaultsScope) {
             auto emitRhs = [argSlot, initializer, isRest](BytecodeEmitter* bce,
                                                           const NameLocation&, bool)
             {

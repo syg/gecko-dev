@@ -2065,7 +2065,7 @@ JSFunction::needsDefaultsEnvironment() const
     if (isNative())
         return false;
 
-    if (!nonLazyScript()->hasDefaults())
+    if (!nonLazyScript()->hasDefaultsScope())
         return false;
 
     return nonLazyScript()->defaultsScope()->hasEnvironment();

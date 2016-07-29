@@ -322,7 +322,7 @@ class ParseContext : public Nestable<ParseContext>
     // The comments atop checkDestructuring explain the distinction between
     // assignment-like and declaration-like destructuring patterns, and why
     // they need to be treated differently.
-    bool inDeclDestructuring;
+    mozilla::Maybe<DeclarationKind> inDestructuringDecl;
 
     // Set when parsing a function and it has 'return <expr>;'
     bool funHasReturnExpr;
@@ -347,7 +347,6 @@ class ParseContext : public Nestable<ParseContext>
         lastYieldOffset(NoYieldOffset),
         innerFunctionsForLazy(prs->context, GCVector<JSFunction*, 8>(prs->context)),
         newDirectives(newDirectives),
-        inDeclDestructuring(false),
         funHasReturnExpr(false),
         funHasReturnVoid(false)
     {
@@ -403,7 +402,7 @@ class ParseContext : public Nestable<ParseContext>
         if (isFunctionBox()) {
             if (functionBox()->function()->isNamedLambda())
                 return namedLambdaScope();
-            if (functionBox()->hasDefaults())
+            if (functionBox()->hasDefaultsScope)
                 return defaultsScope();
         }
         return varScope();
@@ -1119,6 +1118,11 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     Node assignExpr(InHandling inHandling, YieldHandling yieldHandling,
                     TripledotHandling tripledotHandling,
                     InvokedPrediction invoked = PredictUninvoked);
+    Node assignExprMaybeInDestructuringDecl(InHandling inHandling, YieldHandling yieldHandling,
+                                            TripledotHandling tripledotHandling,
+                                            PossibleError* possibleError);
+    Node assignExprMaybeInDestructuringDecl(InHandling inHandling, YieldHandling yieldHandling,
+                                            TripledotHandling tripledotHandling);
     Node assignExprWithoutYield(YieldHandling yieldHandling, unsigned err);
     Node yieldExpression(InHandling inHandling);
     Node condExpr1(InHandling inHandling, YieldHandling yieldHandling,

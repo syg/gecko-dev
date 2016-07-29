@@ -488,6 +488,8 @@ class FunctionBox : public ObjectBox, public SharedContext
     uint8_t         generatorKindBits_;     /* The GeneratorKind of this function. */
     bool            isGenexpLambda:1;       /* lambda from generator expression */
     bool            hasDestructuringArgs:1; /* arguments list contains destructuring expression */
+    bool            hasDefaultsScope:1;     /* a defaults scope is needed for defaults exprs or
+                                               expressions in destructuring formal parameters */
     bool            useAsm:1;               /* see useAsmOrInsideUseAsm */
     bool            insideUseAsm:1;         /* see useAsmOrInsideUseAsm */
     bool            isAnnexB:1;             /* need to emit a synthesized Annex B assignment */
@@ -582,12 +584,8 @@ class FunctionBox : public ObjectBox, public SharedContext
                                              funCxFlags.isDerivedClassConstructor = true; }
     void setHasInnerFunctions()            { funCxFlags.hasInnerFunctions         = true; }
 
-    bool hasDefaults() const {
-        return length != function()->nargs() - function()->hasRest();
-    }
-
     bool hasMappedArgsObj() const {
-        return !strict() && !function()->hasRest() && !hasDefaults() && !hasDestructuringArgs;
+        return !strict() && !function()->hasRest() && !hasDefaultsScope && !hasDestructuringArgs;
     }
 
     // Return whether this or an enclosing function is being parsed and
