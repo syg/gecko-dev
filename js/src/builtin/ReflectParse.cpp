@@ -3465,31 +3465,30 @@ ASTSerializer::functionArgs(ParseNode* pn, ParseNode* pnargs,
                "when there are no defaults");
 
     for (ParseNode* arg = pnargs->pn_head; arg && arg != pnargs->last(); arg = arg->pn_next) {
-        MOZ_ASSERT(arg->isKind(PNK_NAME) || arg->isKind(PNK_ASSIGN));
-        ParseNode* argName = nullptr;
-        ParseNode* defNode = nullptr;
-        if (arg->isKind(PNK_ASSIGN)) {
-            argName = arg->pn_left;
-            defNode = arg->pn_right;
-        } else if (arg->pn_atom == cx->names().empty) {
-            ParseNode* destruct = arg->expr();
-            if (destruct->isKind(PNK_ASSIGN)) {
-                defNode = destruct->pn_right;
-                destruct = destruct->pn_left;
-            }
-            if (!pattern(destruct, &node) || !args.append(node))
-                return false;
+        ParseNode* pat;
+        ParseNode* defNode;
+        if (arg->isKind(PNK_NAME) || arg->isKind(PNK_ARRAY) || arg->isKind(PNK_OBJECT)) {
+            pat = arg;
+            defNode = nullptr;
         } else {
-            argName = arg;
+            MOZ_ASSERT(arg->isKind(PNK_ASSIGN));
+            pat = arg->pn_left;
+            defNode = arg->pn_right;
         }
-        if (argName) {
-            if (!identifier(argName, &node))
-                return false;
-            if (rest.isUndefined() && arg->pn_next == pnargs->last())
-                rest.setObject(node.toObject());
-            else if (!args.append(node))
+
+        // Process the name or pattern.
+        MOZ_ASSERT(pat->isKind(PNK_NAME) || pat->isKind(PNK_ARRAY) || pat->isKind(PNK_OBJECT));
+        if (!pattern(pat, &node))
+            return false;
+        if (rest.isUndefined() && arg->pn_next == pnargs->last()) {
+            MOZ_ASSERT(arg->isKind(PNK_NAME));
+            rest.setObject(node.toObject());
+        } else {
+            if (!args.append(node))
                 return false;
         }
+
+        // Process its default (or lack thereof).
         if (defNode) {
             defaultsNull = false;
             RootedValue def(cx);
@@ -3500,7 +3499,10 @@ ASTSerializer::functionArgs(ParseNode* pn, ParseNode* pnargs,
                 return false;
         }
     }
-    MOZ_ASSERT(!rest.isUndefined());
+    MOZ_ASSERT(!rest.isUndefined(),
+               "if a rest argument was present (signified by "
+               "|rest.isUndefined()| initially), the rest node was properly "
+               "recorded");
 
     if (defaultsNull)
         defaults.clear();
