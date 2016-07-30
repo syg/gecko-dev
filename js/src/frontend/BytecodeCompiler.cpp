@@ -6,6 +6,8 @@
 
 #include "frontend/BytecodeCompiler.h"
 
+#include "mozilla/IntegerPrintfMacros.h"
+
 #include "jscntxt.h"
 #include "jsscript.h"
 
@@ -625,7 +627,7 @@ struct AutoTimer
 
     ~AutoTimer() {
         int64_t elapsed = (mozilla::TimeStamp::Now() - start).ToMicroseconds() * 1000.0;
-        fprintf(stdout, "%s took %lld ns\n", name, elapsed);
+        fprintf(stdout, "%s took %" PRId64 " ns\n", name, elapsed);
     }
 };
 

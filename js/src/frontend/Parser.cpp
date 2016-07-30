@@ -4082,7 +4082,7 @@ Parser<ParseHandler>::initializerInNameDeclaration(Node decl, Node binding,
 
             *forHeadKind = PNK_FORHEAD;
         } else {
-            MOZ_ASSERT(*forHeadKind = PNK_FORHEAD);
+            MOZ_ASSERT(*forHeadKind == PNK_FORHEAD);
         }
 
         // Per Parser::forHeadStart, the semicolon in |for (;| is ultimately
