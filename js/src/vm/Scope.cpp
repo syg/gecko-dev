@@ -374,6 +374,23 @@ Scope::finalize(FreeOp* fop)
     }
 }
 
+size_t
+Scope::sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const
+{
+    if (data_) {
+        if (is<FunctionScope>()) {
+            return mallocSizeOf(&as<FunctionScope>().data()) +
+                   mallocSizeOf(&as<FunctionScope>().bindingData());
+        }
+        if (is<ModuleScope>()) {
+            return mallocSizeOf(&as<ModuleScope>().data()) +
+                   mallocSizeOf(&as<ModuleScope>().bindingData());
+        }
+        return mallocSizeOf(reinterpret_cast<RefCountedData*>(data_));
+    }
+    return 0;
+}
+
 void
 Scope::dump()
 {

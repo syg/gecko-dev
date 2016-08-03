@@ -535,6 +535,7 @@ struct UnusedGCThingSizes
     macro(Other, GCHeapUnused, string) \
     macro(Other, GCHeapUnused, symbol) \
     macro(Other, GCHeapUnused, jitcode) \
+    macro(Other, GCHeapUnused, scope)
 
     UnusedGCThingSizes()
       : FOR_EACH_SIZE(ZERO_SIZE)
@@ -557,6 +558,7 @@ struct UnusedGCThingSizes
           case JS::TraceKind::JitCode:      jitcode += n;     break;
           case JS::TraceKind::LazyScript:   lazyScript += n;  break;
           case JS::TraceKind::ObjectGroup:  objectGroup += n; break;
+          case JS::TraceKind::Scope:        scope += n;       break;
           default:
             MOZ_CRASH("Bad trace kind for UnusedGCThingSizes");
         }
@@ -596,6 +598,8 @@ struct ZoneStats
     macro(Other,   GCHeapUsed,  jitCodesGCHeap) \
     macro(Other,   GCHeapUsed,  objectGroupsGCHeap) \
     macro(Other,   MallocHeap,  objectGroupsMallocHeap) \
+    macro(Other,   GCHeapUsed,  scopesGCHeap) \
+    macro(Other,   MallocHeap,  scopesMallocHeap) \
     macro(Other,   MallocHeap,  typePool) \
     macro(Other,   MallocHeap,  baselineStubsOptimized) \
     macro(Other,   MallocHeap,  uniqueIdMap)

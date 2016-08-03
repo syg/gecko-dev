@@ -237,6 +237,12 @@ class Scope : public js::gc::TenuredCell
         return *static_cast<T*>(this);
     }
 
+    template <typename T>
+    const T& as() const {
+        MOZ_ASSERT(is<T>());
+        return *static_cast<const T*>(this);
+    }
+
     ScopeKind kind() const {
         return kind_;
     }
@@ -287,6 +293,8 @@ class Scope : public js::gc::TenuredCell
 
     void traceChildren(JSTracer* trc);
     void finalize(FreeOp* fop);
+
+    size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
 
     void dump();
 };
