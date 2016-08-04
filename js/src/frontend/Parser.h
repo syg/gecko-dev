@@ -26,6 +26,8 @@ class ModuleObject;
 
 namespace frontend {
 
+class UsedNameTracker;
+
 /*
  * The struct ParseContext stores information about the current parsing context,
  * which is part of the parser state (see the field Parser::pc). The current
@@ -104,10 +106,6 @@ class ParseContext : public Nestable<ParseContext>
         // the scope in which it is declared.
         PooledMapPtr<DeclaredNameMap> declared_;
 
-        // Usually the scope stack and the scopeForUsedNames stack are the
-        // same, with the exception of when parsing function arguments.
-        Scope** scopeForUsedNamesStack_;
-
         // Monotonically increasing id.
         uint32_t id_;
 
@@ -123,20 +121,27 @@ class ParseContext : public Nestable<ParseContext>
 
         using Nestable<Scope>::enclosing;
 
+        // Used when parsing function arguments with its odd scoping
+        // rules. See note in Parser::functionArguments.
+        class AutoDefaultsScope
+        {
+            ParseContext* pc_;
+            UsedNameTracker& usedNames_;
+            uint32_t oldVarScopeId_;
+
+          public:
+            template <typename ParseHandler>
+            explicit AutoDefaultsScope(Parser<ParseHandler>* parser);
+
+            ~AutoDefaultsScope();
+        };
+
         template <typename ParseHandler>
         explicit Scope(Parser<ParseHandler>* parser)
           : Nestable<Scope>(&parser->pc->innermostScope_),
             declared_(parser->context->frontendCollectionPool()),
-            scopeForUsedNamesStack_(&parser->pc->scopeForUsedNames_),
             id_(parser->usedNames.nextScopeId())
-        {
-            *scopeForUsedNamesStack_ = this;
-        }
-
-        ~Scope() {
-            MOZ_ASSERT(*scopeForUsedNamesStack_ == this);
-            *scopeForUsedNamesStack_ = enclosing();
-        }
+        { }
 
         void dump(ParseContext* pc);
 
@@ -251,31 +256,6 @@ class ParseContext : public Nestable<ParseContext>
         inline BindingIter bindings(ParseContext* pc);
     };
 
-    class MOZ_STACK_CLASS AutoOverrideScopeForUsedNames
-    {
-#ifdef DEBUG
-        Scope* overrideScope_;
-#endif
-        Scope** scopeForUsedNamesStack_;
-        Scope* savedScopeForUsedNames_;
-
-      public:
-        AutoOverrideScopeForUsedNames(ParseContext* pc, Scope* overrideScope)
-          : scopeForUsedNamesStack_(&pc->scopeForUsedNames_),
-            savedScopeForUsedNames_(pc->scopeForUsedNames_)
-        {
-#ifdef DEBUG
-            overrideScope_ = overrideScope;
-#endif
-            *scopeForUsedNamesStack_ = overrideScope;
-        }
-
-        ~AutoOverrideScopeForUsedNames() {
-            MOZ_ASSERT(*scopeForUsedNamesStack_ == overrideScope_);
-            *scopeForUsedNamesStack_ = savedScopeForUsedNames_;
-        }
-    };
-
   private:
     // Context shared between parsing and bytecode generation.
     SharedContext* sc_;
@@ -290,10 +270,6 @@ class ParseContext : public Nestable<ParseContext>
     //
     // The outermost scope in the stack is varScope_.
     Scope* innermostScope_;
-
-    // Scope for used names. When parsing function arguments, this is
-    // defaultsScope_.  Otherwise, this is innermostScope_.
-    Scope* scopeForUsedNames_;
 
     // If isFunctionBox() and the function is a named lambda, the DeclEnv
     // scope for named lambdas.
@@ -371,7 +347,6 @@ class ParseContext : public Nestable<ParseContext>
         tokenStream_(prs->tokenStream),
         innermostStatement_(nullptr),
         innermostScope_(nullptr),
-        scopeForUsedNames_(nullptr),
         innerFunctionBoxesForAnnexB_(prs->context->frontendCollectionPool()),
         positionalFormalParameterNames_(prs->context->frontendCollectionPool()),
         closedOverBindingsForLazy_(prs->context->frontendCollectionPool()),
@@ -416,12 +391,6 @@ class ParseContext : public Nestable<ParseContext>
         // There is always at least one scope: the 'var' scope.
         MOZ_ASSERT(innermostScope_);
         return innermostScope_;
-    }
-
-    Scope* scopeForUsedNames() {
-        // There is always at least one scope, per above.
-        MOZ_ASSERT(scopeForUsedNames_);
-        return scopeForUsedNames_;
     }
 
     Scope& namedLambdaScope() {

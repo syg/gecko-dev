@@ -150,6 +150,40 @@ ParseContext::Scope::dump(ParseContext* pc)
 }
 
 template <typename ParseHandler>
+ParseContext::Scope::AutoDefaultsScope::AutoDefaultsScope(Parser<ParseHandler>* parser)
+  : pc_(parser->pc),
+    usedNames_(parser->usedNames),
+    oldVarScopeId_(pc_->varScope().id())
+{
+    pc_->varScope().id_ = pc_->defaultsScope().id();
+}
+
+ParseContext::Scope::AutoDefaultsScope::~AutoDefaultsScope()
+{
+    MOZ_ASSERT(pc_->varScope().id() == pc_->defaultsScope().id());
+
+    if (pc_->functionBox()->hasDefaultsScope) {
+        // It is an invariant of scope numbering that scopes must be numbered in
+        // order of appearance in the text. Because it is not known at the start
+        // of parsing a function whether there will be a defaults scope, the var
+        // scope needs to be renumbered to preserve this invariant.
+
+#ifdef DEBUG
+        // First verify that we have not noted any uses in the old varScope id.
+        uint32_t oldVarScopeId = oldVarScopeId_;
+        auto hasUseExactlyInScope = [oldVarScopeId](JSAtom*, const UsedNameTracker::Use& use) {
+            return use.scopeId == oldVarScopeId;
+        };
+        MOZ_ASSERT(!usedNames_.hasUse(hasUseExactlyInScope));
+#endif
+
+        pc_->varScope().id_ = usedNames_.nextScopeId();
+    } else {
+        pc_->varScope().id_ = oldVarScopeId_;
+    }
+}
+
+template <typename ParseHandler>
 /* static */ bool
 ParseContext::Scope::moveFormalParameterNamesForDefaults(Parser<ParseHandler>* parser)
 {
@@ -180,21 +214,6 @@ ParseContext::Scope::moveFormalParameterNamesForDefaults(Parser<ParseHandler>* p
 
     for (uint32_t i = 0; i < paramNames.length(); i++)
         varScope.declared_->remove(paramNames[i]);
-
-    // It is an invariant of scope numbering that scopes must be numbered in
-    // order of appearance in the text. Because it is not known at the start
-    // of parsing a function whether there will be a defaults scope, the var
-    // scope needs to be renumbered to preserve this invariant.
-
-#ifdef DEBUG
-    // First verify that we have not noted any uses in the old varScope id.
-    auto hasUseExactlyInScope = [&varScope](JSAtom*, const UsedNameTracker::Use& use) {
-        return use.scopeId == varScope.id();
-    };
-    MOZ_ASSERT(!parser->usedNames.hasUse(hasUseExactlyInScope));
-#endif
-
-    varScope.id_ = parser->usedNames.nextScopeId();
 
     return true;
 }
@@ -1231,7 +1250,7 @@ Parser<ParseHandler>::noteUsedName(HandlePropertyName name)
     // to know if they are closed over. So no need to track used name at the
     // global scope. It is not incorrect to track them, this is an
     // optimization.
-    ParseContext::Scope* scope = pc->scopeForUsedNames();
+    ParseContext::Scope* scope = pc->innermostScope();
     if (pc->sc()->isGlobalContext() && scope == &pc->varScope())
         return true;
 
@@ -2498,7 +2517,7 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
         // expression or computed property name. If a defaults scope is
         // needed, the declared formal parameters will be moved to the
         // defaults scope. See moveFormalParameterNamesForDefaults.
-        ParseContext::AutoOverrideScopeForUsedNames overrideScope(pc, &pc->defaultsScope());
+        ParseContext::Scope::AutoDefaultsScope autoDefaults(this);
 
         if (IsGetterKind(kind)) {
             report(ParseError, false, null(), JSMSG_ACCESSOR_WRONG_ARGS, "getter", "no", "s");
