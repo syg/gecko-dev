@@ -1212,6 +1212,7 @@ BytecodeEmitter::EmitterScope::enterModule(BytecodeEmitter* bce, ModuleSharedCon
         return false;
 
     // Resolve body-level bindings, if there are any.
+    TDZCheckCache* tdzCache = bce->innermostTDZCheckCache;
     Maybe<uint32_t> firstLexicalFrameSlot;
     if (ModuleScope::Data* bindings = modulesc->bindings) {
         BindingIter bi(*bindings);
@@ -1220,15 +1221,16 @@ BytecodeEmitter::EmitterScope::enterModule(BytecodeEmitter* bce, ModuleSharedCon
                 return false;
 
             NameLocation loc = NameLocation::fromBinding(bi.kind(), bi.location());
-            if (loc.kind() == NameLocation::Kind::FrameSlot &&
-                BindingKindIsLexical(bi.kind()) &&
-                !firstLexicalFrameSlot)
-            {
-                firstLexicalFrameSlot = Some(loc.frameSlot());
-            }
-
             if (!putNameInCache(bce, bi.name(), loc))
                 return false;
+
+            if (BindingKindIsLexical(bi.kind())) {
+                if (loc.kind() == NameLocation::Kind::FrameSlot && !firstLexicalFrameSlot)
+                    firstLexicalFrameSlot = Some(loc.frameSlot());
+
+                if (!tdzCache->noteTDZCheck(bce, bi.name(), CheckTDZ))
+                    return false;
+            }
         }
 
         updateFrameFixedSlots(bce, bi);
