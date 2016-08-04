@@ -178,7 +178,7 @@ class ParseContext : public Nestable<ParseContext>
 
         // Remove a simple catch parameter name. Used to implement the odd
         // semantics of Annex B.3.5.
-        void removeSimpleCatchParameter(JSAtom* name);
+        void removeSimpleCatchParameter(ParseContext* pc, JSAtom* name);
 
         // An iterator for the set of names a scope binds: the set of all
         // declared names for 'var' scopes, and the set of lexically declared

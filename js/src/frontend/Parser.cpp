@@ -220,8 +220,11 @@ ParseContext::Scope::removeVarForAnnexBLexicalFunction(ParseContext* pc, JSAtom*
 }
 
 void
-ParseContext::Scope::removeSimpleCatchParameter(JSAtom* name)
+ParseContext::Scope::removeSimpleCatchParameter(ParseContext* pc, JSAtom* name)
 {
+    if (pc->useAsmOrInsideUseAsm())
+        return;
+
     DeclaredNamePtr p = declared_->lookup(name);
     MOZ_ASSERT(p && p->value()->kind() == DeclarationKind::SimpleCatchParameter);
     declared_->remove(p);
@@ -6016,7 +6019,7 @@ Parser<ParseHandler>::catchBlockStatement(YieldHandling yieldHandling,
 
         // The catch parameter name is not bound in this scope, so remove it
         // before generating bindings.
-        scope.removeSimpleCatchParameter(simpleCatchParam);
+        scope.removeSimpleCatchParameter(pc, simpleCatchParam);
 
         body = finishLexicalScope(scope, list);
     } else {
