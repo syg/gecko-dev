@@ -85,7 +85,7 @@ class BytecodeEmitter::TDZCheckCache : public Nestable<BytecodeEmitter::TDZCheck
     { }
 
     Maybe<MaybeCheckTDZ> needsTDZCheck(BytecodeEmitter* bce, JSAtom* name);
-    MOZ_MUST_USE bool noteEmittedTDZCheck(BytecodeEmitter* bce, JSAtom* name);
+    MOZ_MUST_USE bool noteTDZCheck(BytecodeEmitter* bce, JSAtom* name, MaybeCheckTDZ check);
 };
 
 class BytecodeEmitter::NestableControl : public Nestable<BytecodeEmitter::NestableControl>
@@ -853,6 +853,7 @@ BytecodeEmitter::EmitterScope::enterLexical(BytecodeEmitter* bce, ScopeKind kind
         MarkAllBindingsClosedOver(*bindings);
 
     // Resolve bindings.
+    TDZCheckCache* tdzCache = bce->innermostTDZCheckCache;
     uint32_t firstFrameSlot = frameSlotStart();
     BindingIter bi(*bindings, firstFrameSlot, /* isNamedLambda = */ false);
     for (; bi; bi++) {
@@ -861,6 +862,9 @@ BytecodeEmitter::EmitterScope::enterLexical(BytecodeEmitter* bce, ScopeKind kind
 
         NameLocation loc = NameLocation::fromBinding(bi.kind(), bi.location());
         if (!putNameInCache(bce, bi.name(), loc))
+            return false;
+
+        if (!tdzCache->noteTDZCheck(bce, bi.name(), CheckTDZ))
             return false;
     }
 
@@ -1350,16 +1354,18 @@ BytecodeEmitter::TDZCheckCache::needsTDZCheck(BytecodeEmitter* bce, JSAtom* name
 }
 
 bool
-BytecodeEmitter::TDZCheckCache::noteEmittedTDZCheck(BytecodeEmitter* bce, JSAtom* name)
+BytecodeEmitter::TDZCheckCache::noteTDZCheck(BytecodeEmitter* bce, JSAtom* name,
+                                             MaybeCheckTDZ check)
 {
     if (!ensureCache(bce))
         return false;
 
     CheckTDZMap::AddPtr p = cache_->lookupForAdd(name);
     if (p) {
-        p->value() = DontCheckTDZ;
+        MOZ_ASSERT(!check, "TDZ only needs to be checked once per binding per basic block.");
+        p->value() = check;
     } else {
-        if (!cache_->add(p, name, DontCheckTDZ))
+        if (!cache_->add(p, name, check))
             return false;
     }
 
@@ -3044,8 +3050,10 @@ BytecodeEmitter::emitSetOrInitializeNameAtLocation(HandleAtom name, const NameLo
         }
         if (!emitLocalOp(op, loc.frameSlot()))
             return false;
-        if (op == JSOP_INITLEXICAL && !innermostTDZCheckCache->noteEmittedTDZCheck(this, name))
-            return false;
+        if (op == JSOP_INITLEXICAL) {
+            if (!innermostTDZCheckCache->noteTDZCheck(this, name, DontCheckTDZ))
+                return false;
+        }
         break;
       }
 
@@ -3075,10 +3083,9 @@ BytecodeEmitter::emitSetOrInitializeNameAtLocation(HandleAtom name, const NameLo
             if (!emitEnvCoordOp(op, loc.environmentCoordinate()))
                 return false;
         }
-        if (op == JSOP_INITALIASEDLEXICAL &&
-            !innermostTDZCheckCache->noteEmittedTDZCheck(this, name))
-        {
-            return false;
+        if (op == JSOP_INITALIASEDLEXICAL) {
+            if (!innermostTDZCheckCache->noteTDZCheck(this, name, DontCheckTDZ))
+                return false;
         }
         break;
       }
@@ -3110,7 +3117,7 @@ BytecodeEmitter::emitTDZCheckIfNeeded(JSAtom* name, const NameLocation& loc)
             return false;
     }
 
-    return innermostTDZCheckCache->noteEmittedTDZCheck(this, name);
+    return innermostTDZCheckCache->noteTDZCheck(this, name, DontCheckTDZ);
 }
 
 bool
@@ -3543,9 +3550,11 @@ BytecodeEmitter::emitSwitch(ParseNode* pn)
 
     // Enter the scope before pushing the switch BreakableControl since all
     // breaks are under the this scope.
+    Maybe<TDZCheckCache> tdzCache;
     Maybe<EmitterScope> emitterScope;
     if (cases->isKind(PNK_LEXICALSCOPE)) {
         if (!cases->isEmptyScope()) {
+            tdzCache.emplace(this);
             emitterScope.emplace(this);
             if (!emitterScope->enterLexical(this, ScopeKind::Lexical, cases->scopeBindings()))
                 return false;
@@ -6241,8 +6250,8 @@ BytecodeEmitter::emitComprehensionForOf(ParseNode* pn)
     // Enter the block before the loop body, after evaluating the obj.
     // Initialize let bindings with undefined when entering, as the name
     // assigned to is a plain assignment.
-    Maybe<EmitterScope> emitterScope;
     TDZCheckCache tdzCache(this);
+    Maybe<EmitterScope> emitterScope;
     if (lexicalScope) {
         emitterScope.emplace(this);
         if (!emitterScope->enterComprehensionFor(this, loopDecl->scopeBindings()))
@@ -6366,8 +6375,8 @@ BytecodeEmitter::emitComprehensionForIn(ParseNode* pn)
     // Enter the block before the loop body, after evaluating the obj.
     // Initialize let bindings with undefined when entering, as the name
     // assigned to is a plain assignment.
-    Maybe<EmitterScope> emitterScope;
     TDZCheckCache tdzCache(this);
+    Maybe<EmitterScope> emitterScope;
     if (lexicalScope) {
         emitterScope.emplace(this);
         if (!emitterScope->enterComprehensionFor(this, loopDecl->scopeBindings()))
@@ -8649,8 +8658,10 @@ BytecodeEmitter::emitClass(ParseNode* pn)
 
     bool savedStrictness = sc->setLocalStrictMode(true);
 
+    Maybe<TDZCheckCache> tdzCache;
     Maybe<EmitterScope> emitterScope;
     if (names) {
+        tdzCache.emplace(this);
         emitterScope.emplace(this);
         if (!emitterScope->enterLexical(this, ScopeKind::Lexical, classNode.scopeBindings()))
             return false;
