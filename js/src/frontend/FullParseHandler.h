@@ -678,7 +678,7 @@ class FullParseHandler
         return new_<CodeNode>(PNK_MODULE, pos());
     }
 
-    ParseNode* newLexicalScope(LexicalScope::BindingData* bindings, ParseNode* body) {
+    ParseNode* newLexicalScope(LexicalScope::Data* bindings, ParseNode* body) {
         return new_<LexicalScopeNode>(bindings, body);
     }
 

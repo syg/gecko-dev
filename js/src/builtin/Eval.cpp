@@ -93,8 +93,9 @@ class EvalScriptGuard
             EvalCacheEntry cacheEntry = {lookupStr_, script_, lookup_.callerScript, lookup_.pc};
             lookup_.str = lookupStr_;
             if (lookup_.str && IsEvalCacheCandidate(script_)) {
-                bool ok = p_->add(cx_, cx_->caches.evalCache, lookup_, cacheEntry);
-                (void)ok; // Ignore failure to add cache entry.
+                // Ignore failure to add cache entry.
+                if (!p_->add(cx_, cx_->caches.evalCache, lookup_, cacheEntry))
+                    cx_->recoverFromOutOfMemory();
             }
         }
     }

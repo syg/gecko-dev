@@ -1344,14 +1344,14 @@ class Parser final : private JS::AutoGCRooter, public StrictModeGetter
     // Required on Scope exit.
     bool propagateFreeNamesAndMarkClosedOverBindings(ParseContext::Scope& scope);
 
-    mozilla::Maybe<GlobalScope::BindingData*> newGlobalScopeData(ParseContext::Scope& scope,
-                                                                 uint32_t* functionBindingEnd);
-    mozilla::Maybe<ModuleScope::BindingData*> newModuleScopeData(ParseContext::Scope& scope);
-    mozilla::Maybe<EvalScope::BindingData*> newEvalScopeData(ParseContext::Scope& scope,
-                                                             uint32_t* functionBindingEnd);
-    mozilla::Maybe<FunctionScope::BindingData*> newFunctionScopeData(ParseContext::Scope& scope,
-                                                                     bool hasDefaults);
-    mozilla::Maybe<LexicalScope::BindingData*> newLexicalScopeData(ParseContext::Scope& scope);
+    mozilla::Maybe<GlobalScope::Data*> newGlobalScopeData(ParseContext::Scope& scope,
+                                                          uint32_t* functionBindingEnd);
+    mozilla::Maybe<ModuleScope::Data*> newModuleScopeData(ParseContext::Scope& scope);
+    mozilla::Maybe<EvalScope::Data*> newEvalScopeData(ParseContext::Scope& scope,
+                                                      uint32_t* functionBindingEnd);
+    mozilla::Maybe<FunctionScope::Data*> newFunctionScopeData(ParseContext::Scope& scope,
+                                                              bool hasDefaults);
+    mozilla::Maybe<LexicalScope::Data*> newLexicalScopeData(ParseContext::Scope& scope);
     Node finishLexicalScope(ParseContext::Scope& scope, Node body);
 
     Node propertyName(YieldHandling yieldHandling, Node propList,

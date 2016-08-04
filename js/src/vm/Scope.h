@@ -189,22 +189,6 @@ class Scope : public js::gc::TenuredCell
     GCPtrShape environmentShape_;
 
   protected:
-    // Most scope data are arrays of JSAtoms, which may be shared across
-    // runtimes. FunctionScope is an exception; see comments above
-    // FunctionScope::Data.
-    struct RefCountedData
-    {
-        uint32_t refCount : 31;
-        bool notLifoAllocated : 1;
-
-        void addRef() {
-            MOZ_ASSERT(notLifoAllocated);
-            refCount++;
-        }
-
-        void release(FreeOp* fop);
-    };
-
     uintptr_t data_;
 
     Scope(ScopeKind kind, Scope* enclosing, Shape* environmentShape, uintptr_t data)
@@ -218,8 +202,8 @@ class Scope : public js::gc::TenuredCell
                          HandleShape envShape, uintptr_t data);
 
     template <typename ConcreteScope, XDRMode mode>
-    static bool XDRSizedBindingData(XDRState<mode>* xdr, Handle<ConcreteScope*> scope,
-                                    MutableHandle<typename ConcreteScope::BindingData*> data);
+    static bool XDRSizedBindingNames(XDRState<mode>* xdr, Handle<ConcreteScope*> scope,
+                                     MutableHandle<typename ConcreteScope::Data*> data);
 
     Shape* maybeCloneEnvironmentShape(JSContext* cx);
 
@@ -287,8 +271,6 @@ class Scope : public js::gc::TenuredCell
         return false;
     }
 
-    // GlobalScopes and FunctionScopes have extra data that's needed when
-    // cloning and cannot use the generic clone.
     static Scope* clone(JSContext* cx, HandleScope scope, HandleScope enclosing);
 
     void traceChildren(JSTracer* trc);
@@ -325,7 +307,7 @@ class LexicalScope : public Scope
   public:
     // Data is public because it is created by the frontend. See
     // Parser<FullParseHandler>::newLexicalScopeData.
-    struct BindingData : public RefCountedData
+    struct Data
     {
         // Bindings are sorted by kind in both frames and environments.
         //
@@ -345,12 +327,11 @@ class LexicalScope : public Scope
         void trace(JSTracer* trc);
     };
 
-    static size_t sizeOfBindingData(uint32_t length) {
-        MOZ_ASSERT(length > 0);
-        return sizeof(BindingData) + (length - 1) * sizeof(BindingName);
+    static size_t sizeOfData(uint32_t length) {
+        return sizeof(Data) + (length ? length - 1 : 0) * sizeof(BindingName);
     }
 
-    static LexicalScope* create(ExclusiveContext* cx, ScopeKind kind, Handle<BindingData*> data,
+    static LexicalScope* create(ExclusiveContext* cx, ScopeKind kind, Handle<Data*> data,
                                 uint32_t firstFrameSlot, HandleScope enclosing);
 
     template <XDRMode mode>
@@ -358,12 +339,12 @@ class LexicalScope : public Scope
                     MutableHandleScope scope);
 
   protected:
-    BindingData& bindingData() {
-        return *reinterpret_cast<BindingData*>(data_);
+    Data& data() {
+        return *reinterpret_cast<Data*>(data_);
     }
 
-    const BindingData& bindingData() const {
-        return *reinterpret_cast<BindingData*>(data_);
+    const Data& data() const {
+        return *reinterpret_cast<Data*>(data_);
     }
 
     static uint32_t nextFrameSlot(Scope* start);
@@ -372,10 +353,8 @@ class LexicalScope : public Scope
     uint32_t firstFrameSlot() const;
 
     uint32_t nextFrameSlot() const {
-        return bindingData().nextFrameSlot;
+        return data().nextFrameSlot;
     }
-
-    size_t sizeOfData(mozilla::MallocSizeOf mallocSizeOf) const;
 
     // Returns an empty shape for extensible global and non-syntactic lexical
     // scopes.
@@ -408,10 +387,15 @@ class FunctionScope : public Scope
     static const ScopeKind classScopeKind_ = ScopeKind::Function;
 
   public:
-    // BindingData is public because it is created by the
+    // Data is public because it is created by the
     // frontend. See Parser<FullParseHandler>::newFunctionScopeData.
-    struct BindingData : public RefCountedData
+    struct Data
     {
+        // The canonical function of the scope, as during a scope walk we
+        // often query properties of the JSFunction (e.g., is the function an
+        // arrow).
+        GCPtrFunction canonicalFunction;
+
         // Bindings are sorted by kind in both frames and environments.
         //
         // Positional formal parameter names are those without default
@@ -440,30 +424,16 @@ class FunctionScope : public Scope
         void trace(JSTracer* trc);
     };
 
-    // Because canonicalFunction is per-compartment and cannot be shared,
-    // FunctionScopes have two data pointers, one for shareable data and one
-    // for per-compartment data.
-    struct Data
-    {
-        // The canonical function of the scope, as during a scope walk we
-        // often query properties of the JSFunction (e.g., is the function an
-        // arrow).
-        GCPtrFunction canonicalFunction;
-
-        // Shareable bindings.
-        BindingData* bindings;
-
-        void trace(JSTracer* trc);
-    };
-
-    static size_t sizeOfBindingData(uint32_t length) {
-        MOZ_ASSERT(length > 0);
-        return sizeof(BindingData) + (length - 1) * sizeof(BindingName);
+    static size_t sizeOfData(uint32_t length) {
+        return sizeof(Data) + (length ? length - 1 : 0) * sizeof(BindingName);
     }
 
-    static FunctionScope* create(ExclusiveContext* cx, Handle<BindingData*> data,
+    static FunctionScope* create(ExclusiveContext* cx, Handle<Data*> data,
                                  uint32_t firstFrameSlot, bool hasDefaults, bool needsEnvironment,
                                  HandleFunction fun, HandleScope enclosing);
+
+    static FunctionScope* clone(JSContext* cx, Handle<FunctionScope*> scope, HandleFunction fun,
+                                HandleScope enclosing);
 
     template <XDRMode mode>
     static bool XDR(XDRState<mode>* xdr, HandleFunction fun, HandleScope enclosing,
@@ -478,22 +448,11 @@ class FunctionScope : public Scope
         return *reinterpret_cast<Data*>(data_);
     }
 
-    BindingData& bindingData() {
-        return *data().bindings;
-    }
-
-     const BindingData& bindingData() const {
-        return *data().bindings;
-    }
-
   public:
-    static FunctionScope* clone(JSContext* cx, Handle<FunctionScope*> scope, HandleFunction fun,
-                                HandleScope enclosing);
-
     uint32_t firstFrameSlot() const;
 
     uint32_t nextFrameSlot() const {
-        return bindingData().nextFrameSlot;
+        return data().nextFrameSlot;
     }
 
     JSFunction* canonicalFunction() const {
@@ -503,10 +462,8 @@ class FunctionScope : public Scope
     JSScript* script() const;
 
     uint32_t numPositionalFormalParameters() const {
-        return bindingData().nonPositionalFormalStart;
+        return data().nonPositionalFormalStart;
     }
-
-    size_t sizeOfData(mozilla::MallocSizeOf mallocSizeOf) const;
 
     static Shape* getEmptyEnvironmentShape(ExclusiveContext* cx);
 };
@@ -538,7 +495,7 @@ class GlobalScope : public Scope
   public:
     // Data is public because it is created by the frontend. See
     // Parser<FullParseHandler>::newGlobalScopeData.
-    struct BindingData : public RefCountedData
+    struct Data
     {
         // Bindings are sorted by kind.
         //
@@ -556,41 +513,38 @@ class GlobalScope : public Scope
         void trace(JSTracer* trc);
     };
 
-    static size_t sizeOfBindingData(uint32_t length) {
-        MOZ_ASSERT(length > 0);
-        return sizeof(BindingData) + (length - 1) * sizeof(BindingName);
+    static size_t sizeOfData(uint32_t length) {
+        return sizeof(Data) + (length ? length - 1 : 0) * sizeof(BindingName);
     }
 
-    static GlobalScope* create(ExclusiveContext* cx, ScopeKind kind, Handle<BindingData*> data);
+    static GlobalScope* create(ExclusiveContext* cx, ScopeKind kind, Handle<Data*> data);
 
     static GlobalScope* createEmpty(ExclusiveContext* cx, ScopeKind kind) {
         return create(cx, kind, nullptr);
     }
 
+    static GlobalScope* clone(JSContext* cx, Handle<GlobalScope*> scope, ScopeKind kind);
+
     template <XDRMode mode>
     static bool XDR(XDRState<mode>* xdr, ScopeKind kind, MutableHandleScope scope);
 
   private:
-    BindingData& bindingData() {
-        return *reinterpret_cast<BindingData*>(data_);
+    Data& data() {
+        return *reinterpret_cast<Data*>(data_);
     }
 
-    const BindingData& bindingData() const {
-        return *reinterpret_cast<BindingData*>(data_);
+    const Data& data() const {
+        return *reinterpret_cast<Data*>(data_);
     }
 
   public:
-    static GlobalScope* clone(JSContext* cx, Handle<GlobalScope*> scope, ScopeKind kind);
-
     bool isSyntactic() const {
         return kind() != ScopeKind::NonSyntactic;
     }
 
     bool hasBindings() const {
-        return bindingData().length > 0;
+        return data().length > 0;
     }
-
-    size_t sizeOfData(mozilla::MallocSizeOf mallocSizeOf) const;
 };
 
 template <>
@@ -632,9 +586,9 @@ class EvalScope : public Scope
     friend class BindingIter;
 
   public:
-    // BindingData is public because it is created by the frontend. See
+    // Data is public because it is created by the frontend. See
     // Parser<FullParseHandler>::newEvalScopeData.
-    struct BindingData : public RefCountedData
+    struct Data
     {
         // All bindings in an eval script are 'var' bindings. The implicit
         // lexical scope around the eval is present regardless of strictness
@@ -652,12 +606,11 @@ class EvalScope : public Scope
         void trace(JSTracer* trc);
     };
 
-    static size_t sizeOfBindingData(uint32_t length) {
-        MOZ_ASSERT(length > 0);
-        return sizeof(BindingData) + (length - 1) * sizeof(BindingName);
+    static size_t sizeOfData(uint32_t length) {
+        return sizeof(Data) + (length ? length - 1 : 0) * sizeof(BindingName);
     }
 
-    static EvalScope* create(ExclusiveContext* cx, ScopeKind kind, Handle<BindingData*> data,
+    static EvalScope* create(ExclusiveContext* cx, ScopeKind kind, Handle<Data*> data,
                              HandleScope enclosing);
 
     template <XDRMode mode>
@@ -665,12 +618,12 @@ class EvalScope : public Scope
                     MutableHandleScope scope);
 
   private:
-    BindingData& bindingData() {
-        return *reinterpret_cast<BindingData*>(data_);
+    Data& data() {
+        return *reinterpret_cast<Data*>(data_);
     }
 
-    const BindingData& bindingData() const {
-        return *reinterpret_cast<BindingData*>(data_);
+    const Data& data() const {
+        return *reinterpret_cast<Data*>(data_);
     }
 
   public:
@@ -679,7 +632,7 @@ class EvalScope : public Scope
     static Scope* nearestVarScopeForDirectEval(Scope* scope);
 
     uint32_t nextFrameSlot() const {
-        return bindingData().nextFrameSlot;
+        return data().nextFrameSlot;
     }
 
     bool strict() const {
@@ -687,7 +640,7 @@ class EvalScope : public Scope
     }
 
     bool hasBindings() const {
-        return bindingData().length > 0;
+        return data().length > 0;
     }
 
     bool isNonGlobal() const {
@@ -695,8 +648,6 @@ class EvalScope : public Scope
             return true;
         return !nearestVarScopeForDirectEval(enclosing())->is<GlobalScope>();
     }
-
-    size_t sizeOfData(mozilla::MallocSizeOf mallocSizeOf) const;
 
     static Shape* getEmptyEnvironmentShape(ExclusiveContext* cx);
 };
@@ -726,8 +677,11 @@ class ModuleScope : public Scope
   public:
     // Data is public because it is created by the frontend. See
     // Parser<FullParseHandler>::newModuleScopeData.
-    struct BindingData : public RefCountedData
+    struct Data
     {
+        // The module of the scope.
+        GCPtr<ModuleObject*> module;
+
         // Bindings are sorted by kind.
         //
         // imports - [0, varStart)
@@ -753,26 +707,11 @@ class ModuleScope : public Scope
         void trace(JSTracer* trc);
     };
 
-    // Because module is per-compartment and cannot be shared, ModuleScopes
-    // have two data pointers, one for shareable data and one for
-    // per-compartment data.
-    struct Data
-    {
-        // The module of the scope.
-        GCPtr<ModuleObject*> module;
-
-        // Shareable bindings.
-        BindingData* bindings;
-
-        void trace(JSTracer* trc);
-    };
-
-    static size_t sizeOfBindingData(uint32_t length) {
-        MOZ_ASSERT(length > 0);
-        return sizeof(BindingData) + (length - 1) * sizeof(BindingName);
+    static size_t sizeOfData(uint32_t length) {
+        return sizeof(Data) + (length ? length - 1 : 0) * sizeof(BindingName);
     }
 
-    static ModuleScope* create(ExclusiveContext* cx, Handle<BindingData*> bindings,
+    static ModuleScope* create(ExclusiveContext* cx, Handle<Data*> data,
                                Handle<ModuleObject*> module, HandleScope enclosing);
 
   private:
@@ -784,21 +723,13 @@ class ModuleScope : public Scope
         return *reinterpret_cast<Data*>(data_);
     }
 
-    BindingData& bindingData() {
-        return *data().bindings;
-    }
-
-    const BindingData& bindingData() const {
-        return *data().bindings;
-    }
-
   public:
     uint32_t nextFrameSlot() const {
-        return bindingData().nextFrameSlot;
+        return data().nextFrameSlot;
     }
 
     uint32_t varFrameSlotEnd() const {
-        return bindingData().varFrameSlotEnd;
+        return data().varFrameSlotEnd;
     }
 
     ModuleObject* module() const {
@@ -806,8 +737,6 @@ class ModuleScope : public Scope
     }
 
     JSScript* script() const;
-
-    size_t sizeOfData(mozilla::MallocSizeOf mallocSizeOf) const;
 
     static Shape* getEmptyEnvironmentShape(ExclusiveContext* cx);
 };
@@ -828,7 +757,7 @@ class BindingIter
 {
   protected:
     // Bindings are sorted by kind. Because different Scopes have differently
-    // laid out BindingData for packing, BindingIter must handle all binding kinds.
+    // laid out Data for packing, BindingIter must handle all binding kinds.
     //
     // Kind ranges:
     //
@@ -909,11 +838,11 @@ class BindingIter
         settle();
     }
 
-    void init(LexicalScope::BindingData& data, uint32_t firstFrameSlot, uint8_t flags);
-    void init(FunctionScope::BindingData& data, uint32_t firstFrameSlot, uint8_t flags);
-    void init(GlobalScope::BindingData& data);
-    void init(EvalScope::BindingData& data, bool strict);
-    void init(ModuleScope::BindingData& data);
+    void init(LexicalScope::Data& data, uint32_t firstFrameSlot, uint8_t flags);
+    void init(FunctionScope::Data& data, uint32_t firstFrameSlot, uint8_t flags);
+    void init(GlobalScope::Data& data);
+    void init(EvalScope::Data& data, bool strict);
+    void init(ModuleScope::Data& data);
 
     bool ignorePositionalFormalParameters() const {
         return flags_ & IgnorePositionalFormalParameters;
@@ -980,25 +909,25 @@ class BindingIter
     explicit BindingIter(Scope* scope);
     explicit BindingIter(JSScript* script);
 
-    BindingIter(LexicalScope::BindingData& data, uint32_t firstFrameSlot, bool isNamedLambda) {
+    BindingIter(LexicalScope::Data& data, uint32_t firstFrameSlot, bool isNamedLambda) {
         init(data, firstFrameSlot, isNamedLambda ? IsNamedLambda : 0);
     }
 
-    BindingIter(FunctionScope::BindingData& data, uint32_t firstFrameSlot, bool hasDefaults) {
+    BindingIter(FunctionScope::Data& data, uint32_t firstFrameSlot, bool hasDefaults) {
         init(data, firstFrameSlot,
              IgnoreDestructuredFormalParameters |
              (hasDefaults ? IgnorePositionalFormalParameters : 0));
     }
 
-    explicit BindingIter(GlobalScope::BindingData& data) {
+    explicit BindingIter(GlobalScope::Data& data) {
         init(data);
     }
 
-    explicit BindingIter(ModuleScope::BindingData& data) {
+    explicit BindingIter(ModuleScope::Data& data) {
         init(data);
     }
 
-    BindingIter(EvalScope::BindingData& data, bool strict) {
+    BindingIter(EvalScope::Data& data, bool strict) {
         init(data, strict);
     }
 
@@ -1360,12 +1289,10 @@ struct ScopeDataGCPolicy
     struct GCPolicy<Data*> : public ScopeDataGCPolicy<Data*>    \
     { }
 
-DEFINE_SCOPE_DATA_GCPOLICY(js::LexicalScope::BindingData);
-DEFINE_SCOPE_DATA_GCPOLICY(js::FunctionScope::BindingData);
+DEFINE_SCOPE_DATA_GCPOLICY(js::LexicalScope::Data);
 DEFINE_SCOPE_DATA_GCPOLICY(js::FunctionScope::Data);
-DEFINE_SCOPE_DATA_GCPOLICY(js::GlobalScope::BindingData);
-DEFINE_SCOPE_DATA_GCPOLICY(js::EvalScope::BindingData);
-DEFINE_SCOPE_DATA_GCPOLICY(js::ModuleScope::BindingData);
+DEFINE_SCOPE_DATA_GCPOLICY(js::GlobalScope::Data);
+DEFINE_SCOPE_DATA_GCPOLICY(js::EvalScope::Data);
 DEFINE_SCOPE_DATA_GCPOLICY(js::ModuleScope::Data);
 
 #undef DEFINE_SCOPE_DATA_GCPOLICY

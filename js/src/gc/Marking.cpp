@@ -974,15 +974,6 @@ js::GCMarker::mark(T* thing)
 
 /*** Inline, Eager GC Marking *********************************************************************/
 
-static inline void
-TraceBindingNames(JSTracer* trc, BindingName* names, uint32_t length)
-{
-    for (uint32_t i = 0; i < length; i++) {
-        JSAtom* name = names[i].name();
-        TraceManuallyBarrieredEdge(trc, &name, "scope name");
-    }
-};
-
 // Each of the eager, inline marking paths is directly preceeded by the
 // out-of-line, generic tracing code for comparison. Both paths must end up
 // traversing equivalent subgraphs.
@@ -1212,6 +1203,14 @@ js::GCMarker::eagerlyMarkChildren(JSRope* rope)
 }
 
 static inline void
+TraceBindingNames(JSTracer* trc, BindingName* names, uint32_t length)
+{
+    for (uint32_t i = 0; i < length; i++) {
+        JSAtom* name = names[i].name();
+        TraceManuallyBarrieredEdge(trc, &name, "scope name");
+    }
+};
+static inline void
 TraceNullableBindingNames(JSTracer* trc, BindingName* names, uint32_t length)
 {
     for (uint32_t i = 0; i < length; i++) {
@@ -1219,17 +1218,11 @@ TraceNullableBindingNames(JSTracer* trc, BindingName* names, uint32_t length)
             TraceManuallyBarrieredEdge(trc, &name, "scope name");
     }
 };
-template <typename Data>
-static inline void
-TraceBindingData(JSTracer* trc, Data* data)
-{
-    TraceBindingNames(trc, data->names, data->length);
-}
 void
 BindingName::trace(JSTracer* trc)
 {
-    JSAtom* atom = name();
-    TraceManuallyBarrieredEdge(trc, &atom, "binding name");
+    if (JSAtom* atom = name())
+        TraceManuallyBarrieredEdge(trc, &atom, "binding name");
 }
 void
 BindingIter::trace(JSTracer* trc)
@@ -1237,34 +1230,23 @@ BindingIter::trace(JSTracer* trc)
     TraceBindingNames(trc, names_, length_);
 }
 void
-LexicalScope::BindingData::trace(JSTracer* trc)
+LexicalScope::Data::trace(JSTracer* trc)
 {
     TraceBindingNames(trc, names, length);
-}
-void
-FunctionScope::BindingData::trace(JSTracer* trc)
-{
-    TraceNullableBindingNames(trc, names, length);
 }
 void
 FunctionScope::Data::trace(JSTracer* trc)
 {
     TraceNullableEdge(trc, &canonicalFunction, "scope canonical function");
-    if (bindings)
-        bindings->trace(trc);
+    TraceNullableBindingNames(trc, names, length);
 }
 void
-GlobalScope::BindingData::trace(JSTracer* trc)
+GlobalScope::Data::trace(JSTracer* trc)
 {
     TraceBindingNames(trc, names, length);
 }
 void
-EvalScope::BindingData::trace(JSTracer* trc)
-{
-    TraceBindingNames(trc, names, length);
-}
-void
-ModuleScope::BindingData::trace(JSTracer* trc)
+EvalScope::Data::trace(JSTracer* trc)
 {
     TraceBindingNames(trc, names, length);
 }
@@ -1272,8 +1254,7 @@ void
 ModuleScope::Data::trace(JSTracer* trc)
 {
     TraceNullableEdge(trc, &module, "scope module");
-    if (bindings)
-        bindings->trace(trc);
+    TraceBindingNames(trc, names, length);
 }
 void
 Scope::traceChildren(JSTracer* trc)
@@ -1289,15 +1270,15 @@ Scope::traceChildren(JSTracer* trc)
       case ScopeKind::Catch:
       case ScopeKind::NamedLambda:
       case ScopeKind::StrictNamedLambda:
-        reinterpret_cast<LexicalScope::BindingData*>(data_)->trace(trc);
+        reinterpret_cast<LexicalScope::Data*>(data_)->trace(trc);
         break;
       case ScopeKind::Global:
       case ScopeKind::NonSyntactic:
-        reinterpret_cast<GlobalScope::BindingData*>(data_)->trace(trc);
+        reinterpret_cast<GlobalScope::Data*>(data_)->trace(trc);
         break;
       case ScopeKind::Eval:
       case ScopeKind::StrictEval:
-        reinterpret_cast<EvalScope::BindingData*>(data_)->trace(trc);
+        reinterpret_cast<EvalScope::Data*>(data_)->trace(trc);
         break;
       case ScopeKind::Module:
         reinterpret_cast<ModuleScope::Data*>(data_)->trace(trc);
@@ -1319,17 +1300,17 @@ js::GCMarker::eagerlyMarkChildren(Scope* scope)
       case ScopeKind::Function: {
         FunctionScope::Data* data = reinterpret_cast<FunctionScope::Data*>(scope->data_);
         traverseEdge(scope, static_cast<JSObject*>(data->canonicalFunction));
-        names = data->bindings->names;
-        length = data->bindings->length;
+        names = data->names;
+        length = data->length;
         break;
       }
+
       case ScopeKind::ParameterDefaults:
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
       case ScopeKind::NamedLambda:
       case ScopeKind::StrictNamedLambda: {
-        LexicalScope::BindingData* data =
-            reinterpret_cast<LexicalScope::BindingData*>(scope->data_);
+        LexicalScope::Data* data = reinterpret_cast<LexicalScope::Data*>(scope->data_);
         names = data->names;
         length = data->length;
         break;
@@ -1337,27 +1318,28 @@ js::GCMarker::eagerlyMarkChildren(Scope* scope)
 
       case ScopeKind::Global:
       case ScopeKind::NonSyntactic: {
-        GlobalScope::BindingData* data =
-            reinterpret_cast<GlobalScope::BindingData*>(scope->data_);
+        GlobalScope::Data* data = reinterpret_cast<GlobalScope::Data*>(scope->data_);
         names = data->names;
         length = data->length;
         break;
       }
+
       case ScopeKind::Eval:
       case ScopeKind::StrictEval: {
-        EvalScope::BindingData* data =
-            reinterpret_cast<EvalScope::BindingData*>(scope->data_);
+        EvalScope::Data* data = reinterpret_cast<EvalScope::Data*>(scope->data_);
         names = data->names;
         length = data->length;
         break;
       }
+
       case ScopeKind::Module: {
         ModuleScope::Data* data = reinterpret_cast<ModuleScope::Data*>(scope->data_);
         traverseEdge(scope, static_cast<JSObject*>(data->module));
-        names = data->bindings->names;
-        length = data->bindings->length;
+        names = data->names;
+        length = data->length;
         break;
       }
+
       case ScopeKind::With:
         break;
     }

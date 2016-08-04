@@ -386,10 +386,10 @@ class MOZ_STACK_CLASS GlobalSharedContext : public SharedContext
     // EmitterScope::enterGlobal.
     //
     // This is only used in BytecodeEmitter, and is thus not kept in
-    // GlobalScope::BindingData.
+    // GlobalScope::Data.
     uint32_t functionBindingEnd;
 
-    Rooted<GlobalScope::BindingData*> bindings;
+    Rooted<GlobalScope::Data*> bindings;
 
     GlobalSharedContext(ExclusiveContext* cx, ScopeKind scopeKind, Directives directives,
                         bool extraWarnings)
@@ -422,10 +422,10 @@ class MOZ_STACK_CLASS EvalSharedContext : public SharedContext
     // EmitterScope::enterEval.
     //
     // This is only used in BytecodeEmitter, and is thus not kept in
-    // EvalScope::BindingData.
+    // EvalScope::Data.
     uint32_t functionBindingEnd;
 
-    Rooted<EvalScope::BindingData*> bindings;
+    Rooted<EvalScope::Data*> bindings;
 
     EvalSharedContext(ExclusiveContext* cx, JSObject* enclosingEnv, Scope* enclosingScope,
                       Directives directives, bool extraWarnings);
@@ -440,13 +440,13 @@ class FunctionBox : public ObjectBox, public SharedContext
     Scope* enclosingScope_;
 
     // Names from the named lambda scope, if a named lambda.
-    LexicalScope::BindingData* namedLambdaBindings_;
+    LexicalScope::Data* namedLambdaBindings_;
 
     // Names from the scope for parameter default expressions, if any.
-    LexicalScope::BindingData* defaultsScopeBindings_;
+    LexicalScope::Data* defaultsScopeBindings_;
 
     // Names from the 'var' scope of the function.
-    FunctionScope::BindingData* varScopeBindings_;
+    FunctionScope::Data* varScopeBindings_;
 
     void initWithEnclosingScope(Scope* enclosingScope);
 
@@ -480,19 +480,19 @@ class FunctionBox : public ObjectBox, public SharedContext
     FunctionBox(ExclusiveContext* cx, LifoAlloc& alloc, ObjectBox* traceListHead, JSFunction* fun,
                 Directives directives, bool extraWarnings, GeneratorKind generatorKind);
 
-    MutableHandle<LexicalScope::BindingData*> namedLambdaBindings() {
+    MutableHandle<LexicalScope::Data*> namedLambdaBindings() {
         MOZ_ASSERT(context->compartment()->runtimeFromAnyThread()->keepAtoms());
-        return MutableHandle<LexicalScope::BindingData*>::fromMarkedLocation(&namedLambdaBindings_);
+        return MutableHandle<LexicalScope::Data*>::fromMarkedLocation(&namedLambdaBindings_);
     }
 
-    MutableHandle<LexicalScope::BindingData*> defaultsScopeBindings() {
+    MutableHandle<LexicalScope::Data*> defaultsScopeBindings() {
         MOZ_ASSERT(context->compartment()->runtimeFromAnyThread()->keepAtoms());
-        return MutableHandle<LexicalScope::BindingData*>::fromMarkedLocation(&defaultsScopeBindings_);
+        return MutableHandle<LexicalScope::Data*>::fromMarkedLocation(&defaultsScopeBindings_);
     }
 
-    MutableHandle<FunctionScope::BindingData*> varScopeBindings() {
+    MutableHandle<FunctionScope::Data*> varScopeBindings() {
         MOZ_ASSERT(context->compartment()->runtimeFromAnyThread()->keepAtoms());
-        return MutableHandle<FunctionScope::BindingData*>::fromMarkedLocation(&varScopeBindings_);
+        return MutableHandle<FunctionScope::Data*>::fromMarkedLocation(&varScopeBindings_);
     }
 
     void initFromLazyFunction();
@@ -585,7 +585,7 @@ class MOZ_STACK_CLASS ModuleSharedContext : public SharedContext
     RootedScope enclosingScope_;
 
   public:
-    Rooted<ModuleScope::BindingData*> bindings;
+    Rooted<ModuleScope::Data*> bindings;
     ModuleBuilder& builder;
 
     ModuleSharedContext(ExclusiveContext* cx, ModuleObject* module, Scope* enclosingScope,

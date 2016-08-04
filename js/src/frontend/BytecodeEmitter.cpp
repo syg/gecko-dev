@@ -306,7 +306,7 @@ ScopeKindIsInBody(ScopeKind kind)
 }
 
 static inline void
-MarkAllBindingsClosedOver(LexicalScope::BindingData& data)
+MarkAllBindingsClosedOver(LexicalScope::Data& data)
 {
     BindingName* names = data.names;
     for (uint32_t i = 0; i < data.length; i++)
@@ -452,11 +452,11 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
     void dump(BytecodeEmitter* bce);
 
     MOZ_MUST_USE bool enterLexical(BytecodeEmitter* bce, ScopeKind kind,
-                                   Handle<LexicalScope::BindingData*> bindings);
+                                   Handle<LexicalScope::Data*> bindings);
     MOZ_MUST_USE bool enterNamedLambda(BytecodeEmitter* bce, FunctionBox* funbox);
     MOZ_MUST_USE bool enterParameterDefaults(BytecodeEmitter* bce, FunctionBox* funbox);
     MOZ_MUST_USE bool enterComprehensionFor(BytecodeEmitter* bce,
-                                            Handle<LexicalScope::BindingData*> bindings);
+                                            Handle<LexicalScope::Data*> bindings);
     MOZ_MUST_USE bool enterFunctionBody(BytecodeEmitter* bce, FunctionBox* funbox);
     MOZ_MUST_USE bool enterGlobal(BytecodeEmitter* bce, GlobalSharedContext* globalsc);
     MOZ_MUST_USE bool enterEval(BytecodeEmitter* bce, EvalSharedContext* evalsc);
@@ -831,7 +831,7 @@ BytecodeEmitter::EmitterScope::deadZoneFrameSlotRange(BytecodeEmitter* bce, uint
 
 bool
 BytecodeEmitter::EmitterScope::enterLexical(BytecodeEmitter* bce, ScopeKind kind,
-                                            Handle<LexicalScope::BindingData*> bindings)
+                                            Handle<LexicalScope::Data*> bindings)
 {
     MOZ_ASSERT(kind != ScopeKind::NamedLambda && kind != ScopeKind::StrictNamedLambda);
     MOZ_ASSERT(this == bce->innermostEmitterScope);
@@ -941,7 +941,7 @@ BytecodeEmitter::EmitterScope::enterParameterDefaults(BytecodeEmitter* bce, Func
 
 bool
 BytecodeEmitter::EmitterScope::enterComprehensionFor(BytecodeEmitter* bce,
-                                                     Handle<LexicalScope::BindingData*> bindings)
+                                                     Handle<LexicalScope::Data*> bindings)
 {
     if (!enterLexical(bce, ScopeKind::Lexical, bindings))
         return false;
@@ -982,7 +982,7 @@ BytecodeEmitter::EmitterScope::enterFunctionBody(BytecodeEmitter* bce, FunctionB
     // Resolve body-level bindings, if there are any.
     uint32_t firstFrameSlot = frameSlotStart();
     if (funbox->varScopeBindings()) {
-        Handle<FunctionScope::BindingData*> bindings = funbox->varScopeBindings();
+        Handle<FunctionScope::Data*> bindings = funbox->varScopeBindings();
         NameLocationMap& cache = *nameCache_;
 
         BindingIter bi(*bindings, firstFrameSlot, funbox->hasDefaultsScope);
@@ -1044,14 +1044,14 @@ class DynamicBindingIter : public BindingIter
     uint32_t functionEnd_;
 
   public:
-    DynamicBindingIter(GlobalScope::BindingData& data, uint32_t functionEnd)
+    DynamicBindingIter(GlobalScope::Data& data, uint32_t functionEnd)
       : BindingIter(data),
         functionEnd_(functionEnd)
     {
         MOZ_ASSERT(functionEnd_ >= varStart_ && functionEnd_ <= letStart_);
     }
 
-    DynamicBindingIter(EvalScope::BindingData& data, uint32_t functionEnd, bool strict)
+    DynamicBindingIter(EvalScope::Data& data, uint32_t functionEnd, bool strict)
       : BindingIter(data, strict),
         functionEnd_(functionEnd)
     {
@@ -1104,7 +1104,7 @@ BytecodeEmitter::EmitterScope::enterGlobal(BytecodeEmitter* bce, GlobalSharedCon
     }
 
     // Resolve binding names and emit DEF{VAR,LET,CONST} prologue ops.
-    if (GlobalScope::BindingData* bindings = globalsc->bindings) {
+    if (GlobalScope::Data* bindings = globalsc->bindings) {
         for (DynamicBindingIter bi(*bindings, globalsc->functionBindingEnd); bi; bi++) {
             NameLocation loc = NameLocation::fromBinding(bi.kind(), bi.location());
             JSAtom* name = bi.name();
@@ -1152,7 +1152,7 @@ BytecodeEmitter::EmitterScope::enterEval(BytecodeEmitter* bce, EvalSharedContext
     // Resolve binding names and emit DEFVAR prologue ops. Eval scripts always
     // have their own lexical scope, but non-strict scopes may introduce 'var'
     // bindings to the nearest var scope.
-    if (EvalScope::BindingData* bindings = evalsc->bindings) {
+    if (EvalScope::Data* bindings = evalsc->bindings) {
         // TODO: We may optimize strict eval bindings in the future to be on
         // the frame. For now, handle everything dynamically.
 
@@ -1209,7 +1209,7 @@ BytecodeEmitter::EmitterScope::enterModule(BytecodeEmitter* bce, ModuleSharedCon
 
     // Resolve body-level bindings, if there are any.
     Maybe<uint32_t> firstLexicalFrameSlot;
-    if (ModuleScope::BindingData* bindings = modulesc->bindings) {
+    if (ModuleScope::Data* bindings = modulesc->bindings) {
         BindingIter bi(*bindings);
         for (; bi; bi++) {
             if (!checkSlotLimits(bce, bi))
@@ -7490,7 +7490,7 @@ BytecodeEmitter::isRestParameter(ParseNode* pn, bool* result)
 
     JSAtom* name = pn->name();
     if (!BindingKindIsLexical(lookupName(name).bindingKind())) {
-        FunctionScope::BindingData* bindings = funbox->varScopeBindings();
+        FunctionScope::Data* bindings = funbox->varScopeBindings();
         if (bindings->nonPositionalFormalStart > 0) {
             *result = name == bindings->names[bindings->nonPositionalFormalStart - 1].name();
             return true;
