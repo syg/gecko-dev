@@ -238,8 +238,6 @@ struct MOZ_STACK_CLASS BytecodeEmitter
 
     bool            hasTryFinally:1;    /* script contains finally block */
 
-    bool            emittingForInit:1;  /* true while emitting init expr of for; exclude 'in' */
-
     bool            emittingRunOnceLambda:1; /* true while emitting a lambda which is only
                                                 expected to run once. */
 

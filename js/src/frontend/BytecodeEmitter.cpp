@@ -1407,7 +1407,6 @@ BytecodeEmitter::BytecodeEmitter(BytecodeEmitter* parent,
     typesetCount(0),
     hasSingletons(false),
     hasTryFinally(false),
-    emittingForInit(false),
     emittingRunOnceLambda(false),
     emitterMode(emitterMode),
     functionBodyEndPosSet(false)
@@ -4683,12 +4682,7 @@ BytecodeEmitter::emitSingleDeclaration(ParseNode* declList, ParseNode* decl,
         }
 
         MOZ_ASSERT(initializer);
-        bool oldEmittingForInit = bce->emittingForInit;
-        bce->emittingForInit = false;
-        if (!bce->emitTree(initializer))
-            return false;
-        bce->emittingForInit = oldEmittingForInit;
-        return true;
+        return bce->emitTree(initializer);
     };
 
     if (!emitInitializeName(decl, emitRhs))
@@ -6038,12 +6032,10 @@ BytecodeEmitter::emitCStyleFor(ParseNode* pn, EmitterScope* headLexicalEmitterSc
         // Emit the `init` clause, whether it's an expression or a variable
         // declaration. (The loop variables were hoisted into an enclosing
         // scope, but we still need to emit code for the initializers.)
-        emittingForInit = true;
         if (!updateSourceCoordNotes(init->pn_pos.begin))
             return false;
         if (!emitTree(init))
             return false;
-        emittingForInit = false;
 
         if (!init->isForLoopDeclaration()) {
             // 'init' is an expression, not a declaration. emitTree left its
@@ -6211,10 +6203,8 @@ BytecodeEmitter::emitComprehensionForInOrOfVariables(ParseNode* pn, bool* lexica
         MOZ_ASSERT(pn->isKind(PNK_LET));
         MOZ_ASSERT(pn->pn_count == 1);
 
-        emittingForInit = true;
         if (!emitDeclarationList(pn))
             return false;
-        emittingForInit = false;
     }
 
     return true;
@@ -7404,15 +7394,10 @@ BytecodeEmitter::emitSelfHostedCallFunction(ParseNode* pn)
     if (!emitTree(thisArg))
         return false;
 
-    bool oldEmittingForInit = emittingForInit;
-    emittingForInit = false;
-
     for (ParseNode* argpn = thisArg->pn_next; argpn; argpn = argpn->pn_next) {
         if (!emitTree(argpn))
             return false;
     }
-
-    emittingForInit = oldEmittingForInit;
 
     uint32_t argc = pn->pn_count - 3;
     if (!emitCall(callOp, argc))
@@ -7691,8 +7676,6 @@ BytecodeEmitter::emitCallOrNew(ParseNode* pn)
      * JSOP_NEW bytecode with a two-byte immediate telling how many args
      * were pushed on the operand stack.
      */
-    bool oldEmittingForInit = emittingForInit;
-    emittingForInit = false;
     if (!spread) {
         for (ParseNode* pn3 = pn2->pn_next; pn3; pn3 = pn3->pn_next) {
             if (!emitTree(pn3))
@@ -7736,7 +7719,6 @@ BytecodeEmitter::emitCallOrNew(ParseNode* pn)
             }
         }
     }
-    emittingForInit = oldEmittingForInit;
 
     if (!spread) {
         if (!emitCall(pn->getOp(), argc, pn))
@@ -8315,12 +8297,9 @@ BytecodeEmitter::emitUnary(ParseNode* pn)
     JSOp op = pn->getOp();
     ParseNode* pn2 = pn->pn_kid;
 
-    bool oldEmittingForInit = emittingForInit;
-    emittingForInit = false;
     if (!emitTree(pn2))
         return false;
 
-    emittingForInit = oldEmittingForInit;
     return emit1(op);
 }
 
@@ -8332,12 +8311,9 @@ BytecodeEmitter::emitTypeof(ParseNode* node, JSOp op)
     if (!updateSourceCoordNotes(node->pn_pos.begin))
         return false;
 
-    bool oldEmittingForInit = emittingForInit;
-    emittingForInit = false;
     if (!emitTree(node->pn_kid))
         return false;
 
-    emittingForInit = oldEmittingForInit;
     return emit1(op);
 }
 
