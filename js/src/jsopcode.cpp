@@ -202,22 +202,25 @@ js::DumpPCCounts(JSContext* cx, HandleScript script, Sprinter* sp)
 void
 js::DumpCompartmentPCCounts(JSContext* cx)
 {
-    RootedScript script(cx);
+    Rooted<GCVector<JSScript*>> scripts(cx, GCVector<JSScript*>(cx));
     for (auto iter = cx->zone()->cellIter<JSScript>(); !iter.done(); iter.next()) {
-        script = iter;
+        JSScript* script = iter;
         if (script->compartment() != cx->compartment())
             continue;
+        if (script->hasScriptCounts() && !scripts.append(script))
+            return;
+    }
 
-        if (script->hasScriptCounts()) {
-            Sprinter sprinter(cx);
-            if (!sprinter.init())
-                return;
+    for (uint32_t i = 0; i < scripts.length(); i++) {
+        HandleScript script = scripts[i];
+        Sprinter sprinter(cx);
+        if (!sprinter.init())
+            return;
 
-            fprintf(stdout, "--- SCRIPT %s:%" PRIuSIZE " ---\n", script->filename(), script->lineno());
-            DumpPCCounts(cx, script, &sprinter);
-            fputs(sprinter.string(), stdout);
-            fprintf(stdout, "--- END SCRIPT %s:%" PRIuSIZE " ---\n", script->filename(), script->lineno());
-        }
+        fprintf(stdout, "--- SCRIPT %s:%" PRIuSIZE " ---\n", script->filename(), script->lineno());
+        DumpPCCounts(cx, script, &sprinter);
+        fputs(sprinter.string(), stdout);
+        fprintf(stdout, "--- END SCRIPT %s:%" PRIuSIZE " ---\n", script->filename(), script->lineno());
     }
 }
 
