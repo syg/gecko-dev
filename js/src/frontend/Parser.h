@@ -567,7 +567,7 @@ enum InHandling { InAllowed, InProhibited };
 enum DefaultHandling { NameRequired, AllowDefaultName };
 enum TripledotHandling { TripledotAllowed, TripledotProhibited };
 
-// A data structure for tracking used names per parsing session in order
+// A data structure for tracking used names per parsing session in order to
 // compute which bindings are closed over. Scripts and scopes are numbered
 // monotonically in textual order and name uses are tracked by lists of
 // (script id, scope id) pairs of their use sites.
@@ -581,16 +581,12 @@ enum TripledotHandling { TripledotAllowed, TripledotProhibited };
 //
 // The algorithm:
 //
+// Let Used by a map of names to lists.
+//
 // 1. Number all scopes in monotonic increasing order in textual order.
 // 2. Number all scripts in monotonic increasing order in textual order.
 // 3. When an identifier u is used in scope numbered S in script numbered P,
-// 3a. If u is found in Used, let (P_u,S_u) be the final item in the list
-//     Used[u]. Append (max(P,P_u),S) to Used[u].
-//
-//     NOTE: max(P,P_u) guarantees that a live use of a name across function
-//     boundaries can be determined by only inspecting the last pair of the
-//     list in Used[u].
-//
+// 3a. Append (P,S) to Used[u].
 // 3b. Otherwise, assign the the list [(P,S)] to Used[u].
 // 4. When we finish parsing a scope S in script P, for each declared name d in
 //    Declared(S):
@@ -629,21 +625,12 @@ class UsedNameTracker
         { }
 
         bool noteUsedInScope(uint32_t scriptId, uint32_t scopeId) {
-            if (uses_.empty()) {
+            if (uses_.empty() || uses_.back().scopeId < scopeId) {
                 Use use;
                 use.scriptId = scriptId;
                 use.scopeId = scopeId;
                 return uses_.append(use);
             }
-
-            Use& innermost = uses_.back();
-            if (innermost.scopeId < scopeId) {
-                Use use;
-                use.scriptId = (std::max)(innermost.scriptId, scriptId);
-                use.scopeId = scopeId;
-                return uses_.append(use);
-            }
-
             return true;
         }
 
