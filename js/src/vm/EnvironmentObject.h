@@ -232,9 +232,7 @@ class EnvironmentObject : public NativeObject
     }
 };
 
-class VarEnvironmentObject : public EnvironmentObject { };
-
-class CallObject : public VarEnvironmentObject
+class CallObject : public EnvironmentObject
 {
   protected:
     static const uint32_t CALLEE_SLOT = 1;
@@ -272,8 +270,6 @@ class CallObject : public VarEnvironmentObject
 
     /* True if this is for a strict mode eval frame. */
     bool isForEval() const {
-        if (is<ModuleEnvironmentObject>())
-            return false;
         MOZ_ASSERT(getFixedSlot(CALLEE_SLOT).isObjectOrNull());
         MOZ_ASSERT_IF(getFixedSlot(CALLEE_SLOT).isObject(),
                       getFixedSlot(CALLEE_SLOT).toObject().is<JSFunction>());
@@ -312,7 +308,7 @@ class CallObject : public VarEnvironmentObject
     }
 };
 
-class ModuleEnvironmentObject : public VarEnvironmentObject
+class ModuleEnvironmentObject : public EnvironmentObject
 {
     static const uint32_t MODULE_SLOT = 1;
 
@@ -892,16 +888,10 @@ class DebugEnvironments
 
 template <>
 inline bool
-JSObject::is<js::VarEnvironmentObject>() const
-{
-    return is<js::CallObject>() || is<js::ModuleEnvironmentObject>();
-}
-
-template <>
-inline bool
 JSObject::is<js::EnvironmentObject>() const
 {
-    return is<js::VarEnvironmentObject>() ||
+    return is<js::CallObject>() ||
+           is<js::ModuleEnvironmentObject>() ||
            is<js::LexicalEnvironmentObject>() ||
            is<js::WithEnvironmentObject>() ||
            is<js::NonSyntacticVariablesObject>() ||

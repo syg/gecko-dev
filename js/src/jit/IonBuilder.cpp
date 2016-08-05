@@ -8517,7 +8517,8 @@ IonBuilder::getStaticName(JSObject* staticObject, PropertyName* name, bool* psuc
                            staticObject->as<LexicalEnvironmentObject>().isGlobal();
     MOZ_ASSERT(isGlobalLexical ||
                staticObject->is<GlobalObject>() ||
-               staticObject->is<VarEnvironmentObject>());
+               staticObject->is<CallObject>() ||
+               staticObject->is<ModuleEnvironmentObject>());
     MOZ_ASSERT(staticObject->isSingleton());
 
     *psucceeded = true;

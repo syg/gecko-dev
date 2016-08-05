@@ -2117,7 +2117,9 @@ bool
 DebugEnvironmentProxy::isForDeclarative() const
 {
     EnvironmentObject& e = environment();
-    return e.is<VarEnvironmentObject>() || e.is<LexicalEnvironmentObject>();
+    return e.is<CallObject>() ||
+           e.is<ModuleEnvironmentObject>() ||
+           e.is<LexicalEnvironmentObject>();
 }
 
 bool
