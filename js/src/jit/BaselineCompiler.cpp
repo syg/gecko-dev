@@ -143,14 +143,6 @@ BaselineCompiler::compile()
                 return Method_Error;
         }
 
-        if (fun->needsDefaultsEnvironment()) {
-            Rooted<LexicalScope*> scope(cx, script->defaultsScope());
-            templateEnv = LexicalEnvironmentObject::createTemplateObject(cx, scope, templateEnv,
-                                                                         gc::TenuredHeap);
-            if (!templateEnv)
-                return Method_Error;
-        }
-
         if (fun->needsCallObject()) {
             RootedScript scriptRoot(cx, script);
             templateEnv = CallObject::createTemplateObject(cx, scriptRoot, templateEnv,
@@ -637,9 +629,9 @@ typedef bool (*CheckGlobalOrEvalDeclarationConflictsFn)(JSContext*, BaselineFram
 static const VMFunction CheckGlobalOrEvalDeclarationConflictsInfo =
     FunctionInfo<CheckGlobalOrEvalDeclarationConflictsFn>(jit::CheckGlobalOrEvalDeclarationConflicts);
 
-typedef bool (*InitExtraFunctionEnvironmentObjectsFn)(JSContext*, BaselineFrame*);
-static const VMFunction InitExtraFunctionEnvironmentObjectsInfo =
-    FunctionInfo<InitExtraFunctionEnvironmentObjectsFn>(jit::InitExtraFunctionEnvironmentObjects);
+typedef bool (*InitFunctionEnvironmentObjectsFn)(JSContext*, BaselineFrame*);
+static const VMFunction InitFunctionEnvironmentObjectsInfo =
+    FunctionInfo<InitFunctionEnvironmentObjectsFn>(jit::InitFunctionEnvironmentObjects);
 
 bool
 BaselineCompiler::initEnvironmentChain()
@@ -659,14 +651,14 @@ BaselineCompiler::initEnvironmentChain()
         masm.loadPtr(Address(callee, JSFunction::offsetOfEnvironment()), scope);
         masm.storePtr(scope, frame.addressOfEnvironmentChain());
 
-        if (fun->needsExtraEnvironmentObjects()) {
+        if (fun->needsFunctionEnvironmentObjects()) {
             // Call into the VM to create the extra environment object.
             prepareVMCall();
 
             masm.loadBaselineFramePtr(BaselineFrameReg, R0.scratchReg());
             pushArg(R0.scratchReg());
 
-            if (!callVMNonOp(InitExtraFunctionEnvironmentObjectsInfo, phase))
+            if (!callVMNonOp(InitFunctionEnvironmentObjectsInfo, phase))
                 return false;
         }
     } else if (module()) {
@@ -3510,17 +3502,18 @@ BaselineCompiler::emit_JSOP_DEBUGLEAVELEXICALENV()
     return callVM(DebugLeaveLexicalEnvInfo);
 }
 
-typedef bool (*PushCallObjectFn)(JSContext*, BaselineFrame*);
-static const VMFunction PushCallObjectInfo = FunctionInfo<PushCallObjectFn>(jit::PushCallObject);
+typedef bool (*PushVarEnvironmentFn)(JSContext*, BaselineFrame*);
+static const VMFunction PushVarEnvironmentInfo =
+    FunctionInfo<PushVarEnvironmentFn>(jit::PushVarEnvironment);
 
 bool
-BaselineCompiler::emit_JSOP_PUSHCALLOBJ()
+BaselineCompiler::emit_JSOP_PUSHVARENV()
 {
     prepareVMCall();
     masm.loadBaselineFramePtr(BaselineFrameReg, R0.scratchReg());
     pushArg(R0.scratchReg());
 
-    return callVM(PushCallObjectInfo);
+    return callVM(PushVarEnvironmentInfo);
 }
 
 typedef bool (*EnterWithFn)(JSContext*, BaselineFrame*, HandleValue, Handle<WithScope*>);
@@ -4237,7 +4230,7 @@ BaselineCompiler::emit_JSOP_RESUME()
     masm.checkStackAlignment();
 
     // Store flags and env chain.
-    masm.store32(Imm32(BaselineFrame::HAS_CALL_OBJ), frame.addressOfFlags());
+    masm.store32(Imm32(BaselineFrame::HAS_VAR_ENV), frame.addressOfFlags());
     masm.unboxObject(Address(genObj, GeneratorObject::offsetOfEnvironmentChainSlot()), scratch2);
     masm.storePtr(scratch2, frame.addressOfEnvironmentChain());
 

@@ -263,20 +263,12 @@ jit::EnsureHasEnvironmentObjects(JSContext* cx, AbstractFramePtr fp)
     MOZ_ASSERT(!fp.isEvalFrame());
 
     if (fp.isFunctionFrame()) {
-        // Ion does not handle defaults scopes yet.
-        MOZ_ASSERT(!fp.callee()->needsDefaultsEnvironment());
+        // Ion does not handle extra var environments due to parameter
+        // expressions yet.
+        MOZ_ASSERT(!fp.callee()->needsExtraVarEnvironment());
 
-        if (!fp.hasCallObj()) {
-            if (fp.callee()->needsNamedLambdaEnvironment()) {
-                if (!fp.initExtraFunctionEnvironmentObjects(cx))
-                    return false;
-            }
-
-            if (fp.callee()->needsCallObject()) {
-                if (!fp.pushCallObject(cx))
-                    return false;
-            }
-        }
+        if (!fp.hasVarEnvironment() && !fp.initFunctionEnvironmentObjects(cx))
+            return false;
     }
 
     return true;

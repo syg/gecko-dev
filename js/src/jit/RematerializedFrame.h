@@ -32,8 +32,8 @@ class RematerializedFrame
     // Propagated to the Baseline frame once this is popped.
     bool isDebuggee_;
 
-    // Has a call object been pushed?
-    bool hasCallObj_;
+    // Has a var environment been pushed?
+    bool hasVarEnv_;
 
     // Is this frame constructing?
     bool isConstructing_;
@@ -121,24 +121,35 @@ class RematerializedFrame
         return envChain_;
     }
 
-    void pushOnEnvironmentChain(EnvironmentObject& env) {
+    template <typename SpecificEnvironment>
+    void pushOnEnvironmentChain(SpecificEnvironment& env) {
         MOZ_ASSERT(*environmentChain() == env.enclosingEnvironment());
         envChain_ = &env;
+        if (mozilla::IsSame<SpecificEnvironment, VarEnvironmentObject>::value) {
+            hasVarEnv_ = true;
+        } else if (mozilla::IsSame<SpecificEnvironment, CallObject>::value) {
+            if (!script()->hasParameterExprs())
+                hasVarEnv_ = true;
+        }
     }
 
     template <typename SpecificEnvironment>
     void popOffEnvironmentChain() {
         MOZ_ASSERT(envChain_->is<SpecificEnvironment>());
         envChain_ = &envChain_->as<SpecificEnvironment>().enclosingEnvironment();
-        if (mozilla::IsSame<SpecificEnvironment, CallObject>::value)
-            hasCallObj_ = false;
+        if (mozilla::IsSame<SpecificEnvironment, VarEnvironmentObject>::value) {
+            hasVarEnv_ = false;
+        } else if (mozilla::IsSame<SpecificEnvironment, CallObject>::value) {
+            if (!script()->hasParameterExprs())
+                hasVarEnv_ = false;
+        }
     }
 
-    MOZ_MUST_USE bool initExtraFunctionEnvironmentObjects(JSContext* cx);
-    MOZ_MUST_USE bool pushCallObject(JSContext* cx);
+    MOZ_MUST_USE bool initFunctionEnvironmentObjects(JSContext* cx);
+    MOZ_MUST_USE bool pushVarEnvironment(JSContext* cx);
 
-    bool hasCallObj() const {
-        return hasCallObj_;
+    bool hasVarEnvironment() const {
+        return hasVarEnv_;
     }
     CallObject& callObj() const;
 

@@ -21,11 +21,18 @@
 namespace js {
 namespace jit {
 
+template <typename SpecificEnvironment>
 inline void
-BaselineFrame::pushOnEnvironmentChain(EnvironmentObject& env)
+BaselineFrame::pushOnEnvironmentChain(SpecificEnvironment& env)
 {
     MOZ_ASSERT(*environmentChain() == env.enclosingEnvironment());
     envChain_ = &env;
+    if (mozilla::IsSame<SpecificEnvironment, VarEnvironmentObject>::value) {
+        flags_ |= HAS_VAR_ENV;
+    } else if (mozilla::IsSame<SpecificEnvironment, CallObject>::value) {
+        if (!script()->hasParameterExprs())
+            flags_ |= HAS_VAR_ENV;
+    }
 }
 
 template <typename SpecificEnvironment>
@@ -34,8 +41,12 @@ BaselineFrame::popOffEnvironmentChain()
 {
     MOZ_ASSERT(envChain_->is<SpecificEnvironment>());
     envChain_ = &envChain_->as<SpecificEnvironment>().enclosingEnvironment();
-    if (mozilla::IsSame<SpecificEnvironment, CallObject>::value)
-        flags_ &= ~HAS_CALL_OBJ;
+    if (mozilla::IsSame<SpecificEnvironment, VarEnvironmentObject>::value) {
+        flags_ &= ~HAS_VAR_ENV;
+    } else if (mozilla::IsSame<SpecificEnvironment, CallObject>::value) {
+        if (!script()->hasParameterExprs())
+            flags_ &= ~HAS_VAR_ENV;
+    }
 }
 
 inline void
@@ -84,7 +95,7 @@ BaselineFrame::recreateLexicalEnvironment(JSContext* cx)
 inline CallObject&
 BaselineFrame::callObj() const
 {
-    MOZ_ASSERT(hasCallObj());
+    MOZ_ASSERT(hasVarEnvironment());
     MOZ_ASSERT(callee()->needsCallObject());
 
     JSObject* obj = environmentChain();

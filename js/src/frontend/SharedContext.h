@@ -442,11 +442,12 @@ class FunctionBox : public ObjectBox, public SharedContext
     // Names from the named lambda scope, if a named lambda.
     LexicalScope::Data* namedLambdaBindings_;
 
-    // Names from the scope for parameter default expressions, if any.
-    LexicalScope::Data* defaultsScopeBindings_;
+    // Names from the function scope.
+    FunctionScope::Data* functionScopeBindings_;
 
-    // Names from the 'var' scope of the function.
-    FunctionScope::Data* varScopeBindings_;
+    // Names from the extra 'var' scope of the function, if the parameter list
+    // has expressions.
+    VarScope::Data* extraVarScopeBindings_;
 
     void initWithEnclosingScope(Scope* enclosingScope);
 
@@ -461,8 +462,7 @@ class FunctionBox : public ObjectBox, public SharedContext
     uint8_t         generatorKindBits_;     /* The GeneratorKind of this function. */
     bool            isGenexpLambda:1;       /* lambda from generator expression */
     bool            hasDestructuringArgs:1; /* arguments list contains destructuring expression */
-    bool            hasDefaultsScope:1;     /* a defaults scope is needed for defaults exprs or
-                                               expressions in destructuring formal parameters */
+    bool            hasParameterExprs:1;    /* extra var environment is needed */
     bool            useAsm:1;               /* see useAsmOrInsideUseAsm */
     bool            insideUseAsm:1;         /* see useAsmOrInsideUseAsm */
     bool            isAnnexB:1;             /* need to emit a synthesized Annex B assignment */
@@ -485,14 +485,14 @@ class FunctionBox : public ObjectBox, public SharedContext
         return MutableHandle<LexicalScope::Data*>::fromMarkedLocation(&namedLambdaBindings_);
     }
 
-    MutableHandle<LexicalScope::Data*> defaultsScopeBindings() {
+    MutableHandle<FunctionScope::Data*> functionScopeBindings() {
         MOZ_ASSERT(context->compartment()->runtimeFromAnyThread()->keepAtoms());
-        return MutableHandle<LexicalScope::Data*>::fromMarkedLocation(&defaultsScopeBindings_);
+        return MutableHandle<FunctionScope::Data*>::fromMarkedLocation(&functionScopeBindings_);
     }
 
-    MutableHandle<FunctionScope::Data*> varScopeBindings() {
+    MutableHandle<VarScope::Data*> extraVarScopeBindings() {
         MOZ_ASSERT(context->compartment()->runtimeFromAnyThread()->keepAtoms());
-        return MutableHandle<FunctionScope::Data*>::fromMarkedLocation(&varScopeBindings_);
+        return MutableHandle<VarScope::Data*>::fromMarkedLocation(&extraVarScopeBindings_);
     }
 
     void initFromLazyFunction();
@@ -515,6 +515,12 @@ class FunctionBox : public ObjectBox, public SharedContext
         return hasExtensibleScope() ||
                needsHomeObject() ||
                isDerivedClassConstructor() ||
+               isGenerator();
+    }
+
+    bool needsExtraVarEnvironmentRegardlessOfBindings() const {
+        MOZ_ASSERT(hasParameterExprs);
+        return hasExtensibleScope() ||
                isGenerator();
     }
 
@@ -558,7 +564,7 @@ class FunctionBox : public ObjectBox, public SharedContext
     void setHasInnerFunctions()            { funCxFlags.hasInnerFunctions         = true; }
 
     bool hasMappedArgsObj() const {
-        return !strict() && !function()->hasRest() && !hasDefaultsScope && !hasDestructuringArgs;
+        return !strict() && !function()->hasRest() && !hasParameterExprs && !hasDestructuringArgs;
     }
 
     // Return whether this or an enclosing function is being parsed and

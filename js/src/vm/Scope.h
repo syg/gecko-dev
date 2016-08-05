@@ -46,8 +46,10 @@ enum class ScopeKind : uint8_t
     // FunctionScope
     Function,
 
+    // VarScope
+    Var,
+
     // LexicalScope
-    ParameterDefaults,
     Lexical,
     Catch,
     NamedLambda,
@@ -292,10 +294,6 @@ class Scope : public js::gc::TenuredCell
 //   Holds the catch parameters (and only the catch parameters) of a catch
 //   block.
 //
-// ParameterDefaults
-//   Holds the parameter names for a function if it has parameter default
-//   expressions.
-//
 // All kinds of LexicalScopes correspond to LexicalEnvironmentObjects on the
 // environment chain.
 //
@@ -367,14 +365,13 @@ Scope::is<LexicalScope>() const
 {
     return kind_ == ScopeKind::Lexical ||
            kind_ == ScopeKind::Catch ||
-           kind_ == ScopeKind::ParameterDefaults ||
            kind_ == ScopeKind::NamedLambda ||
            kind_ == ScopeKind::StrictNamedLambda;
 }
 
 //
-// Scope corresponding to a function body. Holds var bindings and formal
-// parameter names.
+// Scope corresponding to a function. Holds var bindings and formal parameter
+// names.
 //
 // Corresponds to CallObject on environment chain.
 //
@@ -398,9 +395,9 @@ class FunctionScope : public Scope
 
         // Bindings are sorted by kind in both frames and environments.
         //
-        // Positional formal parameter names are those without default
-        // expressions or destructuring, i.e. those that may be referred to by
-        // argument slots.
+        // Positional formal parameter names are those that are not
+        // destructured. They may be referred to by argument slots if
+        // !script()->hasParameterExprs().
         //
         // An argument slot that needs to be skipped due to being destructured
         // or having defaults will have a nullptr name in the name array to
@@ -429,7 +426,7 @@ class FunctionScope : public Scope
     }
 
     static FunctionScope* create(ExclusiveContext* cx, Handle<Data*> data,
-                                 uint32_t firstFrameSlot, bool hasDefaults, bool needsEnvironment,
+                                 bool hasParameterExprs, bool needsEnvironment,
                                  HandleFunction fun, HandleScope enclosing);
 
     static FunctionScope* clone(JSContext* cx, Handle<FunctionScope*> scope, HandleFunction fun,
@@ -449,8 +446,6 @@ class FunctionScope : public Scope
     }
 
   public:
-    uint32_t firstFrameSlot() const;
-
     uint32_t nextFrameSlot() const {
         return data().nextFrameSlot;
     }
@@ -463,6 +458,69 @@ class FunctionScope : public Scope
 
     uint32_t numPositionalFormalParameters() const {
         return data().nonPositionalFormalStart;
+    }
+
+    static Shape* getEmptyEnvironmentShape(ExclusiveContext* cx, bool hasParameterExprs);
+};
+
+//
+// Scope holding only vars. Used for strict eval, eval in parameter
+// expressions, and the extra function var environment when parameter
+// expressions are present.
+//
+// Corresponds to VarEnvironmentObject on environment chain.
+//
+class VarScope : public Scope
+{
+    friend class GCMarker;
+    friend class BindingIter;
+    friend class Scope;
+    static const ScopeKind classScopeKind_ = ScopeKind::Var;
+
+  public:
+    // Data is public because it is created by the
+    // frontend. See Parser<FullParseHandler>::newVarScopeData.
+    struct Data
+    {
+        // All bindings are vars.
+        uint32_t length;
+
+        // Frame slots [firstFrameSlot(), nextFrameSlot) are live when this is
+        // the innermost scope.
+        uint32_t nextFrameSlot;
+
+        // The array of tagged JSAtom* names, allocated beyond the end of the
+        // struct.
+        BindingName names[1];
+
+        void trace(JSTracer* trc);
+    };
+
+    static size_t sizeOfData(uint32_t length) {
+        return sizeof(Data) + (length ? length - 1 : 0) * sizeof(BindingName);
+    }
+
+    static VarScope* create(ExclusiveContext* cx, Handle<Data*> data,
+                            uint32_t firstFrameSlot, bool needsEnvironment,
+                            HandleScope enclosing);
+
+    template <XDRMode mode>
+    static bool XDR(XDRState<mode>* xdr, HandleScope enclosing, MutableHandleScope scope);
+
+  private:
+    Data& data() {
+        return *reinterpret_cast<Data*>(data_);
+    }
+
+    const Data& data() const {
+        return *reinterpret_cast<Data*>(data_);
+    }
+
+  public:
+    uint32_t firstFrameSlot() const;
+
+    uint32_t nextFrameSlot() const {
+        return data().nextFrameSlot;
     }
 
     static Shape* getEmptyEnvironmentShape(ExclusiveContext* cx);
@@ -801,7 +859,7 @@ class BindingIter
         CanHaveEnvironmentSlots = 1 << 2,
 
         // See comment in settle below.
-        IgnorePositionalFormalParameters = 1 << 3,
+        HasFormalParameterExprs = 1 << 3,
         IgnoreDestructuredFormalParameters = 1 << 4,
 
         // Truly I hate named lambdas.
@@ -839,13 +897,14 @@ class BindingIter
     }
 
     void init(LexicalScope::Data& data, uint32_t firstFrameSlot, uint8_t flags);
-    void init(FunctionScope::Data& data, uint32_t firstFrameSlot, uint8_t flags);
+    void init(FunctionScope::Data& data, uint8_t flags);
+    void init(VarScope::Data& data, uint32_t firstFrameSlot);
     void init(GlobalScope::Data& data);
     void init(EvalScope::Data& data, bool strict);
     void init(ModuleScope::Data& data);
 
-    bool ignorePositionalFormalParameters() const {
-        return flags_ & IgnorePositionalFormalParameters;
+    bool hasFormalParameterExprs() const {
+        return flags_ & HasFormalParameterExprs;
     }
 
     bool ignoreDestructuredFormalParameters() const {
@@ -872,34 +931,14 @@ class BindingIter
                 MOZ_ASSERT(canHaveEnvironmentSlots());
                 environmentSlot_++;
             } else if (canHaveFrameSlots()) {
-                if (index_ >= nonPositionalFormalStart_)
-                    frameSlot_++;
+                frameSlot_++;
             }
         }
         index_++;
     }
 
     void settle() {
-        // Special settling behavior is only needed for formal parameters.
-        if (nonPositionalFormalStart_ == 0)
-            return;
-
-        // If a FunctionScope has parameters with default expressions, the
-        // parameters act like lexical bindings in the parameter defaults
-        // scope, which encloses the function scope. That is, they don't
-        // participate in the frame/environment layout of the FunctionScope.
-        //
-        // However, for error reporting and decompiling argument names, we
-        // still need to keep around the binding names. When iterating
-        // bindings for the purpose of computing frame/environment layout,
-        // ignore formal parameter names in FunctionScopes with parameters
-        // that have default expressions.
-        if (ignorePositionalFormalParameters()) {
-            // There can't be imports in a function scope.
-            MOZ_ASSERT(positionalFormalStart_ == 0);
-            while (index_ < nonPositionalFormalStart_)
-                increment();
-        } else if (ignoreDestructuredFormalParameters()) {
+        if (ignoreDestructuredFormalParameters()) {
             while (!done() && !name())
                 increment();
         }
@@ -913,10 +952,14 @@ class BindingIter
         init(data, firstFrameSlot, isNamedLambda ? IsNamedLambda : 0);
     }
 
-    BindingIter(FunctionScope::Data& data, uint32_t firstFrameSlot, bool hasDefaults) {
-        init(data, firstFrameSlot,
+    BindingIter(FunctionScope::Data& data, bool hasParameterExprs) {
+        init(data,
              IgnoreDestructuredFormalParameters |
-             (hasDefaults ? IgnorePositionalFormalParameters : 0));
+             (hasParameterExprs ? HasFormalParameterExprs : 0));
+    }
+
+    BindingIter(VarScope::Data& data, uint32_t firstFrameSlot) {
+        init(data, firstFrameSlot);
     }
 
     explicit BindingIter(GlobalScope::Data& data) {
@@ -996,10 +1039,8 @@ class BindingIter
             MOZ_ASSERT(canHaveEnvironmentSlots());
             return BindingLocation::Environment(environmentSlot_);
         }
-        if (index_ < nonPositionalFormalStart_) {
-            MOZ_ASSERT(canHaveArgumentSlots());
+        if (index_ < nonPositionalFormalStart_ && canHaveArgumentSlots())
             return BindingLocation::Argument(argumentSlot_);
-        }
         if (canHaveFrameSlots())
             return BindingLocation::Frame(frameSlot_);
         MOZ_ASSERT(isNamedLambda());
@@ -1010,8 +1051,13 @@ class BindingIter
         MOZ_ASSERT(!done());
         if (index_ < positionalFormalStart_)
             return BindingKind::Import;
-        if (index_ < varStart_)
+        if (index_ < varStart_) {
+            // When the parameter list has expressions, the parameters act
+            // like lexical bindings and have TDZ.
+            if (hasFormalParameterExprs())
+                return BindingKind::Let;
             return BindingKind::FormalParameter;
+        }
         if (index_ < letStart_)
             return BindingKind::Var;
         if (index_ < constStart_)
@@ -1023,6 +1069,8 @@ class BindingIter
 
     bool hasArgumentSlot() const {
         MOZ_ASSERT(!done());
+        if (hasFormalParameterExprs())
+            return false;
         return index_ >= positionalFormalStart_ && index_ < nonPositionalFormalStart_;
     }
 
@@ -1052,7 +1100,9 @@ void DumpBindings(JSContext* cx, Scope* scope);
 //
 class PositionalFormalParameterIter : public BindingIter
 {
-    bool hasDefaults_;
+#ifdef DEBUG
+    bool hasParameterExprs_;
+#endif
 
     void settle() {
         if (index_ >= nonPositionalFormalStart_)
@@ -1074,7 +1124,7 @@ class PositionalFormalParameterIter : public BindingIter
     BindingLocation location() const {
         // The locations reported by this iter are wrong when the script has a
         // defaults scope.
-        MOZ_ASSERT(!hasDefaults_);
+        MOZ_ASSERT(!hasParameterExprs_);
         return BindingIter::location();
     }
 };
@@ -1291,6 +1341,7 @@ struct ScopeDataGCPolicy
 
 DEFINE_SCOPE_DATA_GCPOLICY(js::LexicalScope::Data);
 DEFINE_SCOPE_DATA_GCPOLICY(js::FunctionScope::Data);
+DEFINE_SCOPE_DATA_GCPOLICY(js::VarScope::Data);
 DEFINE_SCOPE_DATA_GCPOLICY(js::GlobalScope::Data);
 DEFINE_SCOPE_DATA_GCPOLICY(js::EvalScope::Data);
 DEFINE_SCOPE_DATA_GCPOLICY(js::ModuleScope::Data);

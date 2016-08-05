@@ -840,9 +840,11 @@ CheckGlobalOrEvalDeclarationConflicts(JSContext* cx, BaselineFrame* frame)
         //
         // Non-strict eval may introduce 'var' bindings that conflict with
         // lexical bindings in an enclosing lexical scope.
-        if (!script->callObjScope()->hasEnvironment()) {
+        if (!script->bodyScope()->hasEnvironment()) {
             MOZ_ASSERT(!script->strict() &&
-                       script->enclosingScope()->kind() != ScopeKind::ParameterDefaults);
+                       (!script->enclosingScope()->is<FunctionScope>() ||
+                        !script->enclosingScope()->as<FunctionScope>()
+                        .script()->hasParameterExprs()));
             if (!CheckEvalDeclarationConflicts(cx, script, envChain, varObj))
                 return false;
         }
@@ -864,9 +866,9 @@ GlobalNameConflictsCheckFromIon(JSContext* cx, HandleScript script)
 }
 
 bool
-InitExtraFunctionEnvironmentObjects(JSContext* cx, BaselineFrame* frame)
+InitFunctionEnvironmentObjects(JSContext* cx, BaselineFrame* frame)
 {
-    return frame->initExtraFunctionEnvironmentObjects(cx);
+    return frame->initFunctionEnvironmentObjects(cx);
 }
 
 bool
@@ -1041,9 +1043,9 @@ DebugLeaveLexicalEnv(JSContext* cx, BaselineFrame* frame, jsbytecode* pc)
 }
 
 bool
-PushCallObject(JSContext* cx, BaselineFrame* frame)
+PushVarEnvironment(JSContext* cx, BaselineFrame* frame)
 {
-    return frame->pushCallObject(cx);
+    return frame->pushVarEnvironment(cx);
 }
 
 bool

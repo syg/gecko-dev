@@ -149,75 +149,6 @@ ParseContext::Scope::dump(ParseContext* pc)
     fprintf(stdout, "\n");
 }
 
-template <typename ParseHandler>
-ParseContext::Scope::AutoDefaultsScope::AutoDefaultsScope(Parser<ParseHandler>* parser)
-  : pc_(parser->pc),
-    usedNames_(parser->usedNames),
-    oldVarScopeId_(pc_->varScope().id())
-{
-    pc_->varScope().id_ = pc_->defaultsScope().id();
-}
-
-ParseContext::Scope::AutoDefaultsScope::~AutoDefaultsScope()
-{
-    MOZ_ASSERT(pc_->varScope().id() == pc_->defaultsScope().id());
-
-    if (pc_->functionBox()->hasDefaultsScope) {
-        // It is an invariant of scope numbering that scopes must be numbered in
-        // order of appearance in the text. Because it is not known at the start
-        // of parsing a function whether there will be a defaults scope, the var
-        // scope needs to be renumbered to preserve this invariant.
-
-#ifdef DEBUG
-        // First verify that we have not noted any uses in the old varScope id.
-        uint32_t oldVarScopeId = oldVarScopeId_;
-        auto hasUseExactlyInScope = [oldVarScopeId](JSAtom*, const UsedNameTracker::Use& use) {
-            return use.scopeId == oldVarScopeId;
-        };
-        MOZ_ASSERT(!usedNames_.hasUse(hasUseExactlyInScope));
-#endif
-
-        pc_->varScope().id_ = usedNames_.nextScopeId();
-    } else {
-        pc_->varScope().id_ = oldVarScopeId_;
-    }
-}
-
-template <typename ParseHandler>
-/* static */ bool
-ParseContext::Scope::moveFormalParameterNamesForDefaults(Parser<ParseHandler>* parser)
-{
-    // If we had default expressions, move all all formal parameter
-    // declarations from the var scope to the defaults scope as 'let'
-    // bindings, as the defaults scope has TDZ.
-
-    ParseContext* pc = parser->pc;
-    Scope& varScope = pc->varScope();
-    Scope& defaultsScope = pc->defaultsScope();
-    Vector<JSAtom*> paramNames(pc->sc()->context);
-
-    for (DeclaredNameMap::Range r = varScope.declared_->all(); !r.empty(); r.popFront()) {
-        DeclarationKind declKind = r.front().value()->kind();
-        if (declKind == DeclarationKind::PositionalFormalParameter ||
-            declKind == DeclarationKind::FormalParameter)
-        {
-            JSAtom* name = r.front().key();
-            AddDeclaredNamePtr p = defaultsScope.lookupDeclaredNameForAdd(name);
-            MOZ_ASSERT(!p);
-            if (!defaultsScope.addDeclaredName(pc, p, name, DeclarationKind::Let))
-                return false;
-
-            if (!paramNames.append(name))
-                return false;
-        }
-    }
-
-    for (uint32_t i = 0; i < paramNames.length(); i++)
-        varScope.declared_->remove(paramNames[i]);
-
-    return true;
-}
-
 /* static */ void
 ParseContext::Scope::removeVarForAnnexBLexicalFunction(ParseContext* pc, JSAtom* name)
 {
@@ -327,7 +258,7 @@ EvalSharedContext::EvalSharedContext(ExclusiveContext* cx, JSObject* enclosingEn
     if (enclosingEnv && enclosingEnv->is<DebugEnvironmentProxy>()) {
         JSObject* env = &enclosingEnv->as<DebugEnvironmentProxy>().environment();
         while (env) {
-            if (env->is<CallObject>() && !env->as<CallObject>().isForEval()) {
+            if (env->is<CallObject>()) {
                 computeThisBinding(env->as<CallObject>().callee().nonLazyScript()->bodyScope());
                 break;
             }
@@ -361,7 +292,7 @@ ParseContext::init()
                 return false;
         }
 
-        if (!defaultsScope_->init(this))
+        if (!functionScope_->init(this))
             return false;
 
         if (!positionalFormalParameterNames_.acquire(cx))
@@ -369,9 +300,6 @@ ParseContext::init()
         if (!closedOverBindingsForLazy_.acquire(cx))
             return false;
     }
-
-    if (!varScope_->init(this))
-        return false;
 
     if (!sc()->strict() && !innerFunctionBoxesForAnnexB_.acquire(cx))
         return false;
@@ -471,8 +399,8 @@ FunctionBox::FunctionBox(ExclusiveContext* cx, LifoAlloc& alloc, ObjectBox* trac
     SharedContext(cx, Kind::ObjectBox, directives, extraWarnings),
     enclosingScope_(nullptr),
     namedLambdaBindings_(nullptr),
-    defaultsScopeBindings_(nullptr),
-    varScopeBindings_(nullptr),
+    functionScopeBindings_(nullptr),
+    extraVarScopeBindings_(nullptr),
     functionNode(nullptr),
     bufStart(0),
     bufEnd(0),
@@ -482,7 +410,7 @@ FunctionBox::FunctionBox(ExclusiveContext* cx, LifoAlloc& alloc, ObjectBox* trac
     generatorKindBits_(GeneratorKindAsBits(generatorKind)),
     isGenexpLambda(false),
     hasDestructuringArgs(false),
-    hasDefaultsScope(false),
+    hasParameterExprs(false),
     useAsm(false),
     insideUseAsm(false),
     isAnnexB(false),
@@ -925,7 +853,7 @@ Parser<ParseHandler>::notePositionalFormalParameter(Node fn, HandlePropertyName 
                                                     bool disallowDuplicateParams,
                                                     bool *duplicatedParam)
 {
-    AddDeclaredNamePtr p = pc->varScope().lookupDeclaredNameForAdd(name);
+    AddDeclaredNamePtr p = pc->functionScope().lookupDeclaredNameForAdd(name);
     if (p) {
         // Strict-mode disallows duplicate args. We may not know whether we are
         // in strict mode or not (since the function body hasn't been parsed).
@@ -951,7 +879,7 @@ Parser<ParseHandler>::notePositionalFormalParameter(Node fn, HandlePropertyName 
             *duplicatedParam = true;
     } else {
         DeclarationKind kind = DeclarationKind::PositionalFormalParameter;
-        if (!pc->varScope().addDeclaredName(pc, p, name, kind))
+        if (!pc->functionScope().addDeclaredName(pc, p, name, kind))
             return false;
     }
 
@@ -1523,7 +1451,7 @@ Parser<FullParseHandler>::newEvalScopeData(ParseContext::Scope& scope,
 
 template <>
 Maybe<FunctionScope::Data*>
-Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope, bool hasDefaultsScope)
+Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope, bool hasParameterExprs)
 {
     Vector<BindingName> positionalFormals(context);
     Vector<BindingName> formals(context);
@@ -1533,25 +1461,17 @@ Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope, bool 
 
     // Positional parameter names must be added in order of appearance as they are
     // referenced using argument slots.
-    //
-    // These are added to the FunctionScope even when there is a defaults
-    // scope and parameter names are not in the FunctionScope proper. These
-    // are used for decompiling argument names.
     for (size_t i = 0; i < pc->positionalFormalParameterNames().length(); i++) {
         JSAtom* name = pc->positionalFormalParameterNames()[i];
 
         BindingName bindName;
         if (name) {
             DeclaredNamePtr p = scope.lookupDeclaredName(name);
-            MOZ_ASSERT_IF(!hasDefaultsScope,
-                          p->value()->kind() == DeclarationKind::PositionalFormalParameter ||
-                          DeclarationKindIsVar(p->value()->kind()));
 
             // Do not consider any positional formal parameters closed over if
             // there are parameter defaults. It is the binding in the defaults
             // scope that is closed over instead.
-            bindName = BindingName(name, !hasDefaultsScope &&
-                                         (allBindingsClosedOver ||
+            bindName = BindingName(name, (allBindingsClosedOver ||
                                           (p && p->value()->closedOver())));
         }
 
@@ -1570,6 +1490,7 @@ Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope, bool 
             }
             break;
           case BindingKind::Var:
+            MOZ_ASSERT(!hasParameterExprs);
             if (!vars.append(binding))
                 return Nothing();
             break;
@@ -1598,6 +1519,39 @@ Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope, bool 
         cursor += formals.length();
 
         bindings->varStart = cursor - start;
+        PodCopy(cursor, vars.begin(), vars.length());
+        bindings->length = numBindings;
+    }
+
+    return Some(bindings);
+}
+
+template <>
+Maybe<VarScope::Data*>
+Parser<FullParseHandler>::newVarScopeData(ParseContext::Scope& scope)
+{
+    Vector<BindingName> vars(context);
+
+    bool allBindingsClosedOver = pc->sc()->allBindingsClosedOver();
+
+    for (BindingIter bi = scope.bindings(pc); bi; bi++) {
+        BindingName binding(bi.name(), allBindingsClosedOver || bi.closedOver());
+        if (!vars.append(binding))
+            return Nothing();
+    }
+
+    VarScope::Data* bindings = nullptr;
+    uint32_t numBindings = vars.length();
+
+    if (numBindings > 0) {
+        bindings = NewEmptyBindingData<VarScope>(context, alloc, numBindings);
+        if (!bindings)
+            return Nothing();
+
+        // The ordering here is important. See comments in FunctionScope.
+        BindingName* start = bindings->names;
+        BindingName* cursor = start;
+
         PodCopy(cursor, vars.begin(), vars.length());
         bindings->length = numBindings;
     }
@@ -1684,12 +1638,6 @@ IsArgumentsUsedInLegacyGenerator(ExclusiveContext* cx, Scope* scope)
     JSAtom* argumentsName = cx->names().arguments;
     for (ScopeIter si(scope); si; si++) {
         if (si.scope()->is<LexicalScope>()) {
-            // The parameter defaults scope has its enclosed function's
-            // 'arguments' binding. Legacy generators never have parameter
-            // defaults.
-            if (si.kind() == ScopeKind::ParameterDefaults)
-                return false;
-
             // Using a shadowed lexical 'arguments' is okay.
             for (::BindingIter bi(si.scope()); bi; bi++) {
                 if (bi.name() == argumentsName)
@@ -1711,6 +1659,10 @@ Parser<FullParseHandler>::evalBody(EvalSharedContext* evalsc)
 {
     ParseContext evalpc(this, evalsc, /* newDirectives = */ nullptr);
     if (!evalpc.init())
+        return nullptr;
+
+    ParseContext::VarScope varScope(this);
+    if (!varScope.init(pc))
         return nullptr;
 
     // All evals have an implicit non-extensible lexical scope.
@@ -1787,6 +1739,10 @@ Parser<FullParseHandler>::globalBody(GlobalSharedContext* globalsc)
     if (!globalpc.init())
         return nullptr;
 
+    ParseContext::VarScope varScope(this);
+    if (!varScope.init(pc))
+        return nullptr;
+
     ParseNode* body = statements(YieldIsName);
     if (!body)
         return nullptr;
@@ -1817,6 +1773,10 @@ Parser<FullParseHandler>::moduleBody(ModuleSharedContext* modulesc)
     ParseContext modulepc(this, modulesc, nullptr);
     if (!modulepc.init())
         return null();
+
+    ParseContext::VarScope varScope(this);
+    if (!varScope.init(pc))
+        return nullptr;
 
     Node mn = handler.newModule();
     if (!mn)
@@ -1879,22 +1839,6 @@ Parser<SyntaxParseHandler>::moduleBody(ModuleSharedContext* modulesc)
 }
 
 template <typename ParseHandler>
-ParseContext::Scope&
-Parser<ParseHandler>::targetScopeForFunctionSpecialName(DeclarationKind* declKind)
-{
-    // The special names 'arguments' and '.this' are accessible from the
-    // defaults scope if there is one. For simplicity, since the defaults
-    // scope is a lexical scope (it has TDZ), declare the name as a let if it
-    // needs to go on the defaults scope.
-    if (pc->functionBox()->hasDefaultsScope) {
-        *declKind = DeclarationKind::Let;
-        return pc->defaultsScope();
-    }
-    *declKind = DeclarationKind::Var;
-    return pc->varScope();
-}
-
-template <typename ParseHandler>
 bool
 Parser<ParseHandler>::hasUsedFunctionSpecialName(HandlePropertyName name)
 {
@@ -1923,11 +1867,10 @@ Parser<ParseHandler>::declareFunctionThis()
         declareThis = hasUsedFunctionSpecialName(dotThis) || funbox->isDerivedClassConstructor();
 
     if (declareThis) {
-        DeclarationKind declKind;
-        ParseContext::Scope& targetScope = targetScopeForFunctionSpecialName(&declKind);
-        AddDeclaredNamePtr p = targetScope.lookupDeclaredNameForAdd(dotThis);
+        ParseContext::Scope& funScope = pc->functionScope();
+        AddDeclaredNamePtr p = funScope.lookupDeclaredNameForAdd(dotThis);
         MOZ_ASSERT(!p);
-        if (!targetScope.addDeclaredName(pc, p, dotThis, declKind))
+        if (!funScope.addDeclaredName(pc, p, dotThis, DeclarationKind::Var))
             return false;
         funbox->setHasThisBinding();
     }
@@ -1974,8 +1917,8 @@ Parser<ParseHandler>::finishExtraFunctionScopes()
 {
     FunctionBox* funbox = pc->functionBox();
 
-    if (funbox->hasDefaultsScope) {
-        if (!propagateFreeNamesAndMarkClosedOverBindings(pc->defaultsScope()))
+    if (funbox->hasParameterExprs) {
+        if (!propagateFreeNamesAndMarkClosedOverBindings(pc->varScope()))
             return false;
     }
 
@@ -1995,21 +1938,21 @@ Parser<FullParseHandler>::finishFunction()
         return false;
 
     FunctionBox* funbox = pc->functionBox();
-    bool hasDefaultsScope = funbox->hasDefaultsScope;
+    bool hasParameterExprs = funbox->hasParameterExprs;
 
-    {
-        Maybe<FunctionScope::Data*> bindings = newFunctionScopeData(pc->varScope(),
-                                                                    hasDefaultsScope);
+    if (hasParameterExprs) {
+        Maybe<VarScope::Data*> bindings = newVarScopeData(pc->varScope());
         if (!bindings)
             return false;
-        funbox->varScopeBindings().set(*bindings);
+        funbox->extraVarScopeBindings().set(*bindings);
     }
 
-    if (hasDefaultsScope) {
-        Maybe<LexicalScope::Data*> bindings = newLexicalScopeData(pc->defaultsScope());
+    {
+        Maybe<FunctionScope::Data*> bindings = newFunctionScopeData(pc->functionScope(),
+                                                                    hasParameterExprs);
         if (!bindings)
             return false;
-        funbox->defaultsScopeBindings().set(*bindings);
+        funbox->functionScopeBindings().set(*bindings);
     }
 
     if (funbox->function()->isNamedLambda()) {
@@ -2161,15 +2104,14 @@ Parser<ParseHandler>::declareFunctionArgumentsObject()
         tryDeclareArguments = hasUsedFunctionSpecialName(argumentsName);
 
     if (tryDeclareArguments) {
-        DeclarationKind declKind;
-        ParseContext::Scope& targetScope = targetScopeForFunctionSpecialName(&declKind);
-        AddDeclaredNamePtr p = targetScope.lookupDeclaredNameForAdd(argumentsName);
+        ParseContext::Scope& funScope = pc->functionScope();
+        AddDeclaredNamePtr p = funScope.lookupDeclaredNameForAdd(argumentsName);
         if (!p) {
-            if (!targetScope.addDeclaredName(pc, p, argumentsName, declKind))
+            if (!funScope.addDeclaredName(pc, p, argumentsName, DeclarationKind::Var))
                 return false;
             funbox->declaredArguments = true;
             funbox->usesArguments = true;
-        } else if (&targetScope == &pc->defaultsScope()) {
+        } else if (&funScope != &pc->varScope()) {
             // Formal parameters shadow the arguments object.
             return true;
         }
@@ -2220,6 +2162,10 @@ Parser<ParseHandler>::functionBody(InHandling inHandling, YieldHandling yieldHan
 #ifdef DEBUG
     uint32_t startYieldOffset = pc->lastYieldOffset;
 #endif
+
+    ParseContext::VarScope varScope(this);
+    if (!varScope.init(pc))
+        return null();
 
     Node pn;
     if (type == StatementListBody) {
@@ -2503,22 +2449,6 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
         bool disallowDuplicateParams = kind == Arrow || kind == Method || kind == ClassConstructor;
         AtomVector& positionalFormals = pc->positionalFormalParameterNames();
 
-        // Expressions in function arguments have their own scope to ensure
-        // that any closures created by those expressions do not have
-        // visibility of any bindings in the function body.
-        //
-        // Used names while parsing arguments always go onto the defaults
-        // scope. Used names arise in parameter default expressions and
-        // computed property names in destructured arguments, so having a used
-        // name at all means we need the defaults scope.
-        //
-        // Declared names go on the var scope, because it is unknown if a
-        // defaults scope will be needed until we parse the first default
-        // expression or computed property name. If a defaults scope is
-        // needed, the declared formal parameters will be moved to the
-        // defaults scope. See moveFormalParameterNamesForDefaults.
-        ParseContext::Scope::AutoDefaultsScope autoDefaults(this);
-
         if (IsGetterKind(kind)) {
             report(ParseError, false, null(), JSMSG_ACCESSOR_WRONG_ARGS, "getter", "no", "s");
             return false;
@@ -2642,8 +2572,8 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
                     report(ParseError, false, null(), JSMSG_BAD_DUP_ARGS);
                     return false;
                 }
-                if (!funbox->hasDefaultsScope) {
-                    funbox->hasDefaultsScope = true;
+                if (!funbox->hasParameterExprs) {
+                    funbox->hasParameterExprs = true;
 
                     // The Function.length property is the number of formals
                     // before the first default argument.
@@ -2682,12 +2612,8 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
             }
         }
 
-        if (funbox->hasDefaultsScope) {
-            if (!ParseContext::Scope::moveFormalParameterNamesForDefaults(this))
-                return false;
-        } else {
+        if (!funbox->hasParameterExprs)
             funbox->length = positionalFormals.length() - hasRest;
-        }
 
         funbox->function()->setArgCount(positionalFormals.length());
     } else if (IsSetterKind(kind)) {
@@ -6922,7 +6848,7 @@ class AutoClearInDestructuringDecl
     {
         pc->inDestructuringDecl = Nothing();
         if (saved_ && *saved_ == DeclarationKind::FormalParameter)
-            pc->functionBox()->hasDefaultsScope = true;
+            pc->functionBox()->hasParameterExprs = true;
     }
 
     ~AutoClearInDestructuringDecl() {
@@ -7395,6 +7321,10 @@ Parser<ParseHandler>::generatorComprehensionLambda(unsigned begin)
 
     ParseContext genpc(this, genFunbox, /* newDirectives = */ nullptr);
     if (!genpc.init())
+        return null();
+
+    ParseContext::VarScope varScope(this);
+    if (!varScope.init(pc))
         return null();
 
     /*

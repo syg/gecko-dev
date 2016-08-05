@@ -985,7 +985,6 @@ PopEnvironment(JSContext* cx, EnvironmentIter& ei)
     switch (ei.scope().kind()) {
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
-      case ScopeKind::ParameterDefaults:
         if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
             DebugEnvironments::onPopLexical(cx, ei);
         if (ei.scope().hasEnvironment())
@@ -997,12 +996,18 @@ PopEnvironment(JSContext* cx, EnvironmentIter& ei)
         ei.initialFrame().popOffEnvironmentChain<WithEnvironmentObject>();
         break;
       case ScopeKind::Function:
+        if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
+            DebugEnvironments::onPopCall(cx, ei.initialFrame());
+        if (ei.scope().hasEnvironment())
+            ei.initialFrame().popOffEnvironmentChain<CallObject>();
+        break;
+      case ScopeKind::Var:
       case ScopeKind::Eval:
       case ScopeKind::StrictEval:
         if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
-            DebugEnvironments::onPopCallOrEval(cx, ei.initialFrame());
+            DebugEnvironments::onPopVar(cx, ei);
         if (ei.scope().hasEnvironment())
-            ei.initialFrame().popOffEnvironmentChain<CallObject>();
+            ei.initialFrame().popOffEnvironmentChain<VarEnvironmentObject>();
         break;
       case ScopeKind::NamedLambda:
       case ScopeKind::StrictNamedLambda:
@@ -3805,15 +3810,15 @@ CASE(JSOP_RECREATELEXICALENV)
 }
 END_CASE(JSOP_RECREATELEXICALENV)
 
-CASE(JSOP_PUSHCALLOBJ)
+CASE(JSOP_PUSHVARENV)
 {
-    // Consider failure to push the CallObject a prologue error. Code that
-    // executed before this point dealt with parameter defaults and cannot
-    // contain try-catch or try-finally blocks.
-    if (!REGS.fp()->pushCallObject(cx))
+    // Consider failure to push the var environment a prologue error. Code
+    // that executed before this point dealt with parameter environments and
+    // cannot contain try-catch or try-finally blocks.
+    if (!REGS.fp()->pushVarEnvironment(cx))
         goto error;
 }
-END_CASE(JSOP_PUSHCALLOBJ)
+END_CASE(JSOP_PUSHVARENV)
 
 CASE(JSOP_GENERATOR)
 {

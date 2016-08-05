@@ -48,8 +48,8 @@ js::ScopeKindString(ScopeKind kind)
     switch (kind) {
       case ScopeKind::Function:
         return "function";
-      case ScopeKind::ParameterDefaults:
-        return "parameter defaults";
+      case ScopeKind::Var:
+        return "var";
       case ScopeKind::Lexical:
         return "lexical";
       case ScopeKind::Catch:
@@ -320,7 +320,15 @@ Scope::clone(JSContext* cx, HandleScope scope, HandleScope enclosing)
         MOZ_CRASH("Use FunctionScope::clone.");
         break;
 
-      case ScopeKind::ParameterDefaults:
+      case ScopeKind::Var: {
+        Rooted<VarScope::Data*> original(cx, &scope->as<VarScope>().data());
+        VarScope::Data* clone = CopyScopeData<VarScope>(cx, original);
+        if (!clone)
+            return nullptr;
+        dataClone = reinterpret_cast<uintptr_t>(clone);
+        break;
+      }
+
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
       case ScopeKind::NamedLambda:
@@ -419,7 +427,8 @@ LexicalScope::nextFrameSlot(Scope* scope)
         switch (si.kind()) {
           case ScopeKind::Function:
             return si.scope()->as<FunctionScope>().nextFrameSlot();
-          case ScopeKind::ParameterDefaults:
+          case ScopeKind::Var:
+            return si.scope()->as<VarScope>().nextFrameSlot();
           case ScopeKind::Lexical:
           case ScopeKind::Catch:
             return si.scope()->as<LexicalScope>().nextFrameSlot();
@@ -538,22 +547,20 @@ template
 LexicalScope::XDR(XDRState<XDR_DECODE>* xdr, ScopeKind kind, HandleScope enclosing,
                   MutableHandleScope scope);
 
-static const uint32_t FunctionScopeEnvShapeFlags =
-    BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE;
+static inline uint32_t
+FunctionScopeEnvShapeFlags(bool hasParameterExprs)
+{
+    if (hasParameterExprs)
+        return BaseShape::DELEGATE;
+    return BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE;
+}
 
 /* static */ FunctionScope*
 FunctionScope::create(ExclusiveContext* cx, Handle<Data*> data,
-                      uint32_t firstFrameSlot, bool hasDefaults, bool needsEnvironment,
+                      bool hasParameterExprs, bool needsEnvironment,
                       HandleFunction fun, HandleScope enclosing)
 {
-    MOZ_ASSERT_IF(!hasDefaults, firstFrameSlot == 0);
     MOZ_ASSERT(fun->isTenured());
-
-    // Note that enclosing->kind() == ScopeKind::ParameterDefaults does not
-    // imply that this function scope has a parameter defaults scope. The
-    // parameter defaults scope could be in an enclosing function.
-    MOZ_ASSERT_IF(hasDefaults, enclosing->kind() == ScopeKind::ParameterDefaults);
-    MOZ_ASSERT_IF(hasDefaults, firstFrameSlot == enclosing->as<LexicalScope>().nextFrameSlot());
 
     // The data that's passed in may be from the frontend and LifoAlloc'd.
     // Copy it now that we're creating a permanent VM scope.
@@ -561,10 +568,11 @@ FunctionScope::create(ExclusiveContext* cx, Handle<Data*> data,
     Rooted<Data*> copy(cx);
 
     if (data) {
-        BindingIter bi(*data, firstFrameSlot, hasDefaults);
+        BindingIter bi(*data, hasParameterExprs);
+        uint32_t shapeFlags = FunctionScopeEnvShapeFlags(hasParameterExprs);
         copy = CopyScopeData<FunctionScope>(cx, bi, data,
                                             &CallObject::class_,
-                                            FunctionScopeEnvShapeFlags, &envShape);
+                                            shapeFlags, &envShape);
     } else {
         copy = NewEmptyScopeData<FunctionScope>(cx);
     }
@@ -579,7 +587,7 @@ FunctionScope::create(ExclusiveContext* cx, Handle<Data*> data,
     //   - Being a derived class constructor
     //   - Being a generator
     if (!envShape && needsEnvironment) {
-        envShape = getEmptyEnvironmentShape(cx);
+        envShape = getEmptyEnvironmentShape(cx, hasParameterExprs);
         if (!envShape) {
             js_free(copy);
             return nullptr;
@@ -604,23 +612,11 @@ FunctionScope::script() const
 }
 
 /* static */ Shape*
-FunctionScope::getEmptyEnvironmentShape(ExclusiveContext* cx)
+FunctionScope::getEmptyEnvironmentShape(ExclusiveContext* cx, bool hasParameterExprs)
 {
     const Class* cls = &CallObject::class_;
-    return EmptyEnvironmentShape(cx, cls, JSSLOT_FREE(cls), FunctionScopeEnvShapeFlags);
-}
-
-uint32_t
-FunctionScope::firstFrameSlot() const
-{
-    if (script()->hasDefaultsScope()) {
-        // A function scope's first frame slot may be non-0 when a formal
-        // parameter default expression scope is present. In that case, if the
-        // defaults scope has any non-closed over bindings, the first function
-        // scope frame slot would be non-0.
-        return enclosing()->as<LexicalScope>().nextFrameSlot();
-    }
-    return 0;
+    uint32_t shapeFlags = FunctionScopeEnvShapeFlags(hasParameterExprs);
+    return EmptyEnvironmentShape(cx, cls, JSSLOT_FREE(cls), shapeFlags);
 }
 
 /* static */ FunctionScope*
@@ -668,25 +664,21 @@ FunctionScope::XDR(XDRState<mode>* xdr, HandleFunction fun, HandleScope enclosin
                 js_free(data);
         });
 
-        uint8_t hasDefaults;
+        uint8_t hasParameterExprs;
         uint8_t needsEnvironment;
-        uint32_t firstFrameSlot;
         uint32_t nextFrameSlot;
         if (mode == XDR_ENCODE) {
-            hasDefaults = fun->nonLazyScript()->hasDefaultsScope();
+            hasParameterExprs = fun->nonLazyScript()->hasParameterExprs();
             needsEnvironment = scope->hasEnvironment();
-            firstFrameSlot = scope->as<FunctionScope>().firstFrameSlot();
             nextFrameSlot = data->nextFrameSlot;
         }
-        if (!xdr->codeUint8(&hasDefaults))
+        if (!xdr->codeUint8(&hasParameterExprs))
             return false;
         if (!xdr->codeUint8(&needsEnvironment))
             return false;
         if (!xdr->codeUint16(&data->nonPositionalFormalStart))
             return false;
         if (!xdr->codeUint16(&data->varStart))
-            return false;
-        if (!xdr->codeUint32(&firstFrameSlot))
             return false;
         if (!xdr->codeUint32(&nextFrameSlot))
             return false;
@@ -700,8 +692,7 @@ FunctionScope::XDR(XDRState<mode>* xdr, HandleFunction fun, HandleScope enclosin
                 data = nullptr;
             }
 
-            scope.set(create(cx, data, firstFrameSlot, hasDefaults,
-                             needsEnvironment, fun, enclosing));
+            scope.set(create(cx, data, hasParameterExprs, needsEnvironment, fun, enclosing));
             if (!scope)
                 return false;
 
@@ -722,6 +713,124 @@ template
 /* static */ bool
 FunctionScope::XDR(XDRState<XDR_DECODE>* xdr, HandleFunction fun, HandleScope enclosing,
                    MutableHandleScope scope);
+
+static const uint32_t VarScopeEnvShapeFlags =
+    BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE;
+
+/* static */ VarScope*
+VarScope::create(ExclusiveContext* cx, Handle<Data*> data, uint32_t firstFrameSlot,
+                 bool needsEnvironment, HandleScope enclosing)
+{
+    // The data that's passed in may be from the frontend and LifoAlloc'd.
+    // Copy it now that we're creating a permanent VM scope.
+    RootedShape envShape(cx);
+    Rooted<Data*> copy(cx);
+
+    if (data) {
+        BindingIter bi(*data, firstFrameSlot);
+        copy = CopyScopeData<VarScope>(cx, bi, data,
+                                            &VarEnvironmentObject::class_,
+                                            VarScopeEnvShapeFlags, &envShape);
+    } else {
+        copy = NewEmptyScopeData<VarScope>(cx);
+    }
+
+    if (!copy)
+        return nullptr;
+
+    // An environment may be needed regardless of existence of any closed over
+    // bindings:
+    //   - Extensible scopes (i.e., due to direct eval)
+    //   - Being a generator
+    if (!envShape && needsEnvironment) {
+        envShape = getEmptyEnvironmentShape(cx);
+        if (!envShape) {
+            js_free(copy);
+            return nullptr;
+        }
+    }
+
+    Scope* scope = Scope::create(cx, ScopeKind::Var, enclosing, envShape,
+                                 reinterpret_cast<uintptr_t>(copy.get()));
+    if (!scope) {
+        js_free(copy);
+        return nullptr;
+    }
+
+    return &scope->as<VarScope>();
+}
+
+/* static */ Shape*
+VarScope::getEmptyEnvironmentShape(ExclusiveContext* cx)
+{
+    const Class* cls = &VarEnvironmentObject::class_;
+    return EmptyEnvironmentShape(cx, cls, JSSLOT_FREE(cls), VarScopeEnvShapeFlags);
+}
+
+uint32_t
+VarScope::firstFrameSlot() const
+{
+    if (enclosing()->is<FunctionScope>())
+        return enclosing()->as<FunctionScope>().nextFrameSlot();
+    return 0;
+}
+
+template <XDRMode mode>
+/* static */ bool
+VarScope::XDR(XDRState<mode>* xdr, HandleScope enclosing, MutableHandleScope scope)
+{
+    JSContext* cx = xdr->cx();
+    Rooted<Data*> data(cx);
+    if (!XDRSizedBindingNames<VarScope>(xdr, scope.as<VarScope>(), &data))
+        return false;
+
+    {
+        auto freeOnLeave = MakeScopeExit([&data]() {
+            if (mode == XDR_DECODE)
+                js_free(data);
+        });
+
+        uint8_t needsEnvironment;
+        uint32_t firstFrameSlot;
+        uint32_t nextFrameSlot;
+        if (mode == XDR_ENCODE) {
+            needsEnvironment = scope->hasEnvironment();
+            firstFrameSlot = scope->as<VarScope>().firstFrameSlot();
+            nextFrameSlot = data->nextFrameSlot;
+        }
+        if (!xdr->codeUint8(&needsEnvironment))
+            return false;
+        if (!xdr->codeUint32(&firstFrameSlot))
+            return false;
+        if (!xdr->codeUint32(&nextFrameSlot))
+            return false;
+
+        if (mode == XDR_DECODE) {
+            if (!data->length) {
+                MOZ_ASSERT(!data->nextFrameSlot);
+                js_free(data);
+                data = nullptr;
+            }
+
+            scope.set(create(cx, data, firstFrameSlot, needsEnvironment, enclosing));
+            if (!scope)
+                return false;
+
+            // nextFrameSlot is used only for this correctness check.
+            MOZ_ASSERT(nextFrameSlot == scope->as<VarScope>().data().nextFrameSlot);
+        }
+    }
+
+    return true;
+}
+
+template
+/* static */ bool
+VarScope::XDR(XDRState<XDR_ENCODE>* xdr, HandleScope enclosing, MutableHandleScope scope);
+
+template
+/* static */ bool
+VarScope::XDR(XDRState<XDR_DECODE>* xdr, HandleScope enclosing, MutableHandleScope scope);
 
 /* static */ GlobalScope*
 GlobalScope::create(ExclusiveContext* cx, ScopeKind kind, Handle<Data*> data)
@@ -841,7 +950,7 @@ EvalScope::create(ExclusiveContext* cx, ScopeKind scopeKind, Handle<Data*> data,
         if (scopeKind == ScopeKind::StrictEval) {
             BindingIter bi(*data, true);
             copy = CopyScopeData<EvalScope>(cx, bi, data,
-                                            &CallObject::class_,
+                                            &VarEnvironmentObject::class_,
                                             EvalScopeEnvShapeFlags, &envShape);
         } else {
             copy = CopyScopeData<EvalScope>(cx, data);
@@ -853,10 +962,11 @@ EvalScope::create(ExclusiveContext* cx, ScopeKind scopeKind, Handle<Data*> data,
     if (!copy)
         return nullptr;
 
-    // Strict eval and direct eval in parameter defaults always get their own
+    // Strict eval and direct eval in parameter expressions always get their own
     // var environment even if there are no bindings.
     if (!envShape && (scopeKind == ScopeKind::StrictEval ||
-                      enclosing->kind() == ScopeKind::ParameterDefaults))
+                      (enclosing->is<FunctionScope>() &&
+                       enclosing->as<FunctionScope>().script()->hasParameterExprs())))
     {
         envShape = getEmptyEnvironmentShape(cx);
         if (!envShape) {
@@ -881,11 +991,6 @@ EvalScope::nearestVarScopeForDirectEval(Scope* scope)
     for (ScopeIter si(scope); si; si++) {
         switch (si.kind()) {
           case ScopeKind::Function:
-          case ScopeKind::ParameterDefaults:
-            // Direct evals in parameter default expressions always get
-            // their own var scopes. Note that the parameter defaults
-            // isn't itself the var scope (conceptually a fresh one is
-            // created for each default expression).
           case ScopeKind::Global:
           case ScopeKind::NonSyntactic:
             return scope;
@@ -899,7 +1004,7 @@ EvalScope::nearestVarScopeForDirectEval(Scope* scope)
 /* static */ Shape*
 EvalScope::getEmptyEnvironmentShape(ExclusiveContext* cx)
 {
-    const Class* cls = &CallObject::class_;
+    const Class* cls = &VarEnvironmentObject::class_;
     return EmptyEnvironmentShape(cx, cls, JSSLOT_FREE(cls), EvalScopeEnvShapeFlags);
 }
 
@@ -1030,7 +1135,6 @@ ScopeIter::hasSyntacticEnvironment() const
 BindingIter::BindingIter(Scope* scope)
 {
     switch (scope->kind()) {
-      case ScopeKind::ParameterDefaults:
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
         init(scope->as<LexicalScope>().data(),
@@ -1046,14 +1150,16 @@ BindingIter::BindingIter(Scope* scope)
         MOZ_ASSERT(done());
         break;
       case ScopeKind::Function: {
-        uint8_t ignoreFlags = IgnoreDestructuredFormalParameters;
-        if (scope->as<FunctionScope>().canonicalFunction()->nonLazyScript()->hasDefaultsScope())
-            ignoreFlags |= IgnorePositionalFormalParameters;
-        init(scope->as<FunctionScope>().data(),
-             scope->as<FunctionScope>().firstFrameSlot(),
-             ignoreFlags);
+        uint8_t flags = IgnoreDestructuredFormalParameters;
+        if (scope->as<FunctionScope>().script()->hasParameterExprs())
+            flags |= HasFormalParameterExprs;
+        init(scope->as<FunctionScope>().data(), flags);
         break;
       }
+      case ScopeKind::Var:
+        init(scope->as<VarScope>().data(),
+             scope->as<VarScope>().firstFrameSlot());
+        break;
       case ScopeKind::Eval:
       case ScopeKind::StrictEval:
         init(scope->as<EvalScope>().data(), scope->kind() == ScopeKind::StrictEval);
@@ -1099,8 +1205,12 @@ BindingIter::init(LexicalScope::Data& data, uint32_t firstFrameSlot, uint8_t fla
 }
 
 void
-BindingIter::init(FunctionScope::Data& data, uint32_t firstFrameSlot, uint8_t flags)
+BindingIter::init(FunctionScope::Data& data, uint8_t flags)
 {
+    flags = CanHaveFrameSlots | CanHaveEnvironmentSlots | flags;
+    if (!(flags & HasFormalParameterExprs))
+        flags |= CanHaveArgumentSlots;
+
     //            imports - [0, 0)
     // positional formals - [0, data.nonPositionalFormalStart)
     //      other formals - [data.nonPositionalParamStart, data.varStart)
@@ -1108,8 +1218,23 @@ BindingIter::init(FunctionScope::Data& data, uint32_t firstFrameSlot, uint8_t fl
     //               lets - [data.length, data.length)
     //             consts - [data.length, data.length)
     init(0, data.nonPositionalFormalStart, data.varStart, data.length, data.length,
-         CanHaveArgumentSlots | CanHaveFrameSlots | CanHaveEnvironmentSlots | flags,
-         firstFrameSlot, JSSLOT_FREE(&CallObject::class_),
+         flags,
+         0, JSSLOT_FREE(&CallObject::class_),
+         data.names, data.length);
+}
+
+void
+BindingIter::init(VarScope::Data& data, uint32_t firstFrameSlot)
+{
+    //            imports - [0, 0)
+    // positional formals - [0, 0)
+    //      other formals - [0, 0)
+    //               vars - [0, data.length)
+    //               lets - [data.length, data.length)
+    //             consts - [data.length, data.length)
+    init(0, 0, 0, data.length, data.length,
+         CanHaveFrameSlots | CanHaveEnvironmentSlots,
+         firstFrameSlot, JSSLOT_FREE(&VarEnvironmentObject::class_),
          data.names, data.length);
 }
 
@@ -1137,7 +1262,7 @@ BindingIter::init(EvalScope::Data& data, bool strict)
     if (strict) {
         flags = CanHaveFrameSlots | CanHaveEnvironmentSlots;
         firstFrameSlot = 0;
-        firstEnvironmentSlot = JSSLOT_FREE(&CallObject::class_);
+        firstEnvironmentSlot = JSSLOT_FREE(&VarEnvironmentObject::class_);
     } else {
         flags = CannotHaveSlots;
         firstFrameSlot = UINT32_MAX;
@@ -1171,12 +1296,14 @@ BindingIter::init(ModuleScope::Data& data)
 }
 
 PositionalFormalParameterIter::PositionalFormalParameterIter(JSScript* script)
-  : BindingIter(script),
-    hasDefaults_(script->hasDefaultsScope())
+  : BindingIter(script)
+#ifdef DEBUG
+  , hasParameterExprs_(script->hasParameterExprs())
+#endif
 {
     // Reinit with flags = 0, i.e., iterate over all positional parameters.
     if (script->bodyScope()->is<FunctionScope>())
-        init(script->bodyScope()->as<FunctionScope>().data(), 0, /* flags = */ 0);
+        init(script->bodyScope()->as<FunctionScope>().data(), /* flags = */ 0);
     settle();
 }
 
@@ -1208,20 +1335,6 @@ js::DumpBindings(JSContext* cx, Scope* scopeArg)
           case BindingLocation::Kind::Import:
             fprintf(stderr, "import\n");
             break;
-        }
-    }
-
-    if (scope->is<FunctionScope>()) {
-        JSScript* script = scope->as<FunctionScope>().canonicalFunction()->nonLazyScript();
-        if (script->hasDefaultsScope()) {
-            using PFPIter = PositionalFormalParameterIter;
-            for (Rooted<PFPIter> fi(cx, PFPIter(script)); fi; fi++) {
-                JSAutoByteString bytes;
-                if (!AtomToPrintableString(cx, fi.name(), &bytes))
-                    return;
-                fprintf(stderr, "%s %s (in defaults scope)\n",
-                        BindingKindString(fi.kind()), bytes.ptr());
-            }
         }
     }
 }

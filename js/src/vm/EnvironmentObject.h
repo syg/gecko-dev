@@ -58,9 +58,7 @@ EnvironmentCoordinateFunctionScript(JSScript* script, jsbytecode* pc);
  *   JSObject                           Generic object
  *     |
  *   EnvironmentObject                  Engine-internal environment
- *     |   |   |
- *     |   |  VarEnvironmentObject      Shared base for function and modules envs
- *     |   |   |   |
+ *     |   |   |    |
  *     |   |   |  CallObject            Environment of entire function or strict eval
  *     |   |   |
  *     |   |  ModuleEnvironmentObject   Module top-level environment
@@ -261,20 +259,10 @@ class CallObject : public EnvironmentObject
     static CallObject* createTemplateObject(JSContext* cx, HandleScript script,
                                             HandleObject enclosing, gc::InitialHeap heap);
 
-    static CallObject* createForFunction(JSContext* cx, HandleFunction callee,
-                                         HandleObject enclosing);
+    static CallObject* create(JSContext* cx, HandleFunction callee, HandleObject enclosing);
+    static CallObject* create(JSContext* cx, AbstractFramePtr frame);
 
-    static CallObject* createForFunction(JSContext* cx, AbstractFramePtr frame);
-    static CallObject* createForEval(JSContext* cx, AbstractFramePtr frame);
     static CallObject* createHollowForDebug(JSContext* cx, HandleFunction callee);
-
-    /* True if this is for a strict mode eval frame. */
-    bool isForEval() const {
-        MOZ_ASSERT(getFixedSlot(CALLEE_SLOT).isObjectOrNull());
-        MOZ_ASSERT_IF(getFixedSlot(CALLEE_SLOT).isObject(),
-                      getFixedSlot(CALLEE_SLOT).toObject().is<JSFunction>());
-        return getFixedSlot(CALLEE_SLOT).isNull();
-    }
 
     /*
      * When an aliased formal (var accessed by nested closures) is also
@@ -290,10 +278,6 @@ class CallObject : public EnvironmentObject
     inline void setAliasedFormalFromArguments(JSContext* cx, const Value& argsValue, jsid id,
                                               const Value& v);
 
-    /*
-     * Returns the function for which this CallObject was created. (This may
-     * only be called if !isForEval.)
-     */
     JSFunction& callee() const {
         return getReservedSlot(CALLEE_SLOT).toObject().as<JSFunction>();
     }
@@ -305,6 +289,39 @@ class CallObject : public EnvironmentObject
 
     static size_t calleeSlot() {
         return CALLEE_SLOT;
+    }
+};
+
+class VarEnvironmentObject : public EnvironmentObject
+{
+    static const uint32_t SCOPE_SLOT = 1;
+
+    static VarEnvironmentObject* create(JSContext* cx, HandleShape shape, HandleObject enclosing,
+                                        gc::InitialHeap heap);
+    static VarEnvironmentObject* create(JSContext* cx, HandleScope scope, AbstractFramePtr frame);
+
+    void initScope(Scope* scope) {
+        initReservedSlot(SCOPE_SLOT, PrivateGCThingValue(scope));
+    }
+
+  public:
+    static const uint32_t RESERVED_SLOTS = 2;
+    static const Class class_;
+
+    static VarEnvironmentObject* createForFunction(JSContext* cx, AbstractFramePtr frame);
+    static VarEnvironmentObject* createForEval(JSContext* cx, AbstractFramePtr frame);
+    static VarEnvironmentObject* createHollowForDebug(JSContext* cx, Handle<VarScope*> scope);
+
+    Scope& scope() const {
+        Value v = getReservedSlot(SCOPE_SLOT);
+        MOZ_ASSERT(v.isPrivateGCThing());
+        Scope& s = *static_cast<Scope*>(v.toGCThing());
+        MOZ_ASSERT(s.is<VarScope>() || s.is<EvalScope>());
+        return s;
+    }
+
+    bool isForEval() const {
+        return scope().is<EvalScope>();
     }
 };
 
@@ -842,6 +859,9 @@ class DebugEnvironments
 
     static DebugEnvironments* ensureCompartmentData(JSContext* cx);
 
+    template <typename Environment, typename Scope>
+    static void onPopGeneric(JSContext* cx, const EnvironmentIter& ei);
+
   public:
     void mark(JSTracer* trc);
     void sweep(JSRuntime* rt);
@@ -877,7 +897,9 @@ class DebugEnvironments
 
     // In debug-mode, these must be called whenever exiting a scope that might
     // have stack-allocated locals.
-    static void onPopCallOrEval(JSContext* cx, AbstractFramePtr frame);
+    static void onPopCall(JSContext* cx, AbstractFramePtr frame);
+    static void onPopVar(JSContext* cx, const EnvironmentIter& ei);
+    static void onPopVar(JSContext* cx, AbstractFramePtr frame, jsbytecode* pc);
     static void onPopLexical(JSContext* cx, const EnvironmentIter& ei);
     static void onPopLexical(JSContext* cx, AbstractFramePtr frame, jsbytecode* pc);
     static void onPopWith(AbstractFramePtr frame);
@@ -965,7 +987,10 @@ CheckEvalDeclarationConflicts(JSContext* cx, HandleScript script, HandleObject e
                               HandleObject varObj);
 
 MOZ_MUST_USE bool
-InitExtraFunctionEnvironmentObjects(JSContext* cx, AbstractFramePtr frame);
+InitFunctionEnvironmentObjects(JSContext* cx, AbstractFramePtr frame);
+
+MOZ_MUST_USE bool
+PushVarEnvironmentObject(JSContext* cx, AbstractFramePtr frame);
 
 #ifdef DEBUG
 bool

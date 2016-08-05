@@ -661,8 +661,6 @@ BaselineInspector::templateNamedLambdaObject()
     JSObject* res = baselineScript()->templateEnvironment();
     if (script->bodyScope()->hasEnvironment())
         res = res->enclosingEnvironment();
-    if (script->hasDefaultsScope() && script->defaultsScope()->hasEnvironment())
-        res = res->enclosingEnvironment();
     MOZ_ASSERT(res);
 
     return &res->as<LexicalEnvironmentObject>();

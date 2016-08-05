@@ -2360,10 +2360,10 @@ CheckScript(JSContext* cx, JSScript* script, bool osr)
         return false;
     }
 
-    if (script->hasDefaultsScope() && script->defaultsScope()->hasEnvironment()) {
-        // This restriction will be lifted when lexical environments are
-        // compilable by Ion. See bug 1273858.
-        TrackAndSpewIonAbort(cx, script, "has parameter defaults environment");
+    if (script->hasParameterExprs() && script->extraVarScope()->hasEnvironment()) {
+        // This restriction will be lifted when intra-function scope chains
+        // are compilable by Ion. See bug 1273858.
+        TrackAndSpewIonAbort(cx, script, "has extra var environment");
         return false;
     }
 

@@ -1241,6 +1241,11 @@ FunctionScope::Data::trace(JSTracer* trc)
     TraceNullableBindingNames(trc, names, length);
 }
 void
+VarScope::Data::trace(JSTracer* trc)
+{
+    TraceBindingNames(trc, names, length);
+}
+void
 GlobalScope::Data::trace(JSTracer* trc)
 {
     TraceBindingNames(trc, names, length);
@@ -1265,7 +1270,9 @@ Scope::traceChildren(JSTracer* trc)
       case ScopeKind::Function:
         reinterpret_cast<FunctionScope::Data*>(data_)->trace(trc);
         break;
-      case ScopeKind::ParameterDefaults:
+      case ScopeKind::Var:
+        reinterpret_cast<VarScope::Data*>(data_)->trace(trc);
+        break;
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
       case ScopeKind::NamedLambda:
@@ -1305,7 +1312,13 @@ js::GCMarker::eagerlyMarkChildren(Scope* scope)
         break;
       }
 
-      case ScopeKind::ParameterDefaults:
+      case ScopeKind::Var: {
+        VarScope::Data* data = reinterpret_cast<VarScope::Data*>(scope->data_);
+        names = data->names;
+        length = data->length;
+        break;
+      }
+
       case ScopeKind::Lexical:
       case ScopeKind::Catch:
       case ScopeKind::NamedLambda:

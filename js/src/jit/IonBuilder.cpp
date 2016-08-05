@@ -1240,8 +1240,9 @@ IonBuilder::initEnvironmentChain(MDefinition* callee)
                     return false;
             }
 
-            // TODO: Defaults not yet handled.
-            MOZ_ASSERT(!fun->needsDefaultsEnvironment());
+            // TODO: Parameter expression-induced extra var environment not
+            // yet handled.
+            MOZ_ASSERT(!fun->needsExtraVarEnvironment());
 
             if (fun->needsCallObject()) {
                 // See comment in BytecodeAnalysis.h
@@ -2145,17 +2146,6 @@ IonBuilder::inspectOpcode(JSOp op)
 
       case JSOP_CHECKOBJCOERCIBLE:
         return jsop_checkobjcoercible();
-
-      case JSOP_PUSHCALLOBJ:
-        // Having a parameter defaults environment requires delaying pushing
-        // the call object until after parameter defaults are finished
-        // evaluating. Ion doesn't compile scripts with defaults yet and
-        // creates the call object up front. Assert that now.
-        MOZ_ASSERT(!script()->functionNonDelazifying()->needsDefaultsEnvironment());
-        MOZ_ASSERT_IF(!info().isAnalysis(),
-                      current->environmentChain()->op() == MDefinition::Op_NewCallObject ||
-                      current->environmentChain()->op() == MDefinition::Op_NewSingletonCallObject);
-        return true;
 
       case JSOP_DEBUGCHECKSELFHOSTED:
       {
@@ -13617,7 +13607,6 @@ IonBuilder::hasStaticEnvironmentObject(EnvironmentCoordinate ec, JSObject** pcal
     JSObject* environment = script()->functionNonDelazifying()->environment();
     while (environment && !environment->is<GlobalObject>()) {
         if (environment->is<CallObject>() &&
-            !environment->as<CallObject>().isForEval() &&
             environment->as<CallObject>().callee().nonLazyScript() == outerScript)
         {
             MOZ_ASSERT(environment->isSingleton());

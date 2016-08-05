@@ -26,8 +26,6 @@ class ModuleObject;
 
 namespace frontend {
 
-class UsedNameTracker;
-
 /*
  * The struct ParseContext stores information about the current parsing context,
  * which is part of the parser state (see the field Parser::pc). The current
@@ -121,21 +119,6 @@ class ParseContext : public Nestable<ParseContext>
 
         using Nestable<Scope>::enclosing;
 
-        // Used when parsing function arguments with its odd scoping
-        // rules. See note in Parser::functionArguments.
-        class AutoDefaultsScope
-        {
-            ParseContext* pc_;
-            UsedNameTracker& usedNames_;
-            uint32_t oldVarScopeId_;
-
-          public:
-            template <typename ParseHandler>
-            explicit AutoDefaultsScope(Parser<ParseHandler>* parser);
-
-            ~AutoDefaultsScope();
-        };
-
         template <typename ParseHandler>
         explicit Scope(Parser<ParseHandler>* parser)
           : Nestable<Scope>(&parser->pc->innermostScope_),
@@ -171,11 +154,6 @@ class ParseContext : public Nestable<ParseContext>
         {
             return maybeReportOOM(pc, declared_->add(p, name, DeclaredNameInfo(kind)));
         }
-
-        // Move all declared parameter names to the parameter default
-        // expression scope.
-        template <typename ParseHandler>
-        static MOZ_MUST_USE bool moveFormalParameterNamesForDefaults(Parser<ParseHandler>* parser);
 
         // Remove all VarForAnnexBLexicalFunction declarations of a certain
         // name from all scopes in pc's scope stack.
@@ -256,6 +234,40 @@ class ParseContext : public Nestable<ParseContext>
         inline BindingIter bindings(ParseContext* pc);
     };
 
+    class MOZ_STACK_CLASS VarScope
+    {
+        ParseContext* pc_;
+        mozilla::Maybe<Scope> varScope_;
+
+      public:
+        template <typename ParseHandler>
+        explicit VarScope(Parser<ParseHandler>* parser)
+          : pc_(parser->pc)
+        {
+            MOZ_ASSERT(!pc_->varScope_);
+            if (!pc_->isFunctionBox() || pc_->functionBox()->hasParameterExprs) {
+                varScope_.emplace(parser);
+                pc_->varScope_ = varScope_.ptr();
+            } else {
+                pc_->varScope_ = &pc_->functionScope();
+            }
+        }
+
+        MOZ_MUST_USE bool init(ParseContext* pc) {
+            if (varScope_)
+                return varScope_->init(pc);
+            return true;
+        }
+
+        ~VarScope() {
+            if (!pc_->isFunctionBox() || pc_->functionBox()->hasParameterExprs)
+                MOZ_ASSERT(pc_->varScope_ == varScope_.ptr());
+            else
+                MOZ_ASSERT(pc_->varScope_ == &pc_->functionScope());
+            pc_->varScope_ = nullptr;
+        }
+    };
+
   private:
     // Context shared between parsing and bytecode generation.
     SharedContext* sc_;
@@ -275,13 +287,16 @@ class ParseContext : public Nestable<ParseContext>
     // scope for named lambdas.
     mozilla::Maybe<Scope> namedLambdaScope_;
 
-    // If isFunctionBox(), the scope for parameter default expressions.
-    mozilla::Maybe<Scope> defaultsScope_;
+    // If isFunctionBox(), the scope for the function. If there are no
+    // parameter expressions, this is scope for the entire function. If there
+    // are parameter expressions, this holds the special function names
+    // ('.this', 'arguments') and the formal parameers.
+    mozilla::Maybe<Scope> functionScope_;
 
-    // The body-level scope. This always exists, but since Scopes are LIFO, is
-    // wrapped in a Maybe to ensure the correct nesting order of namedLambdaScope,
-    // defaultsScope, and varScope.
-    mozilla::Maybe<Scope> varScope_;
+    // The body-level scope. This always exists, but not necessarily at the
+    // beginning of parsing the script in the case of functions with parameter
+    // expressions.
+    Scope* varScope_;
 
     // Inner function boxes in this context to try Annex B.3.3 semantics
     // on. Only used when full parsing.
@@ -347,6 +362,7 @@ class ParseContext : public Nestable<ParseContext>
         tokenStream_(prs->tokenStream),
         innermostStatement_(nullptr),
         innermostScope_(nullptr),
+        varScope_(nullptr),
         innerFunctionBoxesForAnnexB_(prs->context->frontendCollectionPool()),
         positionalFormalParameterNames_(prs->context->frontendCollectionPool()),
         closedOverBindingsForLazy_(prs->context->frontendCollectionPool()),
@@ -362,9 +378,8 @@ class ParseContext : public Nestable<ParseContext>
         if (isFunctionBox()) {
             if (functionBox()->function()->isNamedLambda())
                 namedLambdaScope_.emplace(prs);
-            defaultsScope_.emplace(prs);
+            functionScope_.emplace(prs);
         }
-        varScope_.emplace(prs);
     }
 
     ~ParseContext();
@@ -398,23 +413,14 @@ class ParseContext : public Nestable<ParseContext>
         return *namedLambdaScope_;
     }
 
-    Scope& defaultsScope() {
+    Scope& functionScope() {
         MOZ_ASSERT(isFunctionBox());
-        return *defaultsScope_;
+        return *functionScope_;
     }
 
     Scope& varScope() {
+        MOZ_ASSERT(varScope_);
         return *varScope_;
-    }
-
-    Scope& outermostScope() {
-        if (isFunctionBox()) {
-            if (functionBox()->function()->isNamedLambda())
-                return namedLambdaScope();
-            if (functionBox()->hasDefaultsScope)
-                return defaultsScope();
-        }
-        return varScope();
     }
 
     template <typename Predicate /* (Statement*) -> bool */>
@@ -1232,7 +1238,6 @@ class Parser final : private JS::AutoGCRooter, public StrictModeGetter
                                      PossibleError* possibleError=nullptr);
     bool matchInOrOf(bool* isForInp, bool* isForOfp, DeclarationKind* delcKind = nullptr);
 
-    ParseContext::Scope& targetScopeForFunctionSpecialName(DeclarationKind* declKind);
     bool hasUsedFunctionSpecialName(HandlePropertyName name);
     bool declareFunctionArgumentsObject();
     bool declareFunctionThis();
@@ -1306,7 +1311,8 @@ class Parser final : private JS::AutoGCRooter, public StrictModeGetter
     mozilla::Maybe<EvalScope::Data*> newEvalScopeData(ParseContext::Scope& scope,
                                                       uint32_t* functionBindingEnd);
     mozilla::Maybe<FunctionScope::Data*> newFunctionScopeData(ParseContext::Scope& scope,
-                                                              bool hasDefaults);
+                                                              bool hasParameterExprs);
+    mozilla::Maybe<VarScope::Data*> newVarScopeData(ParseContext::Scope& scope);
     mozilla::Maybe<LexicalScope::Data*> newLexicalScopeData(ParseContext::Scope& scope);
     Node finishLexicalScope(ParseContext::Scope& scope, Node body);
 

@@ -50,12 +50,12 @@ BytecodeAnalysis::init(TempAllocator& alloc, GSNCache& gsn)
     // Initialize the env chain slot if either the function needs some
     // EnvironmentObject (like a CallObject) or the script uses the env
     // chain. The latter case is handled below.
-    usesEnvironmentChain_ = script_->module() || script_->callObjShape() ||
+    usesEnvironmentChain_ = script_->module() || script_->varEnvironmentShape() ||
                             (script_->functionDelazifying() &&
                              script_->functionDelazifying()->needsSomeEnvironmentObject());
     MOZ_ASSERT_IF(script_->hasAnyAliasedBindings(), usesEnvironmentChain_);
 
-    bool seenPushCallObj = false;
+    bool seenPushVarEnv = false;
     jsbytecode* end = script_->codeEnd();
 
     // Clear all BytecodeInfo.
@@ -161,9 +161,9 @@ BytecodeAnalysis::init(TempAllocator& alloc, GSNCache& gsn)
 
           case JSOP_LAMBDA:
           case JSOP_LAMBDA_ARROW:
-            if (!seenPushCallObj &&
+            if (!seenPushVarEnv &&
                 script_->functionDelazifying() &&
-                script_->functionDelazifying()->needsCallObject())
+                script_->functionDelazifying()->needsExtraVarEnvironment())
             {
                 hasLambdaInDefaultsWithCallObject_ = true;
             }
@@ -198,8 +198,8 @@ BytecodeAnalysis::init(TempAllocator& alloc, GSNCache& gsn)
             hasSetArg_ = true;
             break;
 
-          case JSOP_PUSHCALLOBJ:
-            seenPushCallObj = true;
+          case JSOP_PUSHVARENV:
+            seenPushVarEnv = true;
             break;
 
           default:

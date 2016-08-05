@@ -31,8 +31,8 @@ class BaselineFrame
         // The frame has a valid return value. See also InterpreterFrame::HAS_RVAL.
         HAS_RVAL         = 1 << 0,
 
-        // A call object has been pushed on the environment chain.
-        HAS_CALL_OBJ     = 1 << 2,
+        // A var environment has been pushed on the environment chain.
+        HAS_VAR_ENV      = 1 << 2,
 
         // Frame has an arguments object, argsObj_.
         HAS_ARGS_OBJ     = 1 << 4,
@@ -126,7 +126,8 @@ class BaselineFrame
         return reinterpret_cast<Value*>(&loScratchValue_);
     }
 
-    inline void pushOnEnvironmentChain(EnvironmentObject& env);
+    template <typename SpecificEnvironment>
+    inline void pushOnEnvironmentChain(SpecificEnvironment& env);
     template <typename SpecificEnvironment>
     inline void popOffEnvironmentChain();
     inline void replaceInnermostEnvironment(EnvironmentObject& env);
@@ -244,8 +245,8 @@ class BaselineFrame
         return reinterpret_cast<Value*>(&loReturnValue_);
     }
 
-    bool hasCallObj() const {
-        return flags_ & HAS_CALL_OBJ;
+    bool hasVarEnvironment() const {
+        return flags_ & HAS_VAR_ENV;
     }
 
     inline CallObject& callObj() const;
@@ -261,8 +262,8 @@ class BaselineFrame
     inline MOZ_MUST_USE bool freshenLexicalEnvironment(JSContext* cx);
     inline MOZ_MUST_USE bool recreateLexicalEnvironment(JSContext* cx);
 
-    MOZ_MUST_USE bool initExtraFunctionEnvironmentObjects(JSContext* cx);
-    MOZ_MUST_USE bool pushCallObject(JSContext* cx);
+    MOZ_MUST_USE bool initFunctionEnvironmentObjects(JSContext* cx);
+    MOZ_MUST_USE bool pushVarEnvironment(JSContext* cx);
 
     void initArgsObjUnchecked(ArgumentsObject& argsobj) {
         flags_ |= HAS_ARGS_OBJ;

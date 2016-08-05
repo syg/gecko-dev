@@ -118,7 +118,11 @@ AssertScopeMatchesEnvironment(Scope* scope, JSObject* originalEnv)
                 env = &env->as<CallObject>().enclosingEnvironment();
                 break;
 
-              case ScopeKind::ParameterDefaults:
+              case ScopeKind::Var:
+                MOZ_ASSERT(&env->as<VarEnvironmentObject>().scope() == si.scope());
+                env = &env->as<VarEnvironmentObject>().enclosingEnvironment();
+                break;
+
               case ScopeKind::Lexical:
               case ScopeKind::Catch:
               case ScopeKind::NamedLambda:
@@ -176,9 +180,9 @@ AssertScopeMatchesEnvironment(JSScript* script, jsbytecode* pc, JSObject* env)
 }
 
 bool
-InterpreterFrame::initExtraFunctionEnvironmentObjects(JSContext* cx)
+InterpreterFrame::initFunctionEnvironmentObjects(JSContext* cx)
 {
-    return js::InitExtraFunctionEnvironmentObjects(cx, this);
+    return js::InitFunctionEnvironmentObjects(cx, this);
 }
 
 bool
@@ -189,9 +193,11 @@ InterpreterFrame::prologue(JSContext* cx)
     MOZ_ASSERT(cx->interpreterRegs().pc == script->code());
 
     if (isEvalFrame()) {
-        if (!script->callObjScope()->hasEnvironment()) {
+        if (!script->bodyScope()->hasEnvironment()) {
             MOZ_ASSERT(!script->strict() &&
-                       script->enclosingScope()->kind() != ScopeKind::ParameterDefaults);
+                       (!script->enclosingScope()->is<FunctionScope>() ||
+                        !script->enclosingScope()->as<FunctionScope>()
+                        .script()->hasParameterExprs()));
             // Non-strict eval may introduce var bindings that conflict with
             // lexical bindings in an enclosing lexical scope.
             RootedObject varObjRoot(cx, &varObj());
@@ -224,7 +230,7 @@ InterpreterFrame::prologue(JSContext* cx)
     AssertScopeMatchesEnvironment(script->enclosingScope(), environmentChain());
 
     MOZ_ASSERT(isFunctionFrame());
-    if (callee().needsExtraEnvironmentObjects() && !initExtraFunctionEnvironmentObjects(cx))
+    if (callee().needsFunctionEnvironmentObjects() && !initFunctionEnvironmentObjects(cx))
         return false;
 
     if (isConstructing()) {
@@ -302,26 +308,9 @@ InterpreterFrame::checkReturn(JSContext* cx, HandleValue thisv)
 }
 
 bool
-InterpreterFrame::pushCallObject(JSContext* cx)
+InterpreterFrame::pushVarEnvironment(JSContext* cx)
 {
-    MOZ_ASSERT(!hasCallObjUnchecked());
-
-    CallObject* callobj;
-    if (isEvalFrame()) {
-        MOZ_ASSERT(script()->strict() ||
-                   script()->enclosingScope()->kind() == ScopeKind::ParameterDefaults);
-        callobj = CallObject::createForEval(cx, this);
-    } else {
-        MOZ_ASSERT(callee().needsCallObject());
-        callobj = CallObject::createForFunction(cx, this);
-    }
-
-    if (!callobj)
-        return false;
-
-    pushOnEnvironmentChain(*callobj);
-    flags_ |= HAS_CALL_OBJ;
-    return true;
+    return js::PushVarEnvironmentObject(cx, this);
 }
 
 bool

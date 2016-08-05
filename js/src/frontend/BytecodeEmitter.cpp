@@ -302,7 +302,8 @@ ScopeKindIsInBody(ScopeKind kind)
 {
     return kind == ScopeKind::Lexical ||
            kind == ScopeKind::Catch ||
-           kind == ScopeKind::With;
+           kind == ScopeKind::With ||
+           kind == ScopeKind::Var;
 }
 
 static inline void
@@ -454,10 +455,10 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
     MOZ_MUST_USE bool enterLexical(BytecodeEmitter* bce, ScopeKind kind,
                                    Handle<LexicalScope::Data*> bindings);
     MOZ_MUST_USE bool enterNamedLambda(BytecodeEmitter* bce, FunctionBox* funbox);
-    MOZ_MUST_USE bool enterParameterDefaults(BytecodeEmitter* bce, FunctionBox* funbox);
     MOZ_MUST_USE bool enterComprehensionFor(BytecodeEmitter* bce,
                                             Handle<LexicalScope::Data*> bindings);
-    MOZ_MUST_USE bool enterFunctionBody(BytecodeEmitter* bce, FunctionBox* funbox);
+    MOZ_MUST_USE bool enterFunction(BytecodeEmitter* bce, FunctionBox* funbox);
+    MOZ_MUST_USE bool enterFunctionExtraVar(BytecodeEmitter* bce, FunctionBox* funbox);
     MOZ_MUST_USE bool enterGlobal(BytecodeEmitter* bce, GlobalSharedContext* globalsc);
     MOZ_MUST_USE bool enterEval(BytecodeEmitter* bce, EvalSharedContext* evalsc);
     MOZ_MUST_USE bool enterModule(BytecodeEmitter* module, ModuleSharedContext* modulesc);
@@ -579,8 +580,7 @@ template <typename ScopeCreator>
 bool
 BytecodeEmitter::EmitterScope::internBodyScope(BytecodeEmitter* bce, ScopeCreator createScope)
 {
-    MOZ_ASSERT(bce->bodyScopeIndex == UINT32_MAX,
-               "There can be only one body scope");
+    MOZ_ASSERT(bce->bodyScopeIndex == UINT32_MAX, "There can be only one body scope");
     bce->bodyScopeIndex = bce->scopeList.length();
     return internScope(bce, createScope);
 }
@@ -588,8 +588,7 @@ BytecodeEmitter::EmitterScope::internBodyScope(BytecodeEmitter* bce, ScopeCreato
 bool
 BytecodeEmitter::EmitterScope::appendScopeNote(BytecodeEmitter* bce)
 {
-    MOZ_ASSERT((ScopeKindIsInBody(scope(bce)->kind()) && enclosingInFrame()) ||
-               scope(bce)->kind() == ScopeKind::ParameterDefaults,
+    MOZ_ASSERT(ScopeKindIsInBody(scope(bce)->kind()) && enclosingInFrame(),
                "Scope notes are not needed for body-level scopes.");
     noteIndex_ = bce->scopeNoteList.length();
     return bce->scopeNoteList.append(index(), bce->offset(), bce->inPrologue(),
@@ -610,7 +609,7 @@ NameIsOnEnvironment(Scope* scope, JSAtom* name)
 
             if (bi.hasArgumentSlot()) {
                 JSScript* script = scope->as<FunctionScope>().script();
-                if (!script->strict() && !script->hasDefaultsScope()) {
+                if (!script->strict() && !script->hasParameterExprs()) {
                     // Check for duplicate positional formal parameters.
                     for (BindingIter bi2(bi); bi2 && bi2.hasArgumentSlot(); bi2++) {
                         if (bi2.name() == name)
@@ -650,7 +649,7 @@ BytecodeEmitter::EmitterScope::searchInEnclosingScope(JSAtom* name, Scope* scope
                         continue;
 
                     BindingLocation bindLoc = bi.location();
-                    if (bi.hasArgumentSlot() && !script->strict() && !script->hasDefaultsScope()) {
+                    if (bi.hasArgumentSlot() && !script->strict() && !script->hasParameterExprs()) {
                         // Check for duplicate positional formal parameters.
                         for (BindingIter bi2(bi); bi2 && bi2.hasArgumentSlot(); bi2++) {
                             if (bi2.name() == name)
@@ -664,7 +663,7 @@ BytecodeEmitter::EmitterScope::searchInEnclosingScope(JSAtom* name, Scope* scope
             }
             break;
 
-          case ScopeKind::ParameterDefaults:
+          case ScopeKind::Var:
           case ScopeKind::Lexical:
           case ScopeKind::NamedLambda:
           case ScopeKind::StrictNamedLambda:
@@ -937,13 +936,6 @@ BytecodeEmitter::EmitterScope::enterNamedLambda(BytecodeEmitter* bce, FunctionBo
 }
 
 bool
-BytecodeEmitter::EmitterScope::enterParameterDefaults(BytecodeEmitter* bce, FunctionBox* funbox)
-{
-    MOZ_ASSERT(funbox->hasDefaultsScope && funbox->defaultsScopeBindings());
-    return enterLexical(bce, ScopeKind::ParameterDefaults, funbox->defaultsScopeBindings());
-}
-
-bool
 BytecodeEmitter::EmitterScope::enterComprehensionFor(BytecodeEmitter* bce,
                                                      Handle<LexicalScope::Data*> bindings)
 {
@@ -974,7 +966,62 @@ BytecodeEmitter::EmitterScope::enterComprehensionFor(BytecodeEmitter* bce,
 }
 
 bool
-BytecodeEmitter::EmitterScope::enterFunctionBody(BytecodeEmitter* bce, FunctionBox* funbox)
+BytecodeEmitter::EmitterScope::enterFunctionExtraVar(BytecodeEmitter* bce, FunctionBox* funbox)
+{
+    MOZ_ASSERT(funbox->hasParameterExprs && funbox->extraVarScopeBindings());
+    MOZ_ASSERT(this == bce->innermostEmitterScope);
+
+    if (!ensureCache(bce))
+        return false;
+
+    // Resolve body-level bindings, if there are any.
+    uint32_t firstFrameSlot = frameSlotStart();
+    if (funbox->extraVarScopeBindings()) {
+        BindingIter bi(*funbox->extraVarScopeBindings(), firstFrameSlot);
+        for (; bi; bi++) {
+            if (!checkSlotLimits(bce, bi))
+                return false;
+
+            NameLocation loc = NameLocation::fromBinding(bi.kind(), bi.location());
+            if (!putNameInCache(bce, bi.name(), loc))
+                return false;
+        }
+
+        updateFrameFixedSlots(bce, bi);
+    } else {
+        nextFrameSlot_ = firstFrameSlot;
+    }
+
+    // If the extra var scope may be extended at runtime due to sloppy
+    // direct eval, any names beyond the var scope must be accessed
+    // dynamically as we don't know if the name will become a 'var' binding
+    // due to direct eval.
+    if (funbox->hasExtensibleScope())
+        fallbackFreeNameLocation_ = Some(NameLocation::Dynamic());
+
+    // Create and intern the VM scope.
+    auto createScope = [funbox, firstFrameSlot](ExclusiveContext* cx, HandleScope enclosing) {
+        return VarScope::create(cx, funbox->extraVarScopeBindings(), firstFrameSlot,
+                                funbox->needsExtraVarEnvironmentRegardlessOfBindings(),
+                                enclosing);
+    };
+    if (!internScope(bce, createScope))
+        return false;
+
+    if (hasEnvironment()) {
+        if (!bce->emit1(JSOP_PUSHVARENV))
+            return false;
+    }
+
+    // The extra var scope needs a note to be mapped from a pc.
+    if (!appendScopeNote(bce))
+        return false;
+
+    return checkEnvironmentChainLength(bce);
+}
+
+bool
+BytecodeEmitter::EmitterScope::enterFunction(BytecodeEmitter* bce, FunctionBox* funbox)
 {
     MOZ_ASSERT(this == bce->innermostEmitterScope);
 
@@ -984,12 +1031,11 @@ BytecodeEmitter::EmitterScope::enterFunctionBody(BytecodeEmitter* bce, FunctionB
         return false;
 
     // Resolve body-level bindings, if there are any.
-    uint32_t firstFrameSlot = frameSlotStart();
-    if (funbox->varScopeBindings()) {
-        Handle<FunctionScope::Data*> bindings = funbox->varScopeBindings();
+    if (funbox->functionScopeBindings()) {
+        Handle<FunctionScope::Data*> bindings = funbox->functionScopeBindings();
         NameLocationMap& cache = *nameCache_;
 
-        BindingIter bi(*bindings, firstFrameSlot, funbox->hasDefaultsScope);
+        BindingIter bi(*bindings, funbox->hasParameterExprs);
         for (; bi; bi++) {
             if (!checkSlotLimits(bce, bi))
                 return false;
@@ -1014,31 +1060,26 @@ BytecodeEmitter::EmitterScope::enterFunctionBody(BytecodeEmitter* bce, FunctionB
 
         updateFrameFixedSlots(bce, bi);
     } else {
-        nextFrameSlot_ = firstFrameSlot;
+        nextFrameSlot_ = 0;
     }
 
-    // If the function's scope may be extended at runtime due to non-strict
-    // direct eval, any names beyond the function scope must be accessed
-    // dynamically as we don't know if the name will become a 'var' binding
-    // due to direct eval.
-    if (funbox->hasExtensibleScope())
+    // If the function's scope may be extended at runtime due to sloppy direct
+    // eval and there is no extra var scope, any names beyond the function
+    // scope must be accessed dynamically as we don't know if the name will
+    // become a 'var' binding due to direct eval.
+    if (!funbox->hasParameterExprs && funbox->hasExtensibleScope())
         fallbackFreeNameLocation_ = Some(NameLocation::Dynamic());
 
     // Create and intern the VM scope.
-    auto createScope = [funbox, firstFrameSlot](ExclusiveContext* cx, HandleScope enclosing) {
+    auto createScope = [funbox](ExclusiveContext* cx, HandleScope enclosing) {
         RootedFunction fun(cx, funbox->function());
-        return FunctionScope::create(cx, funbox->varScopeBindings(), firstFrameSlot,
-                                     funbox->hasDefaultsScope,
+        return FunctionScope::create(cx, funbox->functionScopeBindings(),
+                                     funbox->hasParameterExprs,
                                      funbox->needsCallObjectRegardlessOfBindings(),
                                      fun, enclosing);
     };
     if (!internBodyScope(bce, createScope))
         return false;
-
-    if (hasEnvironment()) {
-        if (!bce->emit1(JSOP_PUSHCALLOBJ))
-            return false;
-    }
 
     return checkEnvironmentChainLength(bce);
 }
@@ -1189,7 +1230,7 @@ BytecodeEmitter::EmitterScope::enterEval(BytecodeEmitter* bce, EvalSharedContext
         return false;
 
     if (hasEnvironment()) {
-        if (!bce->emit1(JSOP_PUSHCALLOBJ))
+        if (!bce->emit1(JSOP_PUSHVARENV))
             return false;
     } else if (scope(bce)->enclosing()->is<GlobalScope>()) {
         // As an optimization, if the eval does not have its own var environment
@@ -1302,7 +1343,7 @@ BytecodeEmitter::EmitterScope::leave(BytecodeEmitter* bce, bool nonLocal)
         break;
 
       case ScopeKind::Function:
-      case ScopeKind::ParameterDefaults:
+      case ScopeKind::Var:
       case ScopeKind::NamedLambda:
       case ScopeKind::StrictNamedLambda:
       case ScopeKind::Eval:
@@ -1317,10 +1358,7 @@ BytecodeEmitter::EmitterScope::leave(BytecodeEmitter* bce, bool nonLocal)
     if (!nonLocal) {
         // Popping scopes due to non-local jumps generate additional scope
         // notes. See NonLocalExitControl::prepareForNonLocalJump.
-        //
-        // Also note that ParameterDefaults scopes are an exception. Their
-        // notes are not finished here but in emitFunctionFormalParametersAndBody.
-        if (ScopeKindIsInBody(kind) && kind != ScopeKind::ParameterDefaults)
+        if (ScopeKindIsInBody(kind))
             bce->scopeNoteList.recordEnd(noteIndex_, bce->offset(), bce->inPrologue());
     }
 
@@ -3965,9 +4003,8 @@ BytecodeEmitter::emitSetThis(ParseNode* pn)
         return true;
     };
 
-    // The 'this' binding is not lexical when there is no defaults scope, but
-    // due to super() semantics this initialization needs to be treated as a
-    // lexical one.
+    // The 'this' binding is not lexical, but due to super() semantics this
+    // initialization needs to be treated as a lexical one.
     NameLocation loc = lookupName(name);
     NameLocation lexicalLoc;
     if (loc.kind() == NameLocation::Kind::FrameSlot) {
@@ -4056,7 +4093,7 @@ BytecodeEmitter::emitFunctionScript(ParseNode* body)
     FunctionBox* funbox = sc->asFunctionBox();
 
     // The ordering of these EmitterScopes is important. The decl env scope
-    // needs to enclose the defaults scope needs to enclose the function
+    // needs to enclose the function scope needs to enclose the extra var
     // scope.
 
     Maybe<EmitterScope> namedLambdaEmitterScope;
@@ -7491,7 +7528,7 @@ BytecodeEmitter::isRestParameter(ParseNode* pn, bool* result)
 
     JSAtom* name = pn->name();
     if (!BindingKindIsLexical(lookupName(name).bindingKind())) {
-        FunctionScope::Data* bindings = funbox->varScopeBindings();
+        FunctionScope::Data* bindings = funbox->functionScopeBindings();
         if (bindings->nonPositionalFormalStart > 0) {
             *result = name == bindings->names[bindings->nonPositionalFormalStart - 1].name();
             return true;
@@ -8340,83 +8377,73 @@ BytecodeEmitter::emitFunctionFormalParametersAndBody(ParseNode *pn)
 
     TDZCheckCache tdzCache(this);
 
-    if (funbox->hasDefaultsScope) {
-        // Parameter defaults have their own scope.
-        EmitterScope defaultsEmitterScope(this);
-        if (!defaultsEmitterScope.enterParameterDefaults(this, funbox))
+    if (funbox->hasParameterExprs) {
+        EmitterScope funEmitterScope(this);
+        if (!funEmitterScope.enterFunction(this, funbox))
             return false;
 
-        // Special bindings like arguments and this are available even in the
-        // defaults scope.
         if (!emitInitializeFunctionSpecialNames())
             return false;
 
         if (!emitFunctionFormalParameters(pn))
             return false;
 
-        // Manually record a note saying we're done processing
-        // parameters. Scope notes were designed for intra-function scopes,
-        // and the defaults scope is weird in that it encloses the function
-        // scope.
-        //
-        // This note helps JSScript::lookupScope find the right scope for pc
-        // values before the body of the function, which is used for direct
-        // eval (direct evals in parameter defaults always get their own var
-        // environment) and disassembly.
-        scopeNoteList.recordEnd(defaultsEmitterScope.noteIndex(), offset(), inPrologue());
-
         {
-            EmitterScope varEmitterScope(this);
-            if (!varEmitterScope.enterFunctionBody(this, funbox))
+            EmitterScope extraVarEmitterScope(this);
+            if (!extraVarEmitterScope.enterFunctionExtraVar(this, funbox))
                 return false;
 
-            // After emitting default expressions for all parameters, copy over
-            // any formal parameters which have been redeclared as vars. For
+            // After emitting expressions for all parameters, copy over any
+            // formal parameters which have been redeclared as vars. For
             // example, in the following, the var y in the body scope is 42:
             //
             //   function f(x, y = 42) { var y; }
             //
             RootedAtom name(cx);
-            for (BindingIter bi(*funbox->defaultsScopeBindings(), 0, false); bi; bi++) {
-                name = bi.name();
+            if (funbox->extraVarScopeBindings()) {
+                for (BindingIter bi(*funbox->extraVarScopeBindings(), 0); bi; bi++) {
+                    name = bi.name();
 
-                // There may not be a var binding of the same name.
-                Maybe<NameLocation> varLoc = locationOfNameBoundInScope(name, &varEmitterScope);
-                if (!varLoc || varLoc->bindingKind() != BindingKind::Var)
-                    continue;
+                    // There may not be a parameter binding of the same name.
+                    Maybe<NameLocation> paramLoc = locationOfNameBoundInScope(name, &funEmitterScope);
+                    if (!paramLoc)
+                        continue;
 
-                NameLocation paramLoc = *locationOfNameBoundInScope(name, &defaultsEmitterScope);
-                auto emitRhs = [&name, paramLoc](BytecodeEmitter* bce, const NameLocation&, bool) {
-                    return bce->emitGetNameAtLocation(name, paramLoc);
-                };
+                    auto emitRhs = [&name, &paramLoc](BytecodeEmitter* bce, const NameLocation&,
+                                                      bool)
+                    {
+                        return bce->emitGetNameAtLocation(name, *paramLoc);
+                    };
 
-                if (!emitInitializeName(name, emitRhs))
-                    return false;
-                if (!emit1(JSOP_POP))
-                    return false;
+                    if (!emitInitializeName(name, emitRhs))
+                        return false;
+                    if (!emit1(JSOP_POP))
+                        return false;
+                }
             }
 
             if (!emitFunctionBody(funBody))
                 return false;
 
-            if (!varEmitterScope.leave(this))
+            if (!extraVarEmitterScope.leave(this))
                 return false;
         }
 
-        return defaultsEmitterScope.leave(this);
+        return funEmitterScope.leave(this);
     }
 
-    // No defaults. Enter the function body scope and emit everything.
+    // No parameter expressions. Enter the function body scope and emit
+    // everything.
     //
     // One caveat is that Debugger considers ops in the prologue to be
     // unreachable (i.e. cannot set a breakpoint on it). If there are no
-    // defaults, any unobservable environment ops (like pushing the call
-    // object, setting '.this', etc) need to go in the prologue, else it
+    // parameter exprs, any unobservable environment ops (like pushing the
+    // call object, setting '.this', etc) need to go in the prologue, else it
     // messes up breakpoint tests.
     EmitterScope emitterScope(this);
 
     switchToPrologue();
-    if (!emitterScope.enterFunctionBody(this, funbox))
+    if (!emitterScope.enterFunction(this, funbox))
         return false;
 
     if (!emitInitializeFunctionSpecialNames())
@@ -8438,7 +8465,7 @@ BytecodeEmitter::emitFunctionFormalParameters(ParseNode* pn)
     ParseNode* funBody = pn->last();
     FunctionBox* funbox = sc->asFunctionBox();
 
-    bool hasDefaultsScope = funbox->hasDefaultsScope;
+    bool hasParameterExprs = funbox->hasParameterExprs;
     bool hasRest = funbox->function()->hasRest();
 
     uint16_t argSlot = 0;
@@ -8468,7 +8495,7 @@ BytecodeEmitter::emitFunctionFormalParameters(ParseNode* pn)
         if (initializer) {
             // If we have an initializer, emit the initializer and assign it
             // to the argument slot. TDZ is taken care of afterwards.
-            MOZ_ASSERT(hasDefaultsScope);
+            MOZ_ASSERT(hasParameterExprs);
             if (!emitArgOp(JSOP_GETARG, argSlot))
                 return false;
             if (!emit1(JSOP_DUP))
@@ -8506,7 +8533,7 @@ BytecodeEmitter::emitFunctionFormalParameters(ParseNode* pn)
                 return false;
             if (!emit1(JSOP_POP))
                 return false;
-        } else if (hasDefaultsScope) {
+        } else if (hasParameterExprs) {
             auto emitRhs = [argSlot, initializer, isRest](BytecodeEmitter* bce,
                                                           const NameLocation&, bool)
             {

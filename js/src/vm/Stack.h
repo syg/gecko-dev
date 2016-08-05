@@ -198,15 +198,16 @@ class AbstractFramePtr
 
     inline JSObject* environmentChain() const;
     inline CallObject& callObj() const;
-    inline bool initExtraFunctionEnvironmentObjects(JSContext* cx);
-    inline bool pushCallObject(JSContext* cx);
-    inline void pushOnEnvironmentChain(EnvironmentObject& env);
+    inline bool initFunctionEnvironmentObjects(JSContext* cx);
+    inline bool pushVarEnvironment(JSContext* cx);
+    template <typename SpecificEnvironment>
+    inline void pushOnEnvironmentChain(SpecificEnvironment& env);
     template <typename SpecificEnvironment>
     inline void popOffEnvironmentChain();
 
     inline JSCompartment* compartment() const;
 
-    inline bool hasCallObj() const;
+    inline bool hasVarEnvironment() const;
     inline bool isGlobalFrame() const;
     inline bool isModuleFrame() const;
     inline bool isEvalFrame() const;
@@ -280,7 +281,7 @@ class InterpreterFrame
         RESUMED_GENERATOR      =        0x2,  /* frame is for a resumed generator invocation */
 
         /* Function prologue state */
-        HAS_CALL_OBJ           =        0x4,  /* CallObject created for needsCallObject function */
+        HAS_VAR_ENV            =        0x4,  /* var env created function or eval */
         HAS_ARGS_OBJ           =        0x8,  /* ArgumentsObject created for needsArgsObj script */
 
         /* Lazy frame initialization */
@@ -400,7 +401,7 @@ class InterpreterFrame
 
     bool checkReturn(JSContext* cx, HandleValue thisv);
 
-    bool initExtraFunctionEnvironmentObjects(JSContext* cx);
+    bool initFunctionEnvironmentObjects(JSContext* cx);
 
     /*
      * Initialize locals of newly-pushed frame to undefined.
@@ -543,13 +544,15 @@ class InterpreterFrame
     inline JSObject& varObj() const;
     inline LexicalEnvironmentObject& extensibleLexicalEnvironment() const;
 
-    inline void pushOnEnvironmentChain(EnvironmentObject& env);
+    template <typename SpecificEnvironment>
+    inline void pushOnEnvironmentChain(SpecificEnvironment& env);
     template <typename SpecificEnvironment>
     inline void popOffEnvironmentChain();
     inline void replaceInnermostEnvironment(EnvironmentObject& env);
 
-    // Push a CallObject for function frames with closed over var bindings.
-    bool pushCallObject(JSContext* cx);
+    // Push a VarEnvironmentObject for function frames of functions that have
+    // parameter expressions with closed over var bindings.
+    bool pushVarEnvironment(JSContext* cx);
 
     /*
      * For lexical envs with aliased locals, these interfaces push and pop
@@ -683,7 +686,7 @@ class InterpreterFrame
     void resumeGeneratorFrame(JSObject* envChain) {
         MOZ_ASSERT(script()->isGenerator());
         MOZ_ASSERT(isFunctionFrame());
-        flags_ |= HAS_CALL_OBJ;
+        flags_ |= HAS_VAR_ENV;
         envChain_ = envChain;
     }
 
@@ -710,10 +713,10 @@ class InterpreterFrame
      * time the call/args object are created).
      */
 
-    inline bool hasCallObj() const;
+    inline bool hasVarEnvironment() const;
 
-    bool hasCallObjUnchecked() const {
-        return flags_ & HAS_CALL_OBJ;
+    bool hasVarEnvironmentUnchecked() const {
+        return flags_ & HAS_VAR_ENV;
     }
 
     bool hasArgsObj() const {

@@ -7637,7 +7637,7 @@ DebuggerArguments_getArg(JSContext* cx, unsigned argc, Value* vp)
                 if (fi.argumentSlot() == unsigned(i)) {
                     // We might've been called before the CallObject was
                     // created.
-                    if (fi.closedOver() && frame.hasCallObj())
+                    if (fi.closedOver() && frame.hasVarEnvironment())
                         arg = frame.callObj().aliasedBinding(fi);
                     else
                         arg = frame.unaliasedActual(i, DONT_CHECK_ALIASING);
@@ -10291,13 +10291,7 @@ DebuggerEnvironment::getCallee(JSContext* cx, MutableHandle<DebuggerObject*> res
         return true;
     }
 
-    CallObject& callobj = scope.as<CallObject>();
-    if (callobj.isForEval()) {
-        result.set(nullptr);
-        return true;
-    }
-
-    RootedObject callee(cx, &callobj.callee());
+    RootedObject callee(cx, &scope.as<CallObject>().callee());
     if (IsInternalFunctionObject(*callee)) {
         result.set(nullptr);
         return true;

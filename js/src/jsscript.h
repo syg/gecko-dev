@@ -971,11 +971,14 @@ class JSScript : public js::gc::TenuredCell
     }
 
     // Number of fixed slots reserved for slots that are always live: vars
-    // plus, for functions with defaults scopes, the frame slots used by the
-    // defaults scope. Only nonzero for function or module code.
+    // plus, for functions with extra var scopes, the frame slots used by the
+    // extra var scope. Only nonzero for function or module code.
     size_t numAlwaysLiveFixedSlots() const {
-        if (bodyScope()->is<js::FunctionScope>())
+        if (bodyScope()->is<js::FunctionScope>()) {
+            if (hasParameterExprs())
+                return extraVarScope()->nextFrameSlot();
             return bodyScope()->as<js::FunctionScope>().nextFrameSlot();
+        }
         if (bodyScope()->is<js::ModuleScope>())
             return bodyScope()->as<js::ModuleScope>().varFrameSlotEnd();
         return 0;
@@ -994,39 +997,32 @@ class JSScript : public js::gc::TenuredCell
         return 0;
     }
 
-    js::Shape* callObjShape() const {
-        if (js::Scope* scope = callObjScope())
+    js::Shape* varEnvironmentShape() const {
+        js::Scope* scope = bodyScope();
+        if (scope->is<js::FunctionScope>()) {
+            if (hasParameterExprs())
+                return extraVarScope()->environmentShape();
+            return scope->environmentShape();
+        }
+        if (scope->is<js::EvalScope>())
             return scope->environmentShape();
         return nullptr;
     }
 
-    js::Scope* callObjScope() const {
-        js::Scope* scope = bodyScope();
-        if (scope->is<js::FunctionScope>() || scope->is<js::EvalScope>())
-            return scope;
-        return nullptr;
-    }
-
-    bool hasDefaultsScope() const {
-        // If the body scope is the outermost scope, there can't be a defaults
-        // scope.
-        if (bodyScopeIndex_ == 0)
-            return false;
-
+    bool hasParameterExprs() const {
         // Only functions have parameters.
         js::Scope* scope = bodyScope();
         if (!scope->is<js::FunctionScope>())
             return false;
 
-        // A function may have a ParameterDefaults enclosing scope that is in
-        // an enclosing function. Makes sure the enclosing ParameterDefaults
-        // is for the current function.
-        return scope->enclosing() == getScope(bodyScopeIndex_ - 1) &&
-               scope->enclosing()->kind() == js::ScopeKind::ParameterDefaults;
+        // If the parameter list has expressions, then an extra var
+        // environment would have been created.
+        return bodyScopeIndex_ + 1 < scopes()->length &&
+               getScope(bodyScopeIndex_ + 1)->kind() == js::ScopeKind::Var;
     }
 
     bool hasAnyAliasedBindings() const {
-        return !!callObjShape();
+        return bodyScope()->hasEnvironment();
     }
 
     size_t nTypeSets() const {
@@ -1413,15 +1409,15 @@ class JSScript : public js::gc::TenuredCell
     }
 
     js::Scope* outermostScope() const {
-        // The body scope may not be the outermost scope in the script, such
-        // as when decl env or defaults scopes are present.
+        // The body scope may not be the outermost scope in the script when
+        // the decl env scope is present.
         size_t index = 0;
         return getScope(index);
     }
 
-    js::LexicalScope* defaultsScope() const {
-        MOZ_ASSERT(hasDefaultsScope());
-        return &bodyScope()->enclosing()->as<js::LexicalScope>();
+    js::VarScope* extraVarScope() const {
+        MOZ_ASSERT(hasParameterExprs());
+        return &getScope(bodyScopeIndex_ + 1)->as<js::VarScope>();
     }
 
     inline js::LexicalScope* maybeNamedLambdaScope() const;

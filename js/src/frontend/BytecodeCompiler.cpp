@@ -293,7 +293,7 @@ BytecodeCompiler::deoptimizeArgumentsInEnclosingScripts(JSContext* cx, HandleObj
 {
     RootedObject env(cx, environment);
     while (env->is<EnvironmentObject>() || env->is<DebugEnvironmentProxy>()) {
-        if (env->is<CallObject>() && !env->as<CallObject>().isForEval()) {
+        if (env->is<CallObject>()) {
             RootedScript script(cx, env->as<CallObject>().callee().getOrCreateScript(cx));
             if (!script)
                 return false;

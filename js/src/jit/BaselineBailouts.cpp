@@ -682,8 +682,10 @@ InitFromBailout(JSContext* cx, HandleScript caller, jsbytecode* callerPC,
         Value v = iter.read();
         if (v.isObject()) {
             envChain = &v.toObject();
-            if (fun && fun->needsCallObject() && envChain->is<CallObject>())
-                flags |= BaselineFrame::HAS_CALL_OBJ;
+            if (fun && fun->needsCallObject() && envChain->is<CallObject>()) {
+                MOZ_ASSERT(!fun->needsExtraVarEnvironment());
+                flags |= BaselineFrame::HAS_VAR_ENV;
+            }
         } else {
             MOZ_ASSERT(v.isUndefined() || v.isMagic(JS_OPTIMIZED_OUT));
 

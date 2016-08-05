@@ -176,11 +176,18 @@ InterpreterFrame::aliasedEnvironment(EnvironmentCoordinate ec) const
     return env->as<EnvironmentObject>();
 }
 
+template <typename SpecificEnvironment>
 inline void
-InterpreterFrame::pushOnEnvironmentChain(EnvironmentObject& env)
+InterpreterFrame::pushOnEnvironmentChain(SpecificEnvironment& env)
 {
     MOZ_ASSERT(*environmentChain() == env.enclosingEnvironment());
     envChain_ = &env;
+    if (mozilla::IsSame<SpecificEnvironment, VarEnvironmentObject>::value) {
+        flags_ |= HAS_VAR_ENV;
+    } else if (mozilla::IsSame<SpecificEnvironment, CallObject>::value) {
+        if (!script()->hasParameterExprs())
+            flags_ |= HAS_VAR_ENV;
+    }
 }
 
 template <typename SpecificEnvironment>
@@ -189,8 +196,12 @@ InterpreterFrame::popOffEnvironmentChain()
 {
     MOZ_ASSERT(envChain_->is<SpecificEnvironment>());
     envChain_ = &envChain_->as<SpecificEnvironment>().enclosingEnvironment();
-    if (mozilla::IsSame<SpecificEnvironment, CallObject>::value)
-        flags_ &= ~HAS_CALL_OBJ;
+    if (mozilla::IsSame<SpecificEnvironment, VarEnvironmentObject>::value) {
+        flags_ &= ~HAS_VAR_ENV;
+    } else if (mozilla::IsSame<SpecificEnvironment, CallObject>::value) {
+        if (!script()->hasParameterExprs())
+            flags_ &= ~HAS_VAR_ENV;
+    }
 }
 
 inline void
@@ -202,10 +213,10 @@ InterpreterFrame::replaceInnermostEnvironment(EnvironmentObject& env)
 }
 
 bool
-InterpreterFrame::hasCallObj() const
+InterpreterFrame::hasVarEnvironment() const
 {
-    MOZ_ASSERT(script()->callObjShape());
-    return flags_ & HAS_CALL_OBJ;
+    MOZ_ASSERT(script()->varEnvironmentShape());
+    return flags_ & HAS_VAR_ENV;
 }
 
 inline CallObject&
@@ -446,8 +457,9 @@ AbstractFramePtr::environmentChain() const
     return asRematerializedFrame()->environmentChain();
 }
 
+template <typename SpecificEnvironment>
 inline void
-AbstractFramePtr::pushOnEnvironmentChain(EnvironmentObject& env)
+AbstractFramePtr::pushOnEnvironmentChain(SpecificEnvironment& env)
 {
     if (isInterpreterFrame()) {
         asInterpreterFrame()->pushOnEnvironmentChain(env);
@@ -486,23 +498,23 @@ AbstractFramePtr::callObj() const
 }
 
 inline bool
-AbstractFramePtr::initExtraFunctionEnvironmentObjects(JSContext* cx)
+AbstractFramePtr::initFunctionEnvironmentObjects(JSContext* cx)
 {
     if (isInterpreterFrame())
-        return asInterpreterFrame()->initExtraFunctionEnvironmentObjects(cx);
+        return asInterpreterFrame()->initFunctionEnvironmentObjects(cx);
     if (isBaselineFrame())
-        return asBaselineFrame()->initExtraFunctionEnvironmentObjects(cx);
-    return asRematerializedFrame()->initExtraFunctionEnvironmentObjects(cx);
+        return asBaselineFrame()->initFunctionEnvironmentObjects(cx);
+    return asRematerializedFrame()->initFunctionEnvironmentObjects(cx);
 }
 
 inline bool
-AbstractFramePtr::pushCallObject(JSContext* cx)
+AbstractFramePtr::pushVarEnvironment(JSContext* cx)
 {
     if (isInterpreterFrame())
-        return asInterpreterFrame()->pushCallObject(cx);
+        return asInterpreterFrame()->pushVarEnvironment(cx);
     if (isBaselineFrame())
-        return asBaselineFrame()->pushCallObject(cx);
-    return asRematerializedFrame()->pushCallObject(cx);
+        return asBaselineFrame()->pushVarEnvironment(cx);
+    return asRematerializedFrame()->pushVarEnvironment(cx);
 }
 
 inline JSCompartment*
@@ -562,13 +574,13 @@ AbstractFramePtr::unaliasedActual(unsigned i, MaybeCheckAliasing checkAliasing)
 }
 
 inline bool
-AbstractFramePtr::hasCallObj() const
+AbstractFramePtr::hasVarEnvironment() const
 {
     if (isInterpreterFrame())
-        return asInterpreterFrame()->hasCallObj();
+        return asInterpreterFrame()->hasVarEnvironment();
     if (isBaselineFrame())
-        return asBaselineFrame()->hasCallObj();
-    return asRematerializedFrame()->hasCallObj();
+        return asBaselineFrame()->hasVarEnvironment();
+    return asRematerializedFrame()->hasVarEnvironment();
 }
 
 inline bool

@@ -4667,16 +4667,14 @@ GenerateEnvironmentChainGuard(MacroAssembler& masm, JSObject* envObj,
         // guaranteed to be immutable (and thus cannot introduce shadowing
         // variables).
         CallObject* callObj = &envObj->as<CallObject>();
-        if (!callObj->isForEval()) {
-            JSFunction* fun = &callObj->callee();
-            // The function might have been relazified under rare conditions.
-            // In that case, we pessimistically create the guard, as we'd
-            // need to root various pointers to delazify,
-            if (fun->hasScript()) {
-                JSScript* script = fun->nonLazyScript();
-                if (!script->funHasExtensibleScope())
-                    return;
-            }
+        JSFunction* fun = &callObj->callee();
+        // The function might have been relazified under rare conditions.
+        // In that case, we pessimistically create the guard, as we'd
+        // need to root various pointers to delazify,
+        if (fun->hasScript()) {
+            JSScript* script = fun->nonLazyScript();
+            if (!script->funHasExtensibleScope())
+                return;
         }
     } else if (envObj->is<GlobalObject>()) {
         // If this is the last object on the scope walk, and the property we've

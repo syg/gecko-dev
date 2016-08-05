@@ -1885,17 +1885,17 @@ JSFunction::isBuiltinFunctionConstructor()
 }
 
 bool
-JSFunction::needsDefaultsEnvironment() const
+JSFunction::needsExtraVarEnvironment() const
 {
     MOZ_ASSERT(!isInterpretedLazy());
 
     if (isNative())
         return false;
 
-    if (!nonLazyScript()->hasDefaultsScope())
+    if (!nonLazyScript()->hasParameterExprs())
         return false;
 
-    return nonLazyScript()->defaultsScope()->hasEnvironment();
+    return nonLazyScript()->extraVarScope()->hasEnvironment();
 }
 
 bool

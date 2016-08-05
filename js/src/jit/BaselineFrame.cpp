@@ -91,32 +91,15 @@ BaselineFrame::isNonGlobalEvalFrame() const
 }
 
 bool
-BaselineFrame::initExtraFunctionEnvironmentObjects(JSContext* cx)
+BaselineFrame::initFunctionEnvironmentObjects(JSContext* cx)
 {
-    return js::InitExtraFunctionEnvironmentObjects(cx, this);
+    return js::InitFunctionEnvironmentObjects(cx, this);
 }
 
 bool
-BaselineFrame::pushCallObject(JSContext* cx)
+BaselineFrame::pushVarEnvironment(JSContext* cx)
 {
-    MOZ_ASSERT(!hasCallObj());
-
-    CallObject* callobj;
-    if (isEvalFrame()) {
-        MOZ_ASSERT(script()->strict() ||
-                   script()->enclosingScope()->kind() == ScopeKind::ParameterDefaults);
-        callobj = CallObject::createForEval(cx, this);
-    } else {
-        MOZ_ASSERT(callee()->needsCallObject());
-        callobj = CallObject::createForFunction(cx, this);
-    }
-
-    if (!callobj)
-        return false;
-
-    pushOnEnvironmentChain(*callobj);
-    flags_ |= HAS_CALL_OBJ;
-    return true;
+    return js::PushVarEnvironmentObject(cx, this);
 }
 
 bool
@@ -126,8 +109,8 @@ BaselineFrame::initForOsr(InterpreterFrame* fp, uint32_t numStackValues)
 
     envChain_ = fp->environmentChain();
 
-    if (fp->hasCallObjUnchecked())
-        flags_ |= BaselineFrame::HAS_CALL_OBJ;
+    if (fp->hasVarEnvironmentUnchecked())
+        flags_ |= BaselineFrame::HAS_VAR_ENV;
 
     if (fp->script()->needsArgsObj() && fp->hasArgsObj()) {
         flags_ |= BaselineFrame::HAS_ARGS_OBJ;

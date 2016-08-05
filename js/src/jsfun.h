@@ -145,15 +145,15 @@ class JSFunction : public js::NativeObject
         return nonLazyScript()->bodyScope()->hasEnvironment();
     }
 
-    bool needsDefaultsEnvironment() const;
+    bool needsExtraVarEnvironment() const;
     bool needsNamedLambdaEnvironment() const;
 
-    bool needsExtraEnvironmentObjects() const {
-        return needsDefaultsEnvironment() || needsNamedLambdaEnvironment();
+    bool needsFunctionEnvironmentObjects() const {
+        return needsCallObject() || needsNamedLambdaEnvironment();
     }
 
     bool needsSomeEnvironmentObject() const {
-        return needsCallObject() || needsExtraEnvironmentObjects();
+        return needsFunctionEnvironmentObjects() || needsExtraVarEnvironment();
     }
 
     size_t nargs() const {

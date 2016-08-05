@@ -186,7 +186,7 @@ namespace jit {
     _(JSOP_FRESHENLEXICALENV)  \
     _(JSOP_RECREATELEXICALENV) \
     _(JSOP_DEBUGLEAVELEXICALENV) \
-    _(JSOP_PUSHCALLOBJ)        \
+    _(JSOP_PUSHVARENV)         \
     _(JSOP_EXCEPTION)          \
     _(JSOP_DEBUGGER)           \
     _(JSOP_ARGUMENTS)          \

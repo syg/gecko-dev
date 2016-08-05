@@ -50,7 +50,7 @@ RematerializedFrame::RematerializedFrame(JSContext* cx, uint8_t* top, unsigned n
         callee_ = nullptr;
 
     CopyValueToRematerializedFrame op(slots_);
-    iter.readFrameArgsAndLocals(cx, op, op, &envChain_, &hasCallObj_, &returnValue_,
+    iter.readFrameArgsAndLocals(cx, op, op, &envChain_, &hasVarEnv_, &returnValue_,
                                 &argsObj_, &thisArgument_, ReadFrame_Actuals,
                                 fallback);
 }
@@ -116,7 +116,7 @@ RematerializedFrame::FreeInVector(GCVector<RematerializedFrame*>& frames)
 CallObject&
 RematerializedFrame::callObj() const
 {
-    MOZ_ASSERT(hasCallObj());
+    MOZ_ASSERT(hasVarEnvironment());
 
     JSObject* env = environmentChain();
     while (!env->is<CallObject>())
@@ -125,25 +125,15 @@ RematerializedFrame::callObj() const
 }
 
 bool
-RematerializedFrame::initExtraFunctionEnvironmentObjects(JSContext* cx)
+RematerializedFrame::initFunctionEnvironmentObjects(JSContext* cx)
 {
-    return js::InitExtraFunctionEnvironmentObjects(cx, this);
+    return js::InitFunctionEnvironmentObjects(cx, this);
 }
 
 bool
-RematerializedFrame::pushCallObject(JSContext* cx)
+RematerializedFrame::pushVarEnvironment(JSContext* cx)
 {
-    MOZ_ASSERT(isFunctionFrame());
-    MOZ_ASSERT(callee()->needsCallObject());
-    MOZ_ASSERT(!hasCallObj_);
-
-    CallObject* callobj = CallObject::createForFunction(cx, this);
-    if (!callobj)
-        return false;
-
-    pushOnEnvironmentChain(*callobj);
-    hasCallObj_ = true;
-    return true;
+    return js::PushVarEnvironmentObject(cx, this);
 }
 
 void

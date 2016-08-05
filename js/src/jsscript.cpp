@@ -707,7 +707,10 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope, HandleScrip
                 if (!FunctionScope::XDR(xdr, fun, enclosing, &scope))
                     return false;
                 break;
-              case ScopeKind::ParameterDefaults:
+              case ScopeKind::Var:
+                if (!VarScope::XDR(xdr, enclosing, &scope))
+                    return false;
+                break;
               case ScopeKind::Lexical:
               case ScopeKind::Catch:
               case ScopeKind::NamedLambda:
@@ -2479,7 +2482,7 @@ JSScript::initFunctionPrototype(ExclusiveContext* cx, Handle<JSScript*> script,
         return false;
 
     RootedScope enclosing(cx, &cx->global()->emptyGlobalScope());
-    Scope* functionProtoScope = FunctionScope::create(cx, nullptr, 0, false, false, functionProto,
+    Scope* functionProtoScope = FunctionScope::create(cx, nullptr, false, false, functionProto,
                                                       enclosing);
     if (!functionProtoScope)
         return false;
@@ -3603,8 +3606,12 @@ JSScript::calculateLiveFixed(jsbytecode* pc)
                 scope = MaybeForwarded(scope);
         }
 
-        if (scope && scope->is<LexicalScope>())
-            nlivefixed = scope->as<LexicalScope>().nextFrameSlot();
+        if (scope) {
+            if (scope->is<LexicalScope>())
+                nlivefixed = scope->as<LexicalScope>().nextFrameSlot();
+            else if (scope->is<VarScope>())
+                nlivefixed = scope->as<VarScope>().nextFrameSlot();
+        }
     }
 
     MOZ_ASSERT(nlivefixed <= nfixed());
@@ -3670,13 +3677,6 @@ JSScript::innermostScope(jsbytecode* pc)
 {
     if (Scope* scope = lookupScope(pc))
         return scope;
-
-    // There is no scope note for the body scope. At PUSHCALLOBJ, the
-    // CallObject is not yet pushed, so we need to return the bodyScope's
-    // enclosing scope.
-    if (*pc == JSOP_PUSHCALLOBJ)
-        return bodyScope()->enclosing();
-
     return bodyScope();
 }
 
@@ -3804,7 +3804,7 @@ JSScript::argumentsOptimizationFailed(JSContext* cx, HandleScript script)
 bool
 JSScript::formalIsAliased(unsigned argSlot)
 {
-    if (hasDefaultsScope())
+    if (hasParameterExprs())
         return false;
 
     for (PositionalFormalParameterIter fi(this); fi; fi++) {
