@@ -163,6 +163,11 @@ class ParseContext : public Nestable<ParseContext>
         // semantics of Annex B.3.5.
         void removeSimpleCatchParameter(ParseContext* pc, JSAtom* name);
 
+        void useAsVarScope(ParseContext* pc) {
+            MOZ_ASSERT(!pc->varScope_);
+            pc->varScope_ = this;
+        }
+
         // An iterator for the set of names a scope binds: the set of all
         // declared names for 'var' scopes, and the set of lexically declared
         // names for non-'var' scopes.
@@ -230,41 +235,17 @@ class ParseContext : public Nestable<ParseContext>
             }
         };
 
-        inline uint32_t computeNumBindings(ParseContext* pc);
         inline BindingIter bindings(ParseContext* pc);
     };
 
-    class MOZ_STACK_CLASS VarScope
+    class VarScope : public Scope
     {
-        ParseContext* pc_;
-        mozilla::Maybe<Scope> varScope_;
-
       public:
         template <typename ParseHandler>
         explicit VarScope(Parser<ParseHandler>* parser)
-          : pc_(parser->pc)
+          : Scope(parser)
         {
-            MOZ_ASSERT(!pc_->varScope_);
-            if (!pc_->isFunctionBox() || pc_->functionBox()->hasParameterExprs) {
-                varScope_.emplace(parser);
-                pc_->varScope_ = varScope_.ptr();
-            } else {
-                pc_->varScope_ = &pc_->functionScope();
-            }
-        }
-
-        MOZ_MUST_USE bool init(ParseContext* pc) {
-            if (varScope_)
-                return varScope_->init(pc);
-            return true;
-        }
-
-        ~VarScope() {
-            if (!pc_->isFunctionBox() || pc_->functionBox()->hasParameterExprs)
-                MOZ_ASSERT(pc_->varScope_ == varScope_.ptr());
-            else
-                MOZ_ASSERT(pc_->varScope_ == &pc_->functionScope());
-            pc_->varScope_ = nullptr;
+            useAsVarScope(parser->pc);
         }
     };
 
@@ -525,21 +506,15 @@ ParseContext::Statement::is<ParseContext::LabelStatement>() const
     return kind_ == StatementKind::Label;
 }
 
-inline uint32_t
-ParseContext::Scope::computeNumBindings(ParseContext* pc)
-{
-    if (&pc->varScope() == this)
-        return declared_->count();
-    uint32_t count = 0;
-    for (BindingIter bi = bindings(pc); bi; bi++)
-        count++;
-    return count;
-}
-
 inline ParseContext::Scope::BindingIter
 ParseContext::Scope::bindings(ParseContext* pc)
 {
-    return BindingIter(*this, &pc->varScope() == this);
+    // In function scopes with parameter expressions, function special names
+    // (like '.this') are declared as vars in the function scope, despite its
+    // not being the var scope.
+    return BindingIter(*this,
+                       &pc->varScope() == this ||
+                       (pc->isFunctionBox() && &pc->functionScope() == this));
 }
 
 inline
@@ -1257,8 +1232,7 @@ class Parser final : private JS::AutoGCRooter, public StrictModeGetter
                                      FunctionSyntaxKind kind, GeneratorKind generatorKind,
                                      bool tryAnnexB, Directives inheritedDirectives,
                                      Directives* newDirectives);
-    bool finishFunctionBodyScope();
-    bool finishExtraFunctionScopes();
+    bool finishFunctionScopes();
     bool finishFunction();
     bool leaveInnerFunction(ParseContext* outerpc);
 

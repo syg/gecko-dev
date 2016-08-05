@@ -1490,7 +1490,9 @@ Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope, bool 
             }
             break;
           case BindingKind::Var:
-            MOZ_ASSERT(!hasParameterExprs);
+            MOZ_ASSERT_IF(hasParameterExprs,
+                          bi.name() == context->names().dotThis ||
+                          bi.name() == context->names().arguments);
             if (!vars.append(binding))
                 return Nothing();
             break;
@@ -1913,12 +1915,12 @@ Parser<ParseHandler>::declareDotGeneratorName()
 
 template <typename ParseHandler>
 bool
-Parser<ParseHandler>::finishExtraFunctionScopes()
+Parser<ParseHandler>::finishFunctionScopes()
 {
     FunctionBox* funbox = pc->functionBox();
 
     if (funbox->hasParameterExprs) {
-        if (!propagateFreeNamesAndMarkClosedOverBindings(pc->varScope()))
+        if (!propagateFreeNamesAndMarkClosedOverBindings(pc->functionScope()))
             return false;
     }
 
@@ -1934,7 +1936,7 @@ template <>
 bool
 Parser<FullParseHandler>::finishFunction()
 {
-    if (!finishExtraFunctionScopes())
+    if (!finishFunctionScopes())
         return false;
 
     FunctionBox* funbox = pc->functionBox();
@@ -1974,7 +1976,7 @@ Parser<SyntaxParseHandler>::finishFunction()
     // can skip over any already syntax parsed inner functions and still
     // retain correct scope information.
 
-    if (!finishExtraFunctionScopes())
+    if (!finishFunctionScopes())
         return false;
 
     // There are too many bindings or inner functions to be saved into the
@@ -2049,6 +2051,7 @@ Parser<FullParseHandler>::standaloneFunctionBody(HandleFunction fun,
     if (!funpc.init())
         return null();
     funpc.setIsStandaloneFunctionBody();
+    funpc.functionScope().useAsVarScope(&funpc);
 
     if (formals.length() > ARGNO_LIMIT) {
         report(ParseError, false, null(), JSMSG_TOO_MANY_FUN_ARGS);
@@ -2162,10 +2165,6 @@ Parser<ParseHandler>::functionBody(InHandling inHandling, YieldHandling yieldHan
 #ifdef DEBUG
     uint32_t startYieldOffset = pc->lastYieldOffset;
 #endif
-
-    ParseContext::VarScope varScope(this);
-    if (!varScope.init(pc))
-        return null();
 
     Node pn;
     if (type == StatementListBody) {
@@ -3097,6 +3096,15 @@ Parser<ParseHandler>::functionFormalParametersAndBody(InHandling inHandling,
 
     if (!functionArguments(yieldHandling, kind, pn))
         return false;
+
+    Maybe<ParseContext::VarScope> varScope;
+    if (funbox->hasParameterExprs) {
+        varScope.emplace(this);
+        if (!varScope->init(pc))
+            return false;
+    } else {
+        pc->functionScope().useAsVarScope(pc);
+    }
 
     if (kind == Arrow) {
         bool matched;

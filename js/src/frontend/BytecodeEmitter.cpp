@@ -968,7 +968,7 @@ BytecodeEmitter::EmitterScope::enterComprehensionFor(BytecodeEmitter* bce,
 bool
 BytecodeEmitter::EmitterScope::enterFunctionExtraVar(BytecodeEmitter* bce, FunctionBox* funbox)
 {
-    MOZ_ASSERT(funbox->hasParameterExprs && funbox->extraVarScopeBindings());
+    MOZ_ASSERT(funbox->hasParameterExprs);
     MOZ_ASSERT(this == bce->innermostEmitterScope);
 
     if (!ensureCache(bce))
