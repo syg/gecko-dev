@@ -4327,8 +4327,11 @@ BytecodeEmitter::emitDefault(ParseNode* defaultExpr)
         return false;
     if (!emit1(JSOP_POP))                                 // .
         return false;
-    if (!emitTree(defaultExpr))                           // DEFAULTVALUE
-        return false;
+    {
+        TDZCheckCache tdzCache(this);
+        if (!emitTree(defaultExpr))                       // DEFAULTVALUE
+            return false;
+    }
     if (!emitJumpTargetAndPatch(jump))
         return false;
     return true;
@@ -6101,6 +6104,8 @@ BytecodeEmitter::emitCStyleFor(ParseNode* pn, EmitterScope* headLexicalEmitterSc
 
     /* Check for update code to do before the condition (if any). */
     if (ParseNode* update = forHead->pn_kid3) {
+        TDZCheckCache tdzCache(this);
+
         if (!updateSourceCoordNotes(update->pn_pos.begin))
             return false;
         if (!emitTree(update))
@@ -7798,6 +7803,8 @@ BytecodeEmitter::emitLogical(ParseNode* pn)
      * otherwise it falls into the right operand's bytecode.
      */
 
+    TDZCheckCache tdzCache(this);
+
     /* Left-associative operator chain: avoid too much recursion. */
     ParseNode* pn2 = pn->pn_head;
     if (!emitTree(pn2))
@@ -7913,8 +7920,11 @@ BytecodeEmitter::emitConditionalExpression(ConditionalExpression& conditional)
     if (!emitJump(JSOP_IFEQ, &beq))
         return false;
 
-    if (!emitTree(&conditional.thenExpression()))
-        return false;
+    {
+        TDZCheckCache tdzCache(this);
+        if (!emitTree(&conditional.thenExpression()))
+            return false;
+    }
 
     /* Jump around else, fixup the branch, emit else, fixup jump. */
     JumpList jmp;
@@ -7934,8 +7944,11 @@ BytecodeEmitter::emitConditionalExpression(ConditionalExpression& conditional)
      */
     MOZ_ASSERT(stackDepth > 0);
     stackDepth--;
-    if (!emitTree(&conditional.elseExpression()))
-        return false;
+    {
+        TDZCheckCache tdzCache(this);
+        if (!emitTree(&conditional.elseExpression()))
+            return false;
+    }
     if (!emitJumpTargetAndPatch(jmp))
         return false;
     return setSrcNoteOffset(noteIndex, 0, jmp.offset - beq.offset);
