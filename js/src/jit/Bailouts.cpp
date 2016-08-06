@@ -267,8 +267,10 @@ jit::EnsureHasEnvironmentObjects(JSContext* cx, AbstractFramePtr fp)
         // expressions yet.
         MOZ_ASSERT(!fp.callee()->needsExtraVarEnvironment());
 
-        if (!fp.hasVarEnvironment() && !fp.initFunctionEnvironmentObjects(cx))
-            return false;
+        if (fp.callee()->needsFunctionEnvironmentObjects()) {
+            if (!fp.initFunctionEnvironmentObjects(cx))
+                return false;
+        }
     }
 
     return true;
