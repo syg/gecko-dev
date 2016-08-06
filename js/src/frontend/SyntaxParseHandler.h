@@ -341,7 +341,11 @@ class SyntaxParseHandler
         return NodeGeneric;
     }
 
-    Node newForHead(ParseNodeKind kind, Node decls, Node lhs, Node rhs, const TokenPos& pos) {
+    Node newForHead(Node init, Node test, Node update, const TokenPos& pos) {
+        return NodeGeneric;
+    }
+
+    Node newForInOrOfHead(ParseNodeKind kind, Node target, Node iteratedExpr, const TokenPos& pos) {
         return NodeGeneric;
     }
 

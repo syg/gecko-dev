@@ -248,15 +248,11 @@ IsDeleteKind(ParseNodeKind kind)
  *                          pn_right: body
  * PNK_COMPREHENSIONFOR     pn_left: either PNK_FORIN or PNK_FOROF
  *              binary      pn_right: body
- * PNK_FORIN    ternary     pn_kid1: PNK_VAR to left of 'in', or nullptr
- *                          pn_kid2: PNK_NAME or destructuring expr
- *                            to left of 'in'; if pn_kid1, then this
- *                            is a clone of pn_kid1->pn_head
+ * PNK_FORIN    ternary     pn_kid1: declaration or expression to left of 'in'
+ *                          pn_kid2: null
  *                          pn_kid3: object expr to right of 'in'
- * PNK_FOROF    ternary     pn_kid1: PNK_VAR to left of 'of', or nullptr
- *                          pn_kid2: PNK_NAME or destructuring expr
- *                            to left of 'of'; if pn_kid1, then this
- *                            is a clone of pn_kid1->pn_head
+ * PNK_FOROF    ternary     pn_kid1: declaration or expression to left of 'of'
+ *                          pn_kid2: null
  *                          pn_kid3: expr to right of 'of'
  * PNK_FORHEAD  ternary     pn_kid1:  init expr before first ';' or nullptr
  *                          pn_kid2:  cond expr before second ';' or nullptr

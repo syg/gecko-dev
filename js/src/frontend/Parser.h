@@ -1315,12 +1315,6 @@ class Parser final : private JS::AutoGCRooter, public StrictModeGetter
 
     bool makeSetCall(Node node, unsigned errnum);
 
-    Node cloneForInDeclarationForAssignment(Node decl);
-    Node cloneForOfDeclarationForAssignment(Node decl);
-    Node cloneLeftHandSide(Node opn);
-    Node cloneDestructuringDefault(Node opn);
-    Node cloneParseTree(Node opn);
-
     Node newNumber(const Token& tok) {
         return handler.newNumber(tok.number(), tok.decimalPoint(), tok.pos);
     }

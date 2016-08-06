@@ -5209,10 +5209,7 @@ Parser<ParseHandler>::forStatement(YieldHandling yieldHandling)
 
     MOZ_ASSERT(headKind == PNK_FORIN || headKind == PNK_FOROF || headKind == PNK_FORHEAD);
 
-    Node pn1;
-    Node pn2;
-    Node pn3;
-    TokenStream::Modifier modifier;
+    Node forHead;
     if (headKind == PNK_FORHEAD) {
         Node init = startNode;
 
@@ -5257,10 +5254,12 @@ Parser<ParseHandler>::forStatement(YieldHandling yieldHandling)
             mod = TokenStream::None;
         }
 
-        modifier = mod;
-        pn1 = init;
-        pn2 = test;
-        pn3 = update;
+        MUST_MATCH_TOKEN_MOD(TOK_RP, mod, JSMSG_PAREN_AFTER_FOR_CTRL);
+
+        TokenPos headPos(begin, pos().end);
+        forHead = handler.newForHead(init, test, update, headPos);
+        if (!forHead)
+            return null();
     } else {
         MOZ_ASSERT(headKind == PNK_FORIN || headKind == PNK_FOROF);
 
@@ -5270,11 +5269,6 @@ Parser<ParseHandler>::forStatement(YieldHandling yieldHandling)
         Node target = startNode;
 
         // Parse the rest of the for-in/of head.
-        //
-        // Here pn1 is everything to the left of 'in/of'.  At the end of this
-        // block, pn1 is a decl or nullptr, pn2 is the assignment target that
-        // receives the enumeration value each iteration, and pn3 is the rhs of
-        // 'in/of'.
         if (headKind == PNK_FORIN) {
             stmt.refineForKind(StatementKind::ForInLoop);
             iflags |= JSITER_ENUMERATE;
@@ -5287,41 +5281,22 @@ Parser<ParseHandler>::forStatement(YieldHandling yieldHandling)
             stmt.refineForKind(StatementKind::ForOfLoop);
         }
 
-        // After the following if-else, pn2 will point to the name or
-        // destructuring pattern on in's left. pn1 will point to the decl, if
-        // any, else nullptr. Note that the "declaration with initializer" case
-        // rewrites the loop-head, moving the decl and setting pn1 to nullptr.
-        if (handler.isDeclarationList(target)) {
-            pn1 = target;
-
-            // Make a copy of the declaration that can be passed to
-            // BytecodeEmitter::emitAssignment.
-            pn2 = cloneLeftHandSide(handler.singleBindingFromDeclaration(target));
-            if (!pn2)
-                return null();
-        } else {
+        if (!handler.isDeclarationList(target)) {
             MOZ_ASSERT(!forLoopLexicalScope);
-            pn1 = null();
-            pn2 = target;
-
-            if (!checkAndMarkAsAssignmentLhs(pn2, PlainAssignment))
+            if (!checkAndMarkAsAssignmentLhs(target, PlainAssignment))
                 return null();
         }
-
-        pn3 = iteratedExpr;
 
         // Parser::declaration consumed everything up to the closing ')'.  That
         // token follows an {Assignment,}Expression, so the next token must be
         // consumed as if an operator continued the expression, i.e. as None.
-        modifier = TokenStream::None;
+        MUST_MATCH_TOKEN_MOD(TOK_RP, TokenStream::None, JSMSG_PAREN_AFTER_FOR_CTRL);
+
+        TokenPos headPos(begin, pos().end);
+        forHead = handler.newForInOrOfHead(headKind, target, iteratedExpr, headPos);
+        if (!forHead)
+            return null();
     }
-
-    MUST_MATCH_TOKEN_MOD(TOK_RP, modifier, JSMSG_PAREN_AFTER_FOR_CTRL);
-
-    TokenPos headPos(begin, pos().end);
-    Node forHead = handler.newForHead(headKind, pn1, pn2, pn3, headPos);
-    if (!forHead)
-        return null();
 
     Node body = statement(yieldHandling);
     if (!body)
@@ -7509,9 +7484,6 @@ Parser<ParseHandler>::comprehensionFor(GeneratorKind comprehensionKind)
         return null();
     }
     TokenPos namePos = pos();
-    Node assignLhs = newName(name);
-    if (!assignLhs)
-        return null();
     Node lhs = newName(name);
     if (!lhs)
         return null();
@@ -7557,7 +7529,7 @@ Parser<ParseHandler>::comprehensionFor(GeneratorKind comprehensionKind)
     if (!lexicalScope)
         return null();
 
-    Node head = handler.newForHead(PNK_FOROF, lexicalScope, assignLhs, rhs, headPos);
+    Node head = handler.newForInOrOfHead(PNK_FOROF, lexicalScope, rhs, headPos);
     if (!head)
         return null();
 
@@ -7889,7 +7861,7 @@ Parser<ParseHandler>::memberExpr(YieldHandling yieldHandling, TripledotHandling 
                     return null();
 
                 // Despite the fact that it's impossible to have |super()| is a
-                // generator, we still inherity the yieldHandling of the
+                // generator, we still inherit the yieldHandling of the
                 // memberExpression, per spec. Curious.
                 bool isSpread = false;
                 if (!argumentList(yieldHandling, nextMember, &isSpread))

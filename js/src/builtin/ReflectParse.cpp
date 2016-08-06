@@ -2456,11 +2456,14 @@ ASTSerializer::statement(ParseNode* pn, MutableHandleValue dst)
 
         if (head->isKind(PNK_FORIN) || head->isKind(PNK_FOROF)) {
             RootedValue var(cx);
-            if (!head->pn_kid1) {
-                if (!pattern(head->pn_kid2, &var))
-                    return false;
-            } else if (head->pn_kid1->isKind(PNK_LEXICALSCOPE)) {
+            if (head->pn_kid1->isKind(PNK_LEXICALSCOPE)) {
                 if (!variableDeclaration(head->pn_kid1->pn_expr, true, &var))
+                    return false;
+            } else if (!head->pn_kid1->isKind(PNK_VAR) &&
+                       !head->pn_kid1->isKind(PNK_LET) &&
+                       !head->pn_kid1->isKind(PNK_CONST))
+            {
+                if (!pattern(head->pn_kid1, &var))
                     return false;
             } else {
                 if (!variableDeclaration(head->pn_kid1,
@@ -2678,8 +2681,13 @@ ASTSerializer::comprehensionBlock(ParseNode* pn, MutableHandleValue dst)
     bool isForEach = in->isKind(PNK_FORIN) && (pn->pn_iflags & JSITER_FOREACH);
     bool isForOf = in->isKind(PNK_FOROF);
 
+    ParseNode* decl = in->pn_kid1;
+    if (decl->isKind(PNK_LEXICALSCOPE))
+        decl = decl->pn_expr;
+    MOZ_ASSERT(decl->pn_count == 1);
+
     RootedValue patt(cx), src(cx);
-    return pattern(in->pn_kid2, &patt) &&
+    return pattern(decl->pn_head, &patt) &&
            expression(in->pn_kid3, &src) &&
            builder.comprehensionBlock(patt, src, isForEach, isForOf, &in->pn_pos, dst);
 }

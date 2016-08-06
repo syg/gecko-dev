@@ -1561,13 +1561,9 @@ FoldForInOrOf(ExclusiveContext* cx, ParseNode* node, Parser<FullParseHandler>& p
 {
     MOZ_ASSERT(node->isKind(PNK_FORIN) || node->isKind(PNK_FOROF));
     MOZ_ASSERT(node->isArity(PN_TERNARY));
+    MOZ_ASSERT(!node->pn_kid2);
 
-    if (ParseNode*& decl = node->pn_kid1) {
-        if (!Fold(cx, &decl, parser, inGenexpLambda))
-            return false;
-    }
-
-    return Fold(cx, &node->pn_kid2, parser, inGenexpLambda) &&
+    return Fold(cx, &node->pn_kid1, parser, inGenexpLambda) &&
            Fold(cx, &node->pn_kid3, parser, inGenexpLambda);
 }
 

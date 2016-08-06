@@ -577,11 +577,17 @@ class FullParseHandler
         return new_<ListNode>(PNK_LET, JSOP_NOP, kid);
     }
 
-    ParseNode* newForHead(ParseNodeKind kind, ParseNode* pn1, ParseNode* pn2, ParseNode* pn3,
+    ParseNode* newForHead(ParseNode* init, ParseNode* test, ParseNode* update,
                           const TokenPos& pos)
     {
-        MOZ_ASSERT(kind == PNK_FORIN || kind == PNK_FOROF || kind == PNK_FORHEAD);
-        return new_<TernaryNode>(kind, JSOP_NOP, pn1, pn2, pn3, pos);
+        return new_<TernaryNode>(PNK_FORHEAD, JSOP_NOP, init, test, update, pos);
+    }
+
+    ParseNode* newForInOrOfHead(ParseNodeKind kind, ParseNode* target, ParseNode* iteratedExpr,
+                                const TokenPos& pos)
+    {
+        MOZ_ASSERT(kind == PNK_FORIN || kind == PNK_FOROF);
+        return new_<TernaryNode>(kind, JSOP_NOP, target, nullptr, iteratedExpr, pos);
     }
 
     ParseNode* newSwitchStatement(uint32_t begin, ParseNode* discriminant, ParseNode* caseList) {

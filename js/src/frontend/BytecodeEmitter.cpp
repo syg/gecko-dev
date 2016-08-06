@@ -5872,13 +5872,13 @@ BytecodeEmitter::emitInitializeForInOrOfTarget(ParseNode* forHead)
     MOZ_ASSERT(this->stackDepth >= 1,
                "must have a per-iteration value for initializing");
 
-    ParseNode* decl = forHead->pn_kid1;
-    ParseNode* target = forHead->pn_kid2;
+    ParseNode* target = forHead->pn_kid1;
+    MOZ_ASSERT(!forHead->pn_kid2);
 
     // If the for-in/of loop didn't have a variable declaration, per-loop
     // initialization is just assigning the iteration value to a target
     // expression.
-    if (!decl)
+    if (!parser->handler.isDeclarationList(target))
         return emitAssignment(target, JSOP_NOP, nullptr); // ... ITERVAL
 
     // Otherwise, per-loop initialization is (possibly) declaration
@@ -5887,12 +5887,11 @@ BytecodeEmitter::emitInitializeForInOrOfTarget(ParseNode* forHead)
     // assignment to that name (which does *not* necessarily assign to the
     // variable!) must be generated.
 
-    MOZ_ASSERT(decl->isForLoopDeclaration());
-    MOZ_ASSERT(decl->isArity(PN_LIST));
-    MOZ_ASSERT(decl->pn_count == 1);
-
-    if (!updateSourceCoordNotes(decl->pn_pos.begin))
+    if (!updateSourceCoordNotes(target->pn_pos.begin))
         return false;
+
+    MOZ_ASSERT(target->isForLoopDeclaration());
+    target = parser->handler.singleBindingFromDeclaration(target);
 
     if (target->isKind(PNK_NAME)) {
         auto emitSwapScopeAndRhs = [](BytecodeEmitter* bce, const NameLocation&,
@@ -5971,8 +5970,7 @@ BytecodeEmitter::emitForOf(ParseNode* forOfLoop, EmitterScope* headLexicalEmitte
         // recreation each iteration. If a lexical scope exists for the head,
         // it must be the innermost one. If that scope has closed-over
         // bindings inducing an environment, recreate the current environment.
-        DebugOnly<ParseNode*> forOfTarget =
-            forOfHead->pn_kid1 ? forOfHead->pn_kid1 : forOfHead->pn_kid2;
+        DebugOnly<ParseNode*> forOfTarget = forOfHead->pn_kid1;
         MOZ_ASSERT(forOfTarget->isKind(PNK_LET) || forOfTarget->isKind(PNK_CONST));
         MOZ_ASSERT(headLexicalEmitterScope == innermostEmitterScope);
         MOZ_ASSERT(headLexicalEmitterScope->scope(this)->kind() == ScopeKind::Lexical);
@@ -6101,8 +6099,7 @@ BytecodeEmitter::emitForIn(ParseNode* forInLoop, EmitterScope* headLexicalEmitte
         // recreation each iteration. If a lexical scope exists for the head,
         // it must be the innermost one. If that scope has closed-over
         // bindings inducing an environment, recreate the current environment.
-        DebugOnly<ParseNode*> forInTarget =
-            forInHead->pn_kid1 ? forInHead->pn_kid1 : forInHead->pn_kid2;
+        DebugOnly<ParseNode*> forInTarget = forInHead->pn_kid1;
         MOZ_ASSERT(forInTarget->isKind(PNK_LET) || forInTarget->isKind(PNK_CONST));
         MOZ_ASSERT(headLexicalEmitterScope == innermostEmitterScope);
         MOZ_ASSERT(headLexicalEmitterScope->scope(this)->kind() == ScopeKind::Lexical);
@@ -6415,7 +6412,7 @@ BytecodeEmitter::emitComprehensionForOf(ParseNode* pn)
 
     ParseNode* loopDecl = forHead->pn_kid1;
     bool lexicalScope = false;
-    if (loopDecl && !emitComprehensionForInOrOfVariables(loopDecl, &lexicalScope))
+    if (!emitComprehensionForInOrOfVariables(loopDecl, &lexicalScope))
         return false;
 
     // For-of loops run with two values on the stack: the iterator and the
@@ -6436,10 +6433,14 @@ BytecodeEmitter::emitComprehensionForOf(ParseNode* pn)
     // assigned to is a plain assignment.
     TDZCheckCache tdzCache(this);
     Maybe<EmitterScope> emitterScope;
+    ParseNode* loopVariableName;
     if (lexicalScope) {
+        loopVariableName = parser->handler.singleBindingFromDeclaration(loopDecl->pn_expr);
         emitterScope.emplace(this);
         if (!emitterScope->enterComprehensionFor(this, loopDecl->scopeBindings()))
             return false;
+    } else {
+        loopVariableName = parser->handler.singleBindingFromDeclaration(loopDecl);
     }
 
     LoopControl loopInfo(this, StatementKind::ForOfLoop);
@@ -6467,7 +6468,7 @@ BytecodeEmitter::emitComprehensionForOf(ParseNode* pn)
         return false;
     if (!emitAtomOp(cx->names().value, JSOP_GETPROP))     // ITER RESULT VALUE
         return false;
-    if (!emitAssignment(forHead->pn_kid2, JSOP_NOP, nullptr)) // ITER RESULT VALUE
+    if (!emitAssignment(loopVariableName, JSOP_NOP, nullptr)) // ITER RESULT VALUE
         return false;
     if (!emit1(JSOP_POP))                                 // ITER RESULT
         return false;
@@ -6498,7 +6499,7 @@ BytecodeEmitter::emitComprehensionForOf(ParseNode* pn)
 
     JumpList beq;
     JumpTarget breakTarget{ -1 };
-    if (!emitBackwardJump(JSOP_IFEQ, top, &beq, &breakTarget))    // ITER RESULT
+    if (!emitBackwardJump(JSOP_IFEQ, top, &beq, &breakTarget)) // ITER RESULT
         return false;
 
     MOZ_ASSERT(this->stackDepth == loopDepth);
