@@ -137,12 +137,6 @@ class RematerializedFrame
     void popOffEnvironmentChain() {
         MOZ_ASSERT(envChain_->is<SpecificEnvironment>());
         envChain_ = &envChain_->as<SpecificEnvironment>().enclosingEnvironment();
-        if (mozilla::IsSame<SpecificEnvironment, VarEnvironmentObject>::value) {
-            hasVarEnv_ = false;
-        } else if (mozilla::IsSame<SpecificEnvironment, CallObject>::value) {
-            if (!script()->hasParameterExprs())
-                hasVarEnv_ = false;
-        }
     }
 
     MOZ_MUST_USE bool initFunctionEnvironmentObjects(JSContext* cx);

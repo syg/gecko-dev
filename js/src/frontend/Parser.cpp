@@ -1490,6 +1490,9 @@ Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope, bool 
             }
             break;
           case BindingKind::Var:
+            // The only vars in the function scope when there are parameter
+            // exprs, which induces a separate var environment, should be the
+            // special internal bindings.
             MOZ_ASSERT_IF(hasParameterExprs,
                           bi.name() == context->names().dotThis ||
                           bi.name() == context->names().arguments);

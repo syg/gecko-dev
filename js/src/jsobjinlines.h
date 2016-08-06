@@ -249,6 +249,7 @@ JSObject::isQualifiedVarObj() const
     MOZ_ASSERT_IF(rv,
                   is<js::GlobalObject>() ||
                   is<js::CallObject>() ||
+                  is<js::VarEnvironmentObject>() ||
                   is<js::ModuleEnvironmentObject>() ||
                   is<js::NonSyntacticVariablesObject>() ||
                   (is<js::WithEnvironmentObject>() &&

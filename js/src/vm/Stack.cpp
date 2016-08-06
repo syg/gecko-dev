@@ -138,7 +138,7 @@ AssertScopeMatchesEnvironment(Scope* scope, JSObject* originalEnv)
 
               case ScopeKind::Eval:
               case ScopeKind::StrictEval:
-                env = &env->as<CallObject>().enclosingEnvironment();
+                env = &env->as<VarEnvironmentObject>().enclosingEnvironment();
                 break;
 
               case ScopeKind::Global:

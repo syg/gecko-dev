@@ -1221,9 +1221,11 @@ EnvironmentIter::settle()
     if (frame_ && frame_.script()->varEnvironmentShape() && !frame_.hasVarEnvironment()) {
         // Skip until we're at the enclosing scope of the script.
         while (si_.scope() != frame_.script()->enclosingScope()) {
-            if (env_->is<LexicalEnvironmentObject>() &&
-                !env_->as<LexicalEnvironmentObject>().isExtensible() &&
-                &env_->as<LexicalEnvironmentObject>().scope() == si_.scope())
+            if ((env_->is<LexicalEnvironmentObject>() &&
+                 !env_->as<LexicalEnvironmentObject>().isExtensible() &&
+                 &env_->as<LexicalEnvironmentObject>().scope() == si_.scope()) ||
+                (env_->is<VarEnvironmentObject>() &&
+                 &env_->as<VarEnvironmentObject>().scope() == si_.scope()))
             {
                 MOZ_ASSERT(si_.kind() == ScopeKind::NamedLambda ||
                            si_.kind() == ScopeKind::StrictNamedLambda);

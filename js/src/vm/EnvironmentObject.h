@@ -913,6 +913,7 @@ inline bool
 JSObject::is<js::EnvironmentObject>() const
 {
     return is<js::CallObject>() ||
+           is<js::VarEnvironmentObject>() ||
            is<js::ModuleEnvironmentObject>() ||
            is<js::LexicalEnvironmentObject>() ||
            is<js::WithEnvironmentObject>() ||

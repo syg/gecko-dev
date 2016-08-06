@@ -1358,8 +1358,10 @@ BytecodeEmitter::EmitterScope::leave(BytecodeEmitter* bce, bool nonLocal)
     if (!nonLocal) {
         // Popping scopes due to non-local jumps generate additional scope
         // notes. See NonLocalExitControl::prepareForNonLocalJump.
-        if (ScopeKindIsInBody(kind))
-            bce->scopeNoteList.recordEnd(noteIndex_, bce->offset(), bce->inPrologue());
+        if (ScopeKindIsInBody(kind)) {
+            uint32_t offset = kind == ScopeKind::Var ? UINT32_MAX : bce->offset();
+            bce->scopeNoteList.recordEnd(noteIndex_, offset, bce->inPrologue());
+        }
     }
 
     return true;

@@ -196,12 +196,6 @@ InterpreterFrame::popOffEnvironmentChain()
 {
     MOZ_ASSERT(envChain_->is<SpecificEnvironment>());
     envChain_ = &envChain_->as<SpecificEnvironment>().enclosingEnvironment();
-    if (mozilla::IsSame<SpecificEnvironment, VarEnvironmentObject>::value) {
-        flags_ &= ~HAS_VAR_ENV;
-    } else if (mozilla::IsSame<SpecificEnvironment, CallObject>::value) {
-        if (!script()->hasParameterExprs())
-            flags_ &= ~HAS_VAR_ENV;
-    }
 }
 
 inline void
