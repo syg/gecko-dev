@@ -182,11 +182,10 @@ InterpreterFrame::pushOnEnvironmentChain(SpecificEnvironment& env)
 {
     MOZ_ASSERT(*environmentChain() == env.enclosingEnvironment());
     envChain_ = &env;
-    if (mozilla::IsSame<SpecificEnvironment, VarEnvironmentObject>::value) {
-        flags_ |= HAS_VAR_ENV;
-    } else if (mozilla::IsSame<SpecificEnvironment, CallObject>::value) {
-        if (!script()->hasParameterExprs())
-            flags_ |= HAS_VAR_ENV;
+    if (mozilla::IsSame<SpecificEnvironment, CallObject>::value ||
+        mozilla::IsSame<SpecificEnvironment, VarEnvironmentObject>::value)
+    {
+        flags_ |= HAS_INITIAL_ENV;
     }
 }
 
@@ -207,10 +206,10 @@ InterpreterFrame::replaceInnermostEnvironment(EnvironmentObject& env)
 }
 
 bool
-InterpreterFrame::hasVarEnvironment() const
+InterpreterFrame::hasInitialEnvironment() const
 {
-    MOZ_ASSERT(script()->varEnvironmentShape());
-    return flags_ & HAS_VAR_ENV;
+    MOZ_ASSERT(script()->initialEnvironmentShape());
+    return flags_ & HAS_INITIAL_ENV;
 }
 
 inline CallObject&
@@ -568,13 +567,13 @@ AbstractFramePtr::unaliasedActual(unsigned i, MaybeCheckAliasing checkAliasing)
 }
 
 inline bool
-AbstractFramePtr::hasVarEnvironment() const
+AbstractFramePtr::hasInitialEnvironment() const
 {
     if (isInterpreterFrame())
-        return asInterpreterFrame()->hasVarEnvironment();
+        return asInterpreterFrame()->hasInitialEnvironment();
     if (isBaselineFrame())
-        return asBaselineFrame()->hasVarEnvironment();
-    return asRematerializedFrame()->hasVarEnvironment();
+        return asBaselineFrame()->hasInitialEnvironment();
+    return asRematerializedFrame()->hasInitialEnvironment();
 }
 
 inline bool

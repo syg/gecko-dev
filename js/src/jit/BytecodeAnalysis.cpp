@@ -49,7 +49,7 @@ BytecodeAnalysis::init(TempAllocator& alloc, GSNCache& gsn)
     // Initialize the env chain slot if either the function needs some
     // EnvironmentObject (like a CallObject) or the script uses the env
     // chain. The latter case is handled below.
-    usesEnvironmentChain_ = script_->module() || script_->varEnvironmentShape() ||
+    usesEnvironmentChain_ = script_->module() || script_->initialEnvironmentShape() ||
                             (script_->functionDelazifying() &&
                              script_->functionDelazifying()->needsSomeEnvironmentObject());
 

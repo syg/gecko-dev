@@ -50,7 +50,7 @@ RematerializedFrame::RematerializedFrame(JSContext* cx, uint8_t* top, unsigned n
         callee_ = nullptr;
 
     CopyValueToRematerializedFrame op(slots_);
-    iter.readFrameArgsAndLocals(cx, op, op, &envChain_, &hasVarEnv_, &returnValue_,
+    iter.readFrameArgsAndLocals(cx, op, op, &envChain_, &hasInitialEnv_, &returnValue_,
                                 &argsObj_, &thisArgument_, ReadFrame_Actuals,
                                 fallback);
 }
@@ -116,7 +116,7 @@ RematerializedFrame::FreeInVector(GCVector<RematerializedFrame*>& frames)
 CallObject&
 RematerializedFrame::callObj() const
 {
-    MOZ_ASSERT(hasVarEnvironment());
+    MOZ_ASSERT(hasInitialEnvironment());
 
     JSObject* env = environmentChain();
     while (!env->is<CallObject>())

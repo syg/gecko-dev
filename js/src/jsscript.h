@@ -997,14 +997,9 @@ class JSScript : public js::gc::TenuredCell
         return 0;
     }
 
-    js::Shape* varEnvironmentShape() const {
+    js::Shape* initialEnvironmentShape() const {
         js::Scope* scope = bodyScope();
-        if (scope->is<js::FunctionScope>()) {
-            if (hasParameterExprs())
-                return extraVarScope()->environmentShape();
-            return scope->environmentShape();
-        }
-        if (scope->is<js::EvalScope>())
+        if (scope->is<js::FunctionScope>() || scope->is<js::EvalScope>())
             return scope->environmentShape();
         return nullptr;
     }

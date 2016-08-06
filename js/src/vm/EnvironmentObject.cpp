@@ -1219,14 +1219,12 @@ EnvironmentIter::settle()
 {
     // Check for trying to iterate a function or eval frame before the prologue has
     // created the CallObject, in which case we have to skip.
-    if (frame_ && frame_.script()->varEnvironmentShape() && !frame_.hasVarEnvironment()) {
+    if (frame_ && frame_.script()->initialEnvironmentShape() && !frame_.hasInitialEnvironment()) {
         // Skip until we're at the enclosing scope of the script.
         while (si_.scope() != frame_.script()->enclosingScope()) {
-            if ((env_->is<LexicalEnvironmentObject>() &&
-                 !env_->as<LexicalEnvironmentObject>().isExtensible() &&
-                 &env_->as<LexicalEnvironmentObject>().scope() == si_.scope()) ||
-                (env_->is<VarEnvironmentObject>() &&
-                 &env_->as<VarEnvironmentObject>().scope() == si_.scope()))
+            if (env_->is<LexicalEnvironmentObject>() &&
+                !env_->as<LexicalEnvironmentObject>().isExtensible() &&
+                &env_->as<LexicalEnvironmentObject>().scope() == si_.scope())
             {
                 MOZ_ASSERT(si_.kind() == ScopeKind::NamedLambda ||
                            si_.kind() == ScopeKind::StrictNamedLambda);
@@ -2658,7 +2656,10 @@ DebugEnvironments::onPopVar(JSContext* cx, AbstractFramePtr frame, jsbytecode* p
 void
 DebugEnvironments::onPopVar(JSContext* cx, const EnvironmentIter& ei)
 {
-    onPopGeneric<VarEnvironmentObject, VarScope>(cx, ei);
+    if (ei.scope().is<EvalScope>())
+        onPopGeneric<VarEnvironmentObject, EvalScope>(cx, ei);
+    else
+        onPopGeneric<VarEnvironmentObject, VarScope>(cx, ei);
 }
 
 void

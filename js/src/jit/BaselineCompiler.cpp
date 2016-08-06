@@ -4230,7 +4230,7 @@ BaselineCompiler::emit_JSOP_RESUME()
     masm.checkStackAlignment();
 
     // Store flags and env chain.
-    masm.store32(Imm32(BaselineFrame::HAS_VAR_ENV), frame.addressOfFlags());
+    masm.store32(Imm32(BaselineFrame::HAS_INITIAL_ENV), frame.addressOfFlags());
     masm.unboxObject(Address(genObj, GeneratorObject::offsetOfEnvironmentChainSlot()), scratch2);
     masm.storePtr(scratch2, frame.addressOfEnvironmentChain());
 

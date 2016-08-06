@@ -109,8 +109,8 @@ BaselineFrame::initForOsr(InterpreterFrame* fp, uint32_t numStackValues)
 
     envChain_ = fp->environmentChain();
 
-    if (fp->hasVarEnvironmentUnchecked())
-        flags_ |= BaselineFrame::HAS_VAR_ENV;
+    if (fp->hasInitialEnvironmentUnchecked())
+        flags_ |= BaselineFrame::HAS_INITIAL_ENV;
 
     if (fp->script()->needsArgsObj() && fp->hasArgsObj()) {
         flags_ |= BaselineFrame::HAS_ARGS_OBJ;

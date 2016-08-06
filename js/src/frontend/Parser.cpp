@@ -1062,13 +1062,13 @@ Parser<ParseHandler>::noteDeclaredName(HandlePropertyName name, DeclarationKind 
         // It is an early error if any non-positional formal parameter name
         // (e.g., destructuring formal parameter) is duplicated.
 
-        AddDeclaredNamePtr p = pc->varScope().lookupDeclaredNameForAdd(name);
+        AddDeclaredNamePtr p = pc->functionScope().lookupDeclaredNameForAdd(name);
         if (p) {
             report(ParseError, false, null(), JSMSG_BAD_DUP_ARGS);
             return false;
         }
 
-        if (!pc->varScope().addDeclaredName(pc, p, name, kind))
+        if (!pc->functionScope().addDeclaredName(pc, p, name, kind))
             return false;
 
         break;

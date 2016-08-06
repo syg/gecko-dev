@@ -27,11 +27,10 @@ BaselineFrame::pushOnEnvironmentChain(SpecificEnvironment& env)
 {
     MOZ_ASSERT(*environmentChain() == env.enclosingEnvironment());
     envChain_ = &env;
-    if (mozilla::IsSame<SpecificEnvironment, VarEnvironmentObject>::value) {
-        flags_ |= HAS_VAR_ENV;
-    } else if (mozilla::IsSame<SpecificEnvironment, CallObject>::value) {
-        if (!script()->hasParameterExprs())
-            flags_ |= HAS_VAR_ENV;
+    if (mozilla::IsSame<SpecificEnvironment, CallObject>::value ||
+        mozilla::IsSame<SpecificEnvironment, VarEnvironmentObject>::value)
+    {
+        flags_ |= HAS_INITIAL_ENV;
     }
 }
 
@@ -89,7 +88,7 @@ BaselineFrame::recreateLexicalEnvironment(JSContext* cx)
 inline CallObject&
 BaselineFrame::callObj() const
 {
-    MOZ_ASSERT(hasVarEnvironment());
+    MOZ_ASSERT(hasInitialEnvironment());
     MOZ_ASSERT(callee()->needsCallObject());
 
     JSObject* obj = environmentChain();

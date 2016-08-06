@@ -8421,19 +8421,24 @@ BytecodeEmitter::emitFunctionFormalParametersAndBody(ParseNode *pn)
             //   function f(x, y = 42) { var y; }
             //
             RootedAtom name(cx);
-            if (funbox->extraVarScopeBindings()) {
-                for (BindingIter bi(*funbox->extraVarScopeBindings(), 0); bi; bi++) {
-                    name = bi.name();
-
-                    // There may not be a parameter binding of the same name.
-                    Maybe<NameLocation> paramLoc = locationOfNameBoundInScope(name, &funEmitterScope);
-                    if (!paramLoc)
+            if (funbox->extraVarScopeBindings() && funbox->functionScopeBindings()) {
+                for (BindingIter bi(*funbox->functionScopeBindings(), true); bi; bi++) {
+                    // Only parameters in a function scope with parameter
+                    // expressions are lexical.
+                    if (!BindingKindIsLexical(bi.kind()))
                         continue;
 
-                    auto emitRhs = [&name, &paramLoc](BytecodeEmitter* bce, const NameLocation&,
-                                                      bool)
+                    name = bi.name();
+
+                    // There may not be a var binding of the same name.
+                    if (!locationOfNameBoundInScope(name, &extraVarEmitterScope))
+                        continue;
+
+                    NameLocation paramLoc = *locationOfNameBoundInScope(name, &funEmitterScope);
+                    auto emitRhs = [&name, paramLoc](BytecodeEmitter* bce, const NameLocation&,
+                                                     bool)
                     {
-                        return bce->emitGetNameAtLocation(name, *paramLoc);
+                        return bce->emitGetNameAtLocation(name, paramLoc);
                     };
 
                     if (!emitInitializeName(name, emitRhs))

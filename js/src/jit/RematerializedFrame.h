@@ -32,8 +32,10 @@ class RematerializedFrame
     // Propagated to the Baseline frame once this is popped.
     bool isDebuggee_;
 
-    // Has a var environment been pushed?
-    bool hasVarEnv_;
+    // Has an initial environment has been pushed on the environment chain for
+    // function frames that need a CallObject or eval frames that need a
+    // VarEnvironmentObject?
+    bool hasInitialEnv_;
 
     // Is this frame constructing?
     bool isConstructing_;
@@ -125,11 +127,10 @@ class RematerializedFrame
     void pushOnEnvironmentChain(SpecificEnvironment& env) {
         MOZ_ASSERT(*environmentChain() == env.enclosingEnvironment());
         envChain_ = &env;
-        if (mozilla::IsSame<SpecificEnvironment, VarEnvironmentObject>::value) {
-            hasVarEnv_ = true;
-        } else if (mozilla::IsSame<SpecificEnvironment, CallObject>::value) {
-            if (!script()->hasParameterExprs())
-                hasVarEnv_ = true;
+        if (mozilla::IsSame<SpecificEnvironment, CallObject>::value ||
+            mozilla::IsSame<SpecificEnvironment, VarEnvironmentObject>::value)
+        {
+            hasInitialEnv_ = true;
         }
     }
 
@@ -142,8 +143,8 @@ class RematerializedFrame
     MOZ_MUST_USE bool initFunctionEnvironmentObjects(JSContext* cx);
     MOZ_MUST_USE bool pushVarEnvironment(JSContext* cx);
 
-    bool hasVarEnvironment() const {
-        return hasVarEnv_;
+    bool hasInitialEnvironment() const {
+        return hasInitialEnv_;
     }
     CallObject& callObj() const;
 

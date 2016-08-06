@@ -31,8 +31,10 @@ class BaselineFrame
         // The frame has a valid return value. See also InterpreterFrame::HAS_RVAL.
         HAS_RVAL         = 1 << 0,
 
-        // A var environment has been pushed on the environment chain.
-        HAS_VAR_ENV      = 1 << 2,
+        // An initial environment has been pushed on the environment chain for
+        // function frames that need a CallObject or eval frames that need a
+        // VarEnvironmentObject.
+        HAS_INITIAL_ENV  = 1 << 2,
 
         // Frame has an arguments object, argsObj_.
         HAS_ARGS_OBJ     = 1 << 4,
@@ -245,8 +247,8 @@ class BaselineFrame
         return reinterpret_cast<Value*>(&loReturnValue_);
     }
 
-    bool hasVarEnvironment() const {
-        return flags_ & HAS_VAR_ENV;
+    bool hasInitialEnvironment() const {
+        return flags_ & HAS_INITIAL_ENV;
     }
 
     inline CallObject& callObj() const;

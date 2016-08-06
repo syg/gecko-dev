@@ -207,7 +207,7 @@ class AbstractFramePtr
 
     inline JSCompartment* compartment() const;
 
-    inline bool hasVarEnvironment() const;
+    inline bool hasInitialEnvironment() const;
     inline bool isGlobalFrame() const;
     inline bool isModuleFrame() const;
     inline bool isEvalFrame() const;
@@ -281,7 +281,7 @@ class InterpreterFrame
         RESUMED_GENERATOR      =        0x2,  /* frame is for a resumed generator invocation */
 
         /* Function prologue state */
-        HAS_VAR_ENV            =        0x4,  /* var env created function or eval */
+        HAS_INITIAL_ENV        =        0x4,  /* call obj created function or var env for eval */
         HAS_ARGS_OBJ           =        0x8,  /* ArgumentsObject created for needsArgsObj script */
 
         /* Lazy frame initialization */
@@ -686,7 +686,7 @@ class InterpreterFrame
     void resumeGeneratorFrame(JSObject* envChain) {
         MOZ_ASSERT(script()->isGenerator());
         MOZ_ASSERT(isFunctionFrame());
-        flags_ |= HAS_VAR_ENV;
+        flags_ |= HAS_INITIAL_ENV;
         envChain_ = envChain;
     }
 
@@ -713,10 +713,10 @@ class InterpreterFrame
      * time the call/args object are created).
      */
 
-    inline bool hasVarEnvironment() const;
+    inline bool hasInitialEnvironment() const;
 
-    bool hasVarEnvironmentUnchecked() const {
-        return flags_ & HAS_VAR_ENV;
+    bool hasInitialEnvironmentUnchecked() const {
+        return flags_ & HAS_INITIAL_ENV;
     }
 
     bool hasArgsObj() const {
