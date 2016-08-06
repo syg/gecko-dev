@@ -1297,9 +1297,6 @@ BindingIter::init(ModuleScope::Data& data)
 
 PositionalFormalParameterIter::PositionalFormalParameterIter(JSScript* script)
   : BindingIter(script)
-#ifdef DEBUG
-  , hasParameterExprs_(script->hasParameterExprs())
-#endif
 {
     // Reinit with flags = 0, i.e., iterate over all positional parameters.
     if (script->bodyScope()->is<FunctionScope>())

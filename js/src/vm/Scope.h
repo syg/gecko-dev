@@ -1100,10 +1100,6 @@ void DumpBindings(JSContext* cx, Scope* scope);
 //
 class PositionalFormalParameterIter : public BindingIter
 {
-#ifdef DEBUG
-    bool hasParameterExprs_;
-#endif
-
     void settle() {
         if (index_ >= nonPositionalFormalStart_)
             index_ = length_;
@@ -1119,13 +1115,6 @@ class PositionalFormalParameterIter : public BindingIter
 
     bool isDestructured() const {
         return !name();
-    }
-
-    BindingLocation location() const {
-        // The locations reported by this iter are wrong when the script has a
-        // defaults scope.
-        MOZ_ASSERT(!hasParameterExprs_);
-        return BindingIter::location();
     }
 };
 
