@@ -1031,11 +1031,11 @@ BytecodeEmitter::EmitterScope::enterFunction(BytecodeEmitter* bce, FunctionBox* 
         return false;
 
     // Resolve body-level bindings, if there are any.
+    Maybe<uint32_t> lastLexicalSlot;
     if (funbox->functionScopeBindings()) {
-        Handle<FunctionScope::Data*> bindings = funbox->functionScopeBindings();
         NameLocationMap& cache = *nameCache_;
 
-        BindingIter bi(*bindings, funbox->hasParameterExprs);
+        BindingIter bi(*funbox->functionScopeBindings(), funbox->hasParameterExprs);
         for (; bi; bi++) {
             if (!checkSlotLimits(bce, bi))
                 return false;
@@ -1069,6 +1069,25 @@ BytecodeEmitter::EmitterScope::enterFunction(BytecodeEmitter* bce, FunctionBox* 
     // become a 'var' binding due to direct eval.
     if (!funbox->hasParameterExprs && funbox->hasExtensibleScope())
         fallbackFreeNameLocation_ = Some(NameLocation::Dynamic());
+
+    // In case of parameter expressions, the parameters are lexical
+    // bindings and have TDZ.
+    if (funbox->hasParameterExprs && nextFrameSlot_) {
+        uint32_t paramFrameSlotEnd = 0;
+        for (BindingIter bi(*funbox->functionScopeBindings(), true); bi; bi++) {
+            if (!BindingKindIsLexical(bi.kind()))
+                break;
+
+            NameLocation loc = NameLocation::fromBinding(bi.kind(), bi.location());
+            if (loc.kind() == NameLocation::Kind::FrameSlot) {
+                MOZ_ASSERT(paramFrameSlotEnd <= loc.frameSlot());
+                paramFrameSlotEnd = loc.frameSlot() + 1;
+            }
+        }
+
+        if (!deadZoneFrameSlotRange(bce, 0, paramFrameSlotEnd))
+            return false;
+    }
 
     // Create and intern the VM scope.
     auto createScope = [funbox](ExclusiveContext* cx, HandleScope enclosing) {

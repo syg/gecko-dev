@@ -135,12 +135,11 @@ class JSFunction : public js::NativeObject
 
         // Note: this should be kept in sync with
         // FunctionBox::needsCallObjectRegardlessOfBindings().
-        MOZ_ASSERT(nonLazyScript()->bodyScope()->hasEnvironment() ==
-                   (nonLazyScript()->hasAnyAliasedBindings() ||
-                    nonLazyScript()->funHasExtensibleScope() ||
-                    nonLazyScript()->needsHomeObject()       ||
-                    nonLazyScript()->isDerivedClassConstructor() ||
-                    isGenerator()));
+        MOZ_ASSERT_IF(nonLazyScript()->funHasExtensibleScope() ||
+                      nonLazyScript()->needsHomeObject()       ||
+                      nonLazyScript()->isDerivedClassConstructor() ||
+                      isGenerator(),
+                      nonLazyScript()->bodyScope()->hasEnvironment());
 
         return nonLazyScript()->bodyScope()->hasEnvironment();
     }

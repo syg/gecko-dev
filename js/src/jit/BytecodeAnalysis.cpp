@@ -19,8 +19,7 @@ BytecodeAnalysis::BytecodeAnalysis(TempAllocator& alloc, JSScript* script)
     infos_(alloc),
     usesEnvironmentChain_(false),
     hasTryFinally_(false),
-    hasSetArg_(false),
-    hasLambdaInDefaultsWithCallObject_(false)
+    hasSetArg_(false)
 {
 }
 
@@ -53,7 +52,6 @@ BytecodeAnalysis::init(TempAllocator& alloc, GSNCache& gsn)
     usesEnvironmentChain_ = script_->module() || script_->varEnvironmentShape() ||
                             (script_->functionDelazifying() &&
                              script_->functionDelazifying()->needsSomeEnvironmentObject());
-    MOZ_ASSERT_IF(script_->hasAnyAliasedBindings(), usesEnvironmentChain_);
 
     bool seenPushVarEnv = false;
     jsbytecode* end = script_->codeEnd();
@@ -158,17 +156,6 @@ BytecodeAnalysis::init(TempAllocator& alloc, GSNCache& gsn)
                     infos_[offset].loopEntryInCatchOrFinally = true;
             }
             break;
-
-          case JSOP_LAMBDA:
-          case JSOP_LAMBDA_ARROW:
-            if (!seenPushVarEnv &&
-                script_->functionDelazifying() &&
-                script_->functionDelazifying()->needsExtraVarEnvironment())
-            {
-                hasLambdaInDefaultsWithCallObject_ = true;
-            }
-
-            MOZ_FALLTHROUGH;
 
           case JSOP_GETNAME:
           case JSOP_BINDNAME:

@@ -1245,10 +1245,6 @@ IonBuilder::initEnvironmentChain(MDefinition* callee)
             MOZ_ASSERT(!fun->needsExtraVarEnvironment());
 
             if (fun->needsCallObject()) {
-                // See comment in BytecodeAnalysis.h
-                if (analysis().hasLambdaInDefaultsWithCallObject())
-                    return abort("Has lambdas in parameter default expressions");
-
                 env = createCallObject(callee, env);
                 if (!env)
                     return false;

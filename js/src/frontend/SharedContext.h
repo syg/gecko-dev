@@ -520,8 +520,7 @@ class FunctionBox : public ObjectBox, public SharedContext
 
     bool needsExtraVarEnvironmentRegardlessOfBindings() const {
         MOZ_ASSERT(hasParameterExprs);
-        return hasExtensibleScope() ||
-               isGenerator();
+        return hasExtensibleScope() || isGenerator();
     }
 
     bool isLikelyConstructorWrapper() const {

@@ -1021,10 +1021,6 @@ class JSScript : public js::gc::TenuredCell
                getScope(bodyScopeIndex_ + 1)->kind() == js::ScopeKind::Var;
     }
 
-    bool hasAnyAliasedBindings() const {
-        return bodyScope()->hasEnvironment();
-    }
-
     size_t nTypeSets() const {
         return nTypeSets_;
     }

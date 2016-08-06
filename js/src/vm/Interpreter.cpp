@@ -4990,7 +4990,7 @@ js::ReportRuntimeLexicalError(JSContext* cx, unsigned errorNumber,
                 lexicalScope = &lexicalScope->enclosing()->as<LexicalScope>();
             scope = lexicalScope;
         } else {
-            MOZ_ASSERT(scope->is<ModuleScope>());
+            MOZ_ASSERT(scope->is<ModuleScope>() || script->hasParameterExprs());
         }
 
         // Get the name of the slot.

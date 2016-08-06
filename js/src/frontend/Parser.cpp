@@ -767,6 +767,10 @@ Parser<ParseHandler>::parse()
     if (!globalpc.init())
         return null();
 
+    ParseContext::VarScope varScope(this);
+    if (!varScope.init(pc))
+        return null();
+
     Node pn = statements(YieldIsName);
     if (!pn)
         return null();

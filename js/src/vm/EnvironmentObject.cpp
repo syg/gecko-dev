@@ -194,12 +194,13 @@ CallObject::createTemplateObject(JSContext* cx, HandleScript script, HandleObjec
     callObj->initEnclosingEnvironment(enclosing);
 
     if (script->hasParameterExprs()) {
-        // If there are parameter expressions, parameter bindings start off
-        // uninitialized for TDZ.
-        uint32_t lastSlot = shape->slot();
-        MOZ_ASSERT(lastSlot == callObj->lastProperty()->slot());
-        for (uint32_t slot = JSSLOT_FREE(&class_); slot <= lastSlot; slot++)
-            callObj->initSlot(slot, MagicValue(JS_UNINITIALIZED_LEXICAL));
+        // If there are parameter expressions, all parameters are lexical and
+        // have TDZ.
+        for (BindingIter bi(script->bodyScope()); bi; bi++) {
+            BindingLocation loc = bi.location();
+            if (loc.kind() == BindingLocation::Kind::Environment && BindingKindIsLexical(bi.kind()))
+                callObj->initSlot(loc.slot(), MagicValue(JS_UNINITIALIZED_LEXICAL));
+        }
     }
 
     return callObj;
