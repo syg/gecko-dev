@@ -1668,6 +1668,20 @@ template <typename T>
 struct DeletePolicy<js::GCPtr<T>> : public js::GCManagedDeletePolicy<js::GCPtr<T>>
 {};
 
+// Scope data that contain GCPtrs must use the correct DeletePolicy.
+//
+// This is defined here because vm/Scope.h cannot #include "vm/Runtime.h"
+
+#define DEFINE_SCOPE_DATA_DELETEPOLICY(Data)                            \
+    template <>                                                         \
+    struct DeletePolicy<Data> : public js::GCManagedDeletePolicy<Data>  \
+    { }
+
+DEFINE_SCOPE_DATA_DELETEPOLICY(js::FunctionScope::Data);
+DEFINE_SCOPE_DATA_DELETEPOLICY(js::ModuleScope::Data);
+
+#undef DEFINE_SCOPE_DATA_DELETEPOLICY
+
 } /* namespace JS */
 
 #ifdef _MSC_VER

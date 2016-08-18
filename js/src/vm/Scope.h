@@ -16,6 +16,7 @@
 #include "gc/Heap.h"
 #include "gc/Policy.h"
 #include "js/UbiNode.h"
+#include "js/UniquePtr.h"
 #include "vm/Xdr.h"
 
 namespace js {
@@ -194,21 +195,27 @@ class Scope : public js::gc::TenuredCell
   protected:
     uintptr_t data_;
 
-    Scope(ScopeKind kind, Scope* enclosing, Shape* environmentShape, uintptr_t data)
+    Scope(ScopeKind kind, Scope* enclosing, Shape* environmentShape)
       : kind_(kind),
         enclosing_(enclosing),
         environmentShape_(environmentShape),
-        data_(data)
+        data_(0)
     { }
 
     static Scope* create(ExclusiveContext* cx, ScopeKind kind, HandleScope enclosing,
-                         HandleShape envShape, uintptr_t data);
+                         HandleShape envShape);
 
     template <typename ConcreteScope, XDRMode mode>
     static bool XDRSizedBindingNames(XDRState<mode>* xdr, Handle<ConcreteScope*> scope,
                                      MutableHandle<typename ConcreteScope::Data*> data);
 
     Shape* maybeCloneEnvironmentShape(JSContext* cx);
+
+    template <typename T, typename D>
+    void initData(mozilla::UniquePtr<T, D> data) {
+        MOZ_ASSERT(!data_);
+        data_ = reinterpret_cast<uintptr_t>(data.release());
+    }
 
   public:
     static const JS::TraceKind TraceKind = JS::TraceKind::Scope;
@@ -442,6 +449,9 @@ class FunctionScope : public Scope
                     MutableHandleScope scope);
 
   private:
+    static UniquePtr<Data> copyData(ExclusiveContext* cx, Handle<Data*> data,
+                                    bool hasParameterExprs, MutableHandleShape envShape);
+
     Data& data() {
         return *reinterpret_cast<Data*>(data_);
     }
@@ -516,6 +526,9 @@ class VarScope : public Scope
                     MutableHandleScope scope);
 
   private:
+    static UniquePtr<Data> copyData(ExclusiveContext* cx, Handle<Data*> data,
+                                    uint32_t firstFrameSlot, MutableHandleShape envShape);
+
     Data& data() {
         return *reinterpret_cast<Data*>(data_);
     }
@@ -602,6 +615,8 @@ class GlobalScope : public Scope
     static bool XDR(XDRState<mode>* xdr, ScopeKind kind, MutableHandleScope scope);
 
   private:
+    static UniquePtr<Data> copyData(ExclusiveContext* cx, Handle<Data*> data);
+
     Data& data() {
         return *reinterpret_cast<Data*>(data_);
     }
@@ -691,6 +706,9 @@ class EvalScope : public Scope
                     MutableHandleScope scope);
 
   private:
+    static UniquePtr<Data> copyData(ExclusiveContext* cx, ScopeKind scopeKind,
+                                    Handle<Data*> data, MutableHandleShape envShape);
+
     Data& data() {
         return *reinterpret_cast<Data*>(data_);
     }
@@ -788,6 +806,9 @@ class ModuleScope : public Scope
                                Handle<ModuleObject*> module, HandleScope enclosing);
 
   private:
+    static UniquePtr<Data> copyData(ExclusiveContext* cx, Handle<Data*> data,
+                                    MutableHandleShape envShape);
+
     Data& data() {
         return *reinterpret_cast<Data*>(data_);
     }
