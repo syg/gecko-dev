@@ -1270,6 +1270,8 @@ class Parser final : private JS::AutoGCRooter, public StrictModeGetter
                                        bool disallowDuplicateParams = false,
                                        bool* duplicatedParam = nullptr);
     bool noteDestructuredPositionalFormalParameter(Node fn, Node destruct);
+    mozilla::Maybe<DeclarationKind> isVarRedeclaredInEval(HandlePropertyName name,
+                                                          DeclarationKind kind);
     bool tryDeclareVar(HandlePropertyName name, DeclarationKind kind,
                        mozilla::Maybe<DeclarationKind>* redeclaredKind);
     bool tryDeclareVarForAnnexBLexicalFunction(HandlePropertyName name, bool* tryAnnexB);

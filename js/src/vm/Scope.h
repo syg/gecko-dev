@@ -53,6 +53,7 @@ enum class ScopeKind : uint8_t
 
     // LexicalScope
     Lexical,
+    SimpleCatch,
     Catch,
     NamedLambda,
     StrictNamedLambda,
@@ -298,6 +299,9 @@ class Scope : public js::gc::TenuredCell
 // Lexical
 //   A plain lexical scope.
 //
+// SimpleCatch
+//   Holds the single catch parameter of a catch block.
+//
 // Catch
 //   Holds the catch parameters (and only the catch parameters) of a catch
 //   block.
@@ -376,6 +380,7 @@ inline bool
 Scope::is<LexicalScope>() const
 {
     return kind_ == ScopeKind::Lexical ||
+           kind_ == ScopeKind::SimpleCatch ||
            kind_ == ScopeKind::Catch ||
            kind_ == ScopeKind::NamedLambda ||
            kind_ == ScopeKind::StrictNamedLambda;
