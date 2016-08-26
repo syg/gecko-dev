@@ -2704,7 +2704,7 @@ Parser<ParseHandler>::functionArguments(YieldHandling yieldHandling, FunctionSyn
 template <typename ParseHandler>
 bool
 Parser<ParseHandler>::checkFunctionDefinition(HandleAtom funAtom, Node pn, FunctionSyntaxKind kind,
-                                              bool *tryAnnexB)
+                                              GeneratorKind generatorKind, bool* tryAnnexB)
 {
     if (kind == Statement) {
         TokenPos pos = handler.getPosition(pn);
@@ -2734,7 +2734,7 @@ Parser<ParseHandler>::checkFunctionDefinition(HandleAtom funAtom, Node pn, Funct
             if (!checkLexicalDeclarationDirectlyWithinBlock(*declaredInStmt, declKind, pos))
                 return false;
 
-            if (!pc->sc()->strict()) {
+            if (!pc->sc()->strict() && generatorKind == NotGenerator) {
                 // Under sloppy mode, try Annex B.3.3 semantics. If making an
                 // additional 'var' binding of the same name does not throw an
                 // early error, do so. This 'var' binding would be assigned
@@ -2894,7 +2894,7 @@ Parser<ParseHandler>::functionDefinition(InHandling inHandling, YieldHandling yi
 
     // Note the declared name and check for early errors.
     bool tryAnnexB = false;
-    if (!checkFunctionDefinition(funName, pn, kind, &tryAnnexB))
+    if (!checkFunctionDefinition(funName, pn, kind, generatorKind, &tryAnnexB))
         return null();
 
     // When fully parsing a LazyScript, we do not fully reparse its inner
