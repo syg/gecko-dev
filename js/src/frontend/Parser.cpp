@@ -243,7 +243,6 @@ EvalSharedContext::EvalSharedContext(ExclusiveContext* cx, JSObject* enclosingEn
                                      bool extraWarnings)
   : SharedContext(cx, Kind::Eval, directives, extraWarnings),
     enclosingScope_(cx, enclosingScope),
-    functionBindingEnd(0),
     bindings(cx)
 {
     computeAllowSyntax(enclosingScope);
@@ -1338,8 +1337,7 @@ NewEmptyBindingData(ExclusiveContext* cx, LifoAlloc& alloc, uint32_t numBindings
 
 template <>
 Maybe<GlobalScope::Data*>
-Parser<FullParseHandler>::newGlobalScopeData(ParseContext::Scope& scope,
-                                             uint32_t* functionBindingEnd)
+Parser<FullParseHandler>::newGlobalScopeData(ParseContext::Scope& scope)
 {
     Vector<BindingName> funs(context);
     Vector<BindingName> vars(context);
@@ -1384,12 +1382,10 @@ Parser<FullParseHandler>::newGlobalScopeData(ParseContext::Scope& scope,
         BindingName* start = bindings->names;
         BindingName* cursor = start;
 
-        // Keep track of what vars are functions. This is only used in BCE to omit
-        // superfluous DEFVARs.
         PodCopy(cursor, funs.begin(), funs.length());
         cursor += funs.length();
-        *functionBindingEnd = cursor - start;
 
+        bindings->varStart = cursor - start;
         PodCopy(cursor, vars.begin(), vars.length());
         cursor += vars.length();
 
@@ -1474,8 +1470,7 @@ Parser<FullParseHandler>::newModuleScopeData(ParseContext::Scope& scope)
 
 template <>
 Maybe<EvalScope::Data*>
-Parser<FullParseHandler>::newEvalScopeData(ParseContext::Scope& scope,
-                                           uint32_t* functionBindingEnd)
+Parser<FullParseHandler>::newEvalScopeData(ParseContext::Scope& scope)
 {
     Vector<BindingName> funs(context);
     Vector<BindingName> vars(context);
@@ -1509,8 +1504,8 @@ Parser<FullParseHandler>::newEvalScopeData(ParseContext::Scope& scope,
         // superfluous DEFVARs.
         PodCopy(cursor, funs.begin(), funs.length());
         cursor += funs.length();
-        *functionBindingEnd = cursor - start;
 
+        bindings->varStart = cursor - start;
         PodCopy(cursor, vars.begin(), vars.length());
         bindings->length = numBindings;
     }
@@ -1794,14 +1789,10 @@ Parser<FullParseHandler>::evalBody(EvalSharedContext* evalsc)
     if (!FoldConstants(context, &body, this))
         return nullptr;
 
-    uint32_t functionBindingEnd = 0;
-    Maybe<EvalScope::Data*> bindings =
-        newEvalScopeData(pc->varScope(), &functionBindingEnd);
+    Maybe<EvalScope::Data*> bindings = newEvalScopeData(pc->varScope());
     if (!bindings)
         return nullptr;
-
     evalsc->bindings = *bindings;
-    evalsc->functionBindingEnd = functionBindingEnd;
 
     return body;
 }
@@ -1828,13 +1819,10 @@ Parser<FullParseHandler>::globalBody(GlobalSharedContext* globalsc)
     if (!FoldConstants(context, &body, this))
         return nullptr;
 
-    uint32_t functionBindingEnd = 0;
-    Maybe<GlobalScope::Data*> bindings = newGlobalScopeData(pc->varScope(), &functionBindingEnd);
+    Maybe<GlobalScope::Data*> bindings = newGlobalScopeData(pc->varScope());
     if (!bindings)
         return nullptr;
-
     globalsc->bindings = *bindings;
-    globalsc->functionBindingEnd = functionBindingEnd;
 
     return body;
 }

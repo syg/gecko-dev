@@ -1083,6 +1083,10 @@ CheckVarNameConflict(JSContext* cx, Handle<LexicalEnvironmentObject*> lexicalEnv
                      HandlePropertyName name);
 
 MOZ_MUST_USE bool
+CheckGlobalFunctionNameConflict(JSContext* cx, Handle<GlobalObject*> global,
+                                HandlePropertyName name);
+
+MOZ_MUST_USE bool
 CheckLexicalNameConflict(JSContext* cx, Handle<LexicalEnvironmentObject*> lexicalEnv,
                          HandleObject varObj, HandlePropertyName name);
 

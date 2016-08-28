@@ -4386,19 +4386,13 @@ js::DefFunOperation(JSContext* cx, HandleScript script, HandleObject envChain,
      */
     MOZ_ASSERT(parent->isNative() || parent->is<DebugEnvironmentProxy>());
     if (parent->is<GlobalObject>()) {
+        MOZ_ASSERT(CheckGlobalFunctionNameConflict(cx, parent.as<GlobalObject>(), name));
+
         if (shape->configurable()) {
             if (!DefineProperty(cx, parent, name, rval, nullptr, nullptr, attrs))
                 return false;
         } else {
-            if (shape->isAccessorDescriptor() || !shape->writable() || !shape->enumerable()) {
-                JSAutoByteString bytes;
-                if (AtomToPrintableString(cx, name, &bytes)) {
-                    JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_CANT_REDEFINE_PROP,
-                                         bytes.ptr());
-                }
-
-                return false;
-            }
+            MOZ_ASSERT(!shape->isAccessorDescriptor() && shape->writable() && shape->enumerable());
         }
 
         // Careful: the presence of a shape, even one appearing to derive from

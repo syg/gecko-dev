@@ -3183,6 +3183,38 @@ js::CheckVarNameConflict(JSContext* cx, Handle<LexicalEnvironmentObject*> lexica
 }
 
 bool
+js::CheckGlobalFunctionNameConflict(JSContext* cx, Handle<GlobalObject*> global,
+                                    HandlePropertyName name)
+{
+    RootedId id(cx, NameToId(name));
+    Rooted<PropertyDescriptor> desc(cx);
+    if (!GetOwnPropertyDescriptor(cx, global, id, &desc))
+        return false;
+
+    // ES 8.1.14.16 CanDeclareGlobalFunction.
+
+    // Step 4.
+    if (!desc.object())
+        return true;
+
+    // Step 6.
+    if (desc.hasConfigurable() && desc.configurable())
+        return true;
+
+    // Step 7.
+    if (!desc.isAccessorDescriptor() &&
+        desc.hasWritable() && desc.writable() &&
+        desc.hasEnumerable() && desc.enumerable())
+    {
+        return true;
+    }
+
+    // Step 8.
+    ReportRuntimeRedeclaration(cx, name, "non-configurable global property");
+    return false;
+}
+
+bool
 js::CheckGlobalDeclarationConflicts(JSContext* cx, HandleScript script,
                                     Handle<LexicalEnvironmentObject*> lexicalEnv,
                                     HandleObject varObj)
@@ -3196,14 +3228,31 @@ js::CheckGlobalDeclarationConflicts(JSContext* cx, HandleScript script,
     RootedPropertyName name(cx);
     Rooted<BindingIter> bi(cx, BindingIter(script));
 
+    // ES 15.1.11 GlobalDeclarationInstantiation
+
+    // Step 6.
+    //
+    // Check 'var' declarations do not conflict with existing bindings in the
+    // global lexical environment.
     for (; bi; bi++) {
         if (bi.kind() != BindingKind::Var)
             break;
         name = bi.name()->asPropertyName();
         if (!CheckVarNameConflict(cx, lexicalEnv, name))
             return false;
+
+        // Step 10.
+        //
+        // Check that global functions may be declared.
+        if (bi.isTopLevelFunction() && varObj->is<GlobalObject>()) {
+            if (!CheckGlobalFunctionNameConflict(cx, varObj.as<GlobalObject>(), name))
+                return false;
+        }
     }
 
+    // Step 5.
+    //
+    // Check that lexical bindings do not conflict.
     for (; bi; bi++) {
         name = bi.name()->asPropertyName();
         if (!CheckLexicalNameConflict(cx, lexicalEnv, varObj, name))
@@ -3258,7 +3307,9 @@ js::CheckEvalDeclarationConflicts(JSContext* cx, HandleScript script,
 
     RootedObject obj(cx, scopeChain);
 
-    // ES6 18.2.1.2 step d
+    // ES 18.2.1.3.
+
+    // Step 5.
     //
     // Check that a direct eval will not hoist 'var' bindings over lexical
     // bindings with the same name.
@@ -3266,6 +3317,21 @@ js::CheckEvalDeclarationConflicts(JSContext* cx, HandleScript script,
         if (!CheckVarNameConflictsInEnv(cx, script, obj))
             return false;
         obj = obj->enclosingEnvironment();
+    }
+
+    // Step 8.
+    //
+    // Check that global functions may be declared.
+    if (varObj->is<GlobalObject>()) {
+        Handle<GlobalObject*> global = varObj.as<GlobalObject>();
+        RootedPropertyName name(cx);
+        for (Rooted<BindingIter> bi(cx, BindingIter(script)); bi; bi++) {
+            if (bi.isTopLevelFunction()) {
+                name = bi.name()->asPropertyName();
+                if (!CheckGlobalFunctionNameConflict(cx, global, name))
+                    return false;
+            }
+        }
     }
 
     return true;
