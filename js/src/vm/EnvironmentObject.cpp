@@ -1532,7 +1532,8 @@ class DebugEnvironmentProxyHandler : public BaseProxyHandler
 
             // Named lambdas that are not closed over are lost.
             if (loc.kind() == BindingLocation::Kind::NamedLambdaCallee) {
-                *accessResult = ACCESS_LOST;
+                if (action == GET)
+                    *accessResult = ACCESS_LOST;
                 return true;
             }
 
@@ -2031,11 +2032,10 @@ class DebugEnvironmentProxyHandler : public BaseProxyHandler
         switch (access) {
           case ACCESS_UNALIASED:
             return result.succeed();
-          case ACCESS_GENERIC:
-            {
-                RootedValue envVal(cx, ObjectValue(*env));
-                return SetProperty(cx, env, id, v, envVal, result);
-            }
+          case ACCESS_GENERIC: {
+            RootedValue envVal(cx, ObjectValue(*env));
+            return SetProperty(cx, env, id, v, envVal, result);
+          }
           default:
             MOZ_CRASH("bad AccessResult");
         }
