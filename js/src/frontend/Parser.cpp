@@ -1695,9 +1695,11 @@ Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope, bool 
     Vector<BindingName> vars(context);
 
     bool allBindingsClosedOver = pc->sc()->allBindingsClosedOver();
+    bool hasDuplicateParams = pc->functionBox()->hasDuplicateParameters;
 
     // Positional parameter names must be added in order of appearance as they are
     // referenced using argument slots.
+
     for (size_t i = 0; i < pc->positionalFormalParameterNames().length(); i++) {
         JSAtom* name = pc->positionalFormalParameterNames()[i];
 
@@ -1708,8 +1710,23 @@ Parser<FullParseHandler>::newFunctionScopeData(ParseContext::Scope& scope, bool 
             // Do not consider any positional formal parameters closed over if
             // there are parameter defaults. It is the binding in the defaults
             // scope that is closed over instead.
-            bindName = BindingName(name, (allBindingsClosedOver ||
-                                          (p && p->value()->closedOver())));
+            bool closedOver = allBindingsClosedOver ||
+                              (p && p->value()->closedOver());
+
+            // If the parameter name has duplicates, only the final parameter
+            // name should be on the environment, as otherwise the environment
+            // object would have multiple, same-named properties.
+            if (hasDuplicateParams) {
+                for (size_t j = pc->positionalFormalParameterNames().length() - 1; j != i; j--) {
+                    if (pc->positionalFormalParameterNames()[j] == name && j != i) {
+                        MOZ_ASSERT(j > i);
+                        closedOver = false;
+                        break;
+                    }
+                }
+            }
+
+            bindName = BindingName(name, closedOver);
         }
 
         if (!positionalFormals.append(bindName))
