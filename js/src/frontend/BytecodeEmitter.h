@@ -672,6 +672,10 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     // onto the stack.
     MOZ_MUST_USE bool emitIteratorNext(ParseNode* pn, bool allowSelfHosted = false);
 
+    // Pops iterator from the top of the stack. If |.return| is not undefined,
+    // call it and check that its result is an Object.
+    MOZ_MUST_USE bool emitIteratorClose(bool allowSelfHosted = false);
+
     // Check if the value on top of the stack is "undefined". If so, replace
     // that value on the stack with the value defined by |defaultExpr|.
     // |pattern| is a lhs node of the default expression.  If it's an
