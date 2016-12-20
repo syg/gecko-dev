@@ -2290,9 +2290,11 @@ NonLocalExitControl::prepareForNonLocalJump(BytecodeEmitter::NestableControl* ta
     if (target && target->kind() == StatementKind::ForOfLoop) {
         // The iterator and the "done" value from the last result of
         // calling iterator.next are on the stack.
-        // TODOshu refactor
-        npops += 1;
-        if (!flushPops(bce_))
+        //
+        // Because for-of loops will pop both values at the end of the loop
+        // and emitIteratorClose expects the iterator to be on the top of the
+        // stack, dup the iterator.
+        if (!bce_->emitDupAt(1))
             return false;
         if (!bce_->emitIteratorClose())
             return false;
@@ -4660,6 +4662,9 @@ BytecodeEmitter::emitIteratorClose(bool allowSelfHosted)
                "can run user-modifiable iteration code");
 
     // Generate inline logic corresponding to IteratorClose (ES 7.4.6).
+    //
+    // Callers need to ensure that the iterator object is at the top of the
+    // stack.
 
     uint32_t startOffset = offset();
 
@@ -4682,7 +4687,7 @@ BytecodeEmitter::emitIteratorClose(bool allowSelfHosted)
         return false;
     if (!emit1(JSOP_STRICTNE))                            // ... ITER RET ?NEQL
         return false;
-    if (!ifReturnMethodIsDefined.emitIf())
+    if (!ifReturnMethodIsDefined.emitIfElse())
         return false;
 
     // Step 5, 8.
@@ -4696,6 +4701,13 @@ BytecodeEmitter::emitIteratorClose(bool allowSelfHosted)
     if (!emitCheckIsObj(CheckIsObjectKind::IteratorReturn)) // ... RESULT
         return false;
     checkTypeSet(JSOP_CALL);
+    if (!emit1(JSOP_POP))                                 // ...
+        return false;
+
+    if (!ifReturnMethodIsDefined.emitElse())
+        return false;
+    if (!emitUint16Operand(JSOP_POPN, 2))                 // ...
+        return false;
     if (!ifReturnMethodIsDefined.emitEnd())
         return false;
 
