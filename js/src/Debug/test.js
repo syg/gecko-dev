@@ -14,8 +14,10 @@ function f() {
   var iterable = {};
   iterable[Symbol.iterator] = makeIterator();
 
-  for (var i of iterable)
+  for (var i of iterable) {
+    throw 42;
     break;
+  }
 }
 
 dis(f);

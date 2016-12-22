@@ -2264,15 +2264,6 @@ NonLocalExitControl::prepareForNonLocalJump(BytecodeEmitter::NestableControl* ta
           }
 
           case StatementKind::ForOfLoop:
-            // The iterator and the "done" value from the last result of
-            // calling iterator.next are on the stack.
-            npops += 1;
-            if (!flushPops(bce_))
-                return false;
-            if (!bce_->emitIteratorClose())
-                return false;
-            break;
-
           case StatementKind::ForInLoop:
             // The iterator and the current value are on the stack.
             npops += 1;
@@ -2285,19 +2276,6 @@ NonLocalExitControl::prepareForNonLocalJump(BytecodeEmitter::NestableControl* ta
           default:
             break;
         }
-    }
-
-    if (target && target->kind() == StatementKind::ForOfLoop) {
-        // The iterator and the "done" value from the last result of
-        // calling iterator.next are on the stack.
-        //
-        // Because for-of loops will pop both values at the end of the loop
-        // and emitIteratorClose expects the iterator to be on the top of the
-        // stack, dup the iterator.
-        if (!bce_->emitDupAt(1))
-            return false;
-        if (!bce_->emitIteratorClose())
-            return false;
     }
 
     EmitterScope* targetEmitterScope = target ? target->emitterScope() : bce_->varEmitterScope;
@@ -4694,19 +4672,19 @@ BytecodeEmitter::emitIteratorClose(bool allowSelfHosted)
     //
     // Call "return" if it is not undefined, and check that it returns an
     // Object.
-    if (!emit1(JSOP_SWAP))                                // ... RET ITER
+    if (!emitDupAt(1))                                    // ... ITER RET ITER
         return false;
-    if (!emitCall(JSOP_CALL, 0))                          // ... RESULT
+    if (!emitCall(JSOP_CALL, 0))                          // ... ITER RESULT
         return false;
-    if (!emitCheckIsObj(CheckIsObjectKind::IteratorReturn)) // ... RESULT
+    if (!emitCheckIsObj(CheckIsObjectKind::IteratorReturn)) // ... ITER RESULT
         return false;
     checkTypeSet(JSOP_CALL);
-    if (!emit1(JSOP_POP))                                 // ...
+    if (!emit1(JSOP_POP))                                 // ... ITER
         return false;
 
     if (!ifReturnMethodIsDefined.emitElse())
         return false;
-    if (!emitUint16Operand(JSOP_POPN, 2))                 // ...
+    if (!emit1(JSOP_POP))                                 // ... ITER
         return false;
     if (!ifReturnMethodIsDefined.emitEnd())
         return false;
@@ -6385,13 +6363,37 @@ BytecodeEmitter::emitForOf(ParseNode* forOfLoop, EmitterScope* headLexicalEmitte
     if (!setSrcNoteOffset(noteIndex, 0, beq.offset - initialJump.offset))
         return false;
 
+    // for-of loops need to call IteratorClose when |break|ing but not during
+    // normal termination. Jump over the IteratorClose code when terminating
+    // normally.
+    int32_t savedDepth = stackDepth;
+    if (!emit1(JSOP_POP))                                 // ITER
+        return false;
+    JumpList normalTermination;
+    if (!emitJump(JSOP_GOTO, &normalTermination))
+        return false;
+
     if (!loopInfo.patchBreaksAndContinues(this))
         return false;
 
     if (!tryNoteList.append(JSTRY_FOR_OF, stackDepth, top.offset, breakTarget.offset))
         return false;
 
-    return emitUint16Operand(JSOP_POPN, 2);               //
+    // Emit IteratorClose bytecode after the for-of trynote, as IteratorClose
+    // is done by the exception unwinder. This ensures that if IteratorClose
+    // itself throws, we do not try to close it again.
+    stackDepth = savedDepth;
+    if (!emit1(JSOP_POP))                                 // ITER
+        return false;
+    if (!emitIteratorClose())
+        return false;
+
+    JumpTarget done{ 0 };
+    if (!emitJumpTarget(&done))
+        return false;
+    patchJumpsToTarget(normalTermination, done);
+
+    return emit1(JSOP_POP);                               //
 }
 
 bool

@@ -1171,10 +1171,11 @@ ProcessTryNotes(JSContext* cx, EnvironmentIter& ei, InterpreterRegs& regs)
             SettleOnTryNote(cx, tn, ei, regs);
             return FinallyContinuation;
 
+          case JSTRY_FOR_OF:
           case JSTRY_FOR_IN: {
             /* This is similar to JSOP_ENDITER in the interpreter loop. */
             DebugOnly<jsbytecode*> pc = regs.fp()->script()->main() + tn->start + tn->length;
-            MOZ_ASSERT(JSOp(*pc) == JSOP_ENDITER);
+            MOZ_ASSERT_IF(tn->kind == JSTRY_FOR_IN, JSOp(*pc) == JSOP_ENDITER);
             Value* sp = regs.spForStackDepth(tn->stackDepth);
             RootedObject obj(cx, &sp[-1].toObject());
             if (!UnwindIteratorForException(cx, obj)) {
@@ -1189,7 +1190,6 @@ ProcessTryNotes(JSContext* cx, EnvironmentIter& ei, InterpreterRegs& regs)
             break;
           }
 
-          case JSTRY_FOR_OF:
           case JSTRY_LOOP:
             break;
 
