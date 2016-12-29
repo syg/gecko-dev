@@ -4005,6 +4005,12 @@ BaselineCompiler::emit_JSOP_ENDITER()
 }
 
 bool
+BaselineCompiler::emit_JSOP_ISGENCLOSING()
+{
+    return emit_JSOP_ISNOITER();
+}
+
+bool
 BaselineCompiler::emit_JSOP_GETRVAL()
 {
     frame.syncStack(0);

@@ -417,16 +417,19 @@ HandleExceptionIon(JSContext* cx, const InlineFrameIterator& frame, ResumeFromEx
         JSTryNote* tn = *tni;
 
         switch (tn->kind) {
-          case JSTRY_FOR_IN: {
-            MOZ_ASSERT(JSOp(*(script->main() + tn->start + tn->length)) == JSOP_ENDITER);
-            MOZ_ASSERT(tn->stackDepth > 0);
+          case JSTRY_FOR_IN:
+          case JSTRY_FOR_OF: {
+            MOZ_ASSERT_IF(JSTRY_FOR_IN,
+                          JSOp(*(script->main() + tn->start + tn->length)) == JSOP_ENDITER);
 
-            uint32_t localSlot = tn->stackDepth;
+            uint32_t iterDepth = tn->kind == JSTRY_FOR_IN ? 0 : 1;
+            MOZ_ASSERT(tn->stackDepth > iterDepth);
+
+            uint32_t localSlot = tn->stackDepth - iterDepth;
             CloseLiveIteratorIon(cx, frame, localSlot);
             break;
           }
 
-          case JSTRY_FOR_OF:
           case JSTRY_LOOP:
             break;
 
@@ -598,23 +601,24 @@ ProcessTryNotesBaseline(JSContext* cx, const JitFrameIterator& frame, Environmen
             return true;
           }
 
-          case JSTRY_FOR_IN: {
+          case JSTRY_FOR_IN:
+          case JSTRY_FOR_OF: {
             uint8_t* framePointer;
             uint8_t* stackPointer;
             BaselineFrameAndStackPointersFromTryNote(tn, frame, &framePointer, &stackPointer);
-            Value iterValue(*(Value*) stackPointer);
+            uint32_t iterDepth = tn->kind == JSTRY_FOR_IN ? 0 : 1;
+            Value iterValue(*(reinterpret_cast<Value*>(stackPointer) + iterDepth));
             RootedObject iterObject(cx, &iterValue.toObject());
             if (!UnwindIteratorForException(cx, iterObject)) {
                 // See comment in the JSTRY_FOR_IN case in Interpreter.cpp's
                 // ProcessTryNotes.
                 SettleOnTryNote(cx, tn, frame, ei, rfe, pc);
-                MOZ_ASSERT(**pc == JSOP_ENDITER);
+                MOZ_ASSERT_IF(tn->kind == JSTRY_FOR_IN, **pc == JSOP_ENDITER);
                 return false;
             }
             break;
           }
 
-          case JSTRY_FOR_OF:
           case JSTRY_LOOP:
             break;
 

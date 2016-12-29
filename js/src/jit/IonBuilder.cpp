@@ -2191,6 +2191,7 @@ IonBuilder::inspectOpcode(JSOp op)
         return jsop_itermore();
 
       case JSOP_ISNOITER:
+      case JSOP_ISGENCLOSING:
         return jsop_isnoiter();
 
       case JSOP_ENDITER:

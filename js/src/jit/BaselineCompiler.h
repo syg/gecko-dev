@@ -203,6 +203,7 @@ namespace jit {
     _(JSOP_MOREITER)           \
     _(JSOP_ISNOITER)           \
     _(JSOP_ENDITER)            \
+    _(JSOP_ISGENCLOSING)       \
     _(JSOP_GENERATOR)          \
     _(JSOP_INITIALYIELD)       \
     _(JSOP_YIELD)              \

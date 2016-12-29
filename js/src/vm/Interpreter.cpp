@@ -1171,12 +1171,14 @@ ProcessTryNotes(JSContext* cx, EnvironmentIter& ei, InterpreterRegs& regs)
             SettleOnTryNote(cx, tn, ei, regs);
             return FinallyContinuation;
 
-          case JSTRY_FOR_IN: {
+          case JSTRY_FOR_IN:
+          case JSTRY_FOR_OF: {
             /* This is similar to JSOP_ENDITER in the interpreter loop. */
             DebugOnly<jsbytecode*> pc = regs.fp()->script()->main() + tn->start + tn->length;
-            MOZ_ASSERT(JSOp(*pc) == JSOP_ENDITER);
+            MOZ_ASSERT_IF(tn->kind == JSTRY_FOR_IN, JSOp(*pc) == JSOP_ENDITER);
             Value* sp = regs.spForStackDepth(tn->stackDepth);
-            RootedObject obj(cx, &sp[-1].toObject());
+            int iterDepth = tn->kind == JSTRY_FOR_IN ? -1 : -2;
+            RootedObject obj(cx, &sp[iterDepth].toObject());
             if (!UnwindIteratorForException(cx, obj)) {
                 // We should only settle on the note only if
                 // UnwindIteratorForException itself threw, as
@@ -1189,7 +1191,6 @@ ProcessTryNotes(JSContext* cx, EnvironmentIter& ei, InterpreterRegs& regs)
             break;
           }
 
-          case JSTRY_FOR_OF:
           case JSTRY_LOOP:
             break;
 
@@ -1868,7 +1869,6 @@ CASE(EnableInterruptsPseudoOpcode)
 /* Various 1-byte no-ops. */
 CASE(JSOP_NOP)
 CASE(JSOP_NOP_DESTRUCTURING)
-CASE(JSOP_UNUSED187)
 CASE(JSOP_UNUSED192)
 CASE(JSOP_UNUSED209)
 CASE(JSOP_UNUSED210)
@@ -2162,6 +2162,13 @@ CASE(JSOP_ENDITER)
         goto error;
 }
 END_CASE(JSOP_ENDITER)
+
+CASE(JSOP_ISGENCLOSING)
+{
+    bool b = REGS.sp[-2].isMagic(JS_GENERATOR_CLOSING);
+    PUSH_BOOLEAN(b);
+}
+END_CASE(JSOP_ISGENCLOSING)
 
 CASE(JSOP_DUP)
 {
@@ -5051,7 +5058,12 @@ js::ThrowCheckIsObject(JSContext* cx, CheckIsObjectKind kind)
 {
     switch (kind) {
       case CheckIsObjectKind::IteratorNext:
-        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_NEXT_RETURNED_PRIMITIVE);
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                                  JSMSG_ITER_METHOD_RETURNED_PRIMITIVE, "next");
+        break;
+      case CheckIsObjectKind::IteratorReturn:
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                                  JSMSG_ITER_METHOD_RETURNED_PRIMITIVE, "return");
         break;
       case CheckIsObjectKind::GetIterator:
         JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_GET_ITER_RETURNED_PRIMITIVE);
