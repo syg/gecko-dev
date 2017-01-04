@@ -4777,17 +4777,9 @@ BytecodeEmitter::emitIteratorClose(Maybe<JumpTarget> yieldStarTryStart, bool all
         if (!ifReturnDone.emitElse())                     // ITER OLDRESULT FTYPE FVALUE RESULT
             return false;
         int32_t savedDepth = this->stackDepth;
-        if (!emit1(JSOP_SWAP))                            // ITER OLDRESULT FTYPE RESULT FVALUE
+        if (!emit2(JSOP_UNPICK, 3))                       // ITER RESULT OLDRESULT FTYPE FVALUE
             return false;
-        if (!emit1(JSOP_POP))                             // ITER OLDRESULT FTYPE RESULT
-            return false;
-        if (!emit1(JSOP_SWAP))                            // ITER OLDRESULT RESULT FTYPE
-            return false;
-        if (!emit1(JSOP_POP))                             // ITER OLDRESULT RESULT
-            return false;
-        if (!emit1(JSOP_SWAP))                            // ITER RESULT OLDRESULT
-            return false;
-        if (!emit1(JSOP_POP))                             // ITER RESULT
+        if (!emitUint16Operand(JSOP_POPN, 3))             // ITER RESULT
             return false;
         JumpList beq;
         JumpTarget breakTarget{ -1 };
