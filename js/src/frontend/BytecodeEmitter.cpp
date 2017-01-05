@@ -4975,6 +4975,10 @@ BytecodeEmitter::emitDestructuringOpsArray(ParseNode* pattern, DestructuringFlav
     //     value = [...iter];
     //
     //   SetOrInitialize(lref, value);
+    //
+    //   // === emitted after loop ===
+    //   if (!done)
+    //      IteratorClose(iter);
 
     // Use an iterator to destructure the RHS, instead of index lookup. We
     // must leave the *original* value on the stack.
@@ -4985,7 +4989,7 @@ BytecodeEmitter::emitDestructuringOpsArray(ParseNode* pattern, DestructuringFlav
 
     for (ParseNode* member = pattern->pn_head; member; member = member->pn_next) {
         bool isHead = member == pattern->pn_head;
-        bool hasNext = !!member->pn_next;
+        DebugOnly<bool> hasNext = !!member->pn_next;
 
         if (member->isKind(PNK_SPREAD)) {
             size_t emitted = 0;
@@ -5060,21 +5064,14 @@ BytecodeEmitter::emitDestructuringOpsArray(ParseNode* pattern, DestructuringFlav
             // iterator can already be completed.
             //                                                       ... OBJ ITER DONE *LREF
             if (emitted) {
-                if (hasNext) {
-                    if (!emitDupAt(emitted))                      // ... OBJ ITER DONE *LREF DONE
-                        return false;
-                } else {
-                    if (!emit2(JSOP_PICK, emitted))               // ... OBJ ITER *LREF DONE
-                        return false;
-                }
+                if (!emitDupAt(emitted))                          // ... OBJ ITER DONE *LREF DONE
+                    return false;
             } else {
-                if (hasNext) {
-                    // The position of LREF in the following stack comment
-                    // isn't accurate for the operation, but it's equivalent
-                    // since LREF is nothing
-                    if (!emit1(JSOP_DUP))                         // ... OBJ ITER DONE *LREF DONE
-                        return false;
-                }
+                // The position of LREF in the following stack comment
+                // isn't accurate for the operation, but it's equivalent
+                // since LREF is nothing
+                if (!emit1(JSOP_DUP))                             // ... OBJ ITER DONE *LREF DONE
+                    return false;
             }
             if (!ifAlreadyDone.emitIfElse())                      // ... OBJ ITER ?DONE *LREF
                 return false;
@@ -5087,14 +5084,12 @@ BytecodeEmitter::emitDestructuringOpsArray(ParseNode* pattern, DestructuringFlav
             if (!ifAlreadyDone.emitElse())                        // ... OBJ ITER ?DONE *LREF
                 return false;
 
-            if (hasNext) {
-                if (emitted) {
-                    if (!emit2(JSOP_PICK, emitted))               // ... OBJ ITER *LREF DONE
-                        return false;
-                }
-                if (!emit1(JSOP_POP))                             // ... OBJ ITER *LREF
+            if (emitted) {
+                if (!emit2(JSOP_PICK, emitted))                   // ... OBJ ITER *LREF DONE
                     return false;
             }
+            if (!emit1(JSOP_POP))                                 // ... OBJ ITER *LREF
+                return false;
         }
 
         if (emitted) {
@@ -5111,12 +5106,10 @@ BytecodeEmitter::emitDestructuringOpsArray(ParseNode* pattern, DestructuringFlav
         if (!emitAtomOp(cx->names().done, JSOP_GETPROP))          // ... OBJ ITER *LREF RESULT DONE
             return false;
 
-        if (hasNext) {
-            if (!emit1(JSOP_DUP))                                 // ... OBJ ITER *LREF RESULT DONE DONE
-                return false;
-            if (!emit2(JSOP_UNPICK, emitted + 2))                 // ... OBJ ITER DONE *LREF RESULT DONE
-                return false;
-        }
+        if (!emit1(JSOP_DUP))                                     // ... OBJ ITER *LREF RESULT DONE DONE
+            return false;
+        if (!emit2(JSOP_UNPICK, emitted + 2))                     // ... OBJ ITER DONE *LREF RESULT DONE
+            return false;
 
         IfThenElseEmitter ifDone(this);
         if (!ifDone.emitIfElse())                                 // ... OBJ ITER ?DONE *LREF RESULT
@@ -5162,8 +5155,30 @@ BytecodeEmitter::emitDestructuringOpsArray(ParseNode* pattern, DestructuringFlav
         }
     }
 
-    if (!emit1(JSOP_POP))                                         // ... OBJ
-        return false;
+    // ES 12.15.5.2
+    if (!pattern->pn_head) {
+        // If we have an empty pattern [], call IteratorClose unconditionally.
+
+                                                                  // ... OBJ ITER
+        if (!emitIteratorClose())                                 // ... OBJ
+            return false;
+    } else {
+        // Otherwise, the last ?DONE value is on top of the stack. If not ?DONE,
+        // call IteratorClose.
+
+                                                                  // ... OBJ ITER ?DONE
+        IfThenElseEmitter ifDone(this);
+        if (!ifDone.emitIfElse())                                 // ... OBJ ITER
+            return false;
+        if (!emit1(JSOP_POP))                                     // ... OBJ
+            return false;
+        if (!ifDone.emitElse())                                   // ... OBJ ITER
+            return false;
+        if (!emitIteratorClose())                                 // ... OBJ
+            return false;
+        if (!ifDone.emitEnd())
+            return false;
+    }
 
     return true;
 }
