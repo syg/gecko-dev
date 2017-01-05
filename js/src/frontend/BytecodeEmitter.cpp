@@ -4803,6 +4803,21 @@ BytecodeEmitter::emitIteratorClose(Maybe<JumpTarget> yieldStarTryStart, bool all
     return emit1(JSOP_POP);                               // ...
 }
 
+template <typename InnerEmitter>
+bool
+BytecodeEmitter::wrapWithIteratorCloseTryNote(int32_t iterDepth, InnerEmitter emitter)
+{
+    MOZ_ASSERT(this->stackDepth >= iterDepth);
+
+    size_t start = offset();
+    if (!emitter(this))
+        return false;
+    size_t end = offset();
+    if (start != end)
+        return tryNoteList.append(JSTRY_ITERCLOSE, iterDepth, start, end);
+    return true;
+}
+
 bool
 BytecodeEmitter::emitDefault(ParseNode* defaultExpr, ParseNode* pattern)
 {
@@ -4987,13 +5002,22 @@ BytecodeEmitter::emitDestructuringOpsArray(ParseNode* pattern, DestructuringFlav
     if (!emitIterator())                                          // ... OBJ ITER
         return false;
 
+    int32_t iterDepth = stackDepth;
+
     for (ParseNode* member = pattern->pn_head; member; member = member->pn_next) {
         bool isHead = member == pattern->pn_head;
         DebugOnly<bool> hasNext = !!member->pn_next;
 
         if (member->isKind(PNK_SPREAD)) {
             size_t emitted = 0;
-            if (!emitDestructuringLHSRef(member, &emitted))       // ... OBJ ITER ?DONE *LREF
+
+            auto emitLHSRef = [member, &emitted](BytecodeEmitter* bce) {
+                return bce->emitDestructuringLHSRef(member, &emitted); // ... OBJ ITER ?DONE *LREF
+            };
+
+            // The iterator is at the top of the stack when isHead, otherwise
+            // second from the top due to DONE.
+            if (!wrapWithIteratorCloseTryNote(iterDepth, emitLHSRef))
                 return false;
 
             IfThenElseEmitter ifThenElse(this);
@@ -5034,7 +5058,15 @@ BytecodeEmitter::emitDestructuringOpsArray(ParseNode* pattern, DestructuringFlav
                 MOZ_ASSERT(ifThenElse.pushed() == 1);
             }
 
-            if (!emitSetOrInitializeDestructuring(member, flav))  // ... OBJ ITER
+            auto emitAssignment = [member, flav](BytecodeEmitter* bce) {
+                return bce->emitSetOrInitializeDestructuring(member, flav); // ... OBJ ITER
+            };
+
+            if (!wrapWithIteratorCloseTryNote(iterDepth, emitAssignment))
+                return false;
+
+            // Push a true for DONE.
+            if (!emit1(JSOP_TRUE))                                // ... OBJ ITER TRUE
                 return false;
 
             MOZ_ASSERT(!hasNext);
@@ -5054,7 +5086,13 @@ BytecodeEmitter::emitDestructuringOpsArray(ParseNode* pattern, DestructuringFlav
 
         size_t emitted = 0;
         if (!isElision) {
-            if (!emitDestructuringLHSRef(subpattern, &emitted))   // ... OBJ ITER ?DONE *LREF
+            auto emitLHSRef = [subpattern, &emitted](BytecodeEmitter* bce) {
+                return bce->emitDestructuringLHSRef(subpattern, &emitted); // ... OBJ ITER ?DONE *LREF
+            };
+
+            // The iterator is at the top of the stack when isHead, otherwise
+            // second from the top due to DONE.
+            if (!wrapWithIteratorCloseTryNote(iterDepth, emitLHSRef))
                 return false;
         }
 
@@ -5144,11 +5182,12 @@ BytecodeEmitter::emitDestructuringOpsArray(ParseNode* pattern, DestructuringFlav
         }
 
         if (!isElision) {
-            if (!emitSetOrInitializeDestructuring(subpattern,
-                                                  flav))          // ... OBJ ITER ?DONE
-            {
+            auto emitAssignment = [subpattern, flav](BytecodeEmitter* bce) {
+                return bce->emitSetOrInitializeDestructuring(subpattern, flav); // ... OBJ ITER ?DONE
+            };
+
+            if (!wrapWithIteratorCloseTryNote(iterDepth, emitAssignment))
                 return false;
-            }
         } else {
             if (!emit1(JSOP_POP))                                 // ... OBJ ITER ?DONE
                 return false;
@@ -6442,6 +6481,8 @@ BytecodeEmitter::emitForOf(ParseNode* forOfLoop, EmitterScope* headLexicalEmitte
     if (!emitIterator())                                  // ITER
         return false;
 
+    int32_t iterDepth = stackDepth;
+
     // For-of loops have both the iterator and the value on the stack. Push
     // undefined to balance the stack.
     if (!emit1(JSOP_UNDEFINED))                           // ITER RESULT
@@ -6498,19 +6539,23 @@ BytecodeEmitter::emitForOf(ParseNode* forOfLoop, EmitterScope* headLexicalEmitte
         if (!emitAtomOp(cx->names().value, JSOP_GETPROP)) // ITER RESULT VALUE
             return false;
 
-        if (!emitInitializeForInOrOfTarget(forOfHead))    // ITER RESULT VALUE
-            return false;
-
-        if (!emit1(JSOP_POP))                             // ITER RESULT
-            return false;
-
-        MOZ_ASSERT(this->stackDepth == loopDepth,
-                   "the stack must be balanced around the initializing "
-                   "operation");
-
-        // Perform the loop body.
         ParseNode* forBody = forOfLoop->pn_right;
-        if (!emitTree(forBody))                           // ITER RESULT
+        auto emitTargetAndBody = [forOfHead, forBody, loopDepth](BytecodeEmitter* bce) {
+            if (!bce->emitInitializeForInOrOfTarget(forOfHead)) // ITER RESULT VALUE
+                return false;
+
+            if (!bce->emit1(JSOP_POP))                    // ITER RESULT
+                return false;
+
+            MOZ_ASSERT(bce->stackDepth == loopDepth,
+                       "the stack must be balanced around the initializing "
+                       "operation");
+
+            // Perform the loop body.
+            return bce->emitTree(forBody);                // ITER RESULT
+        };
+
+        if (!wrapWithIteratorCloseTryNote(iterDepth, emitTargetAndBody))
             return false;
 
         // Set offset for continues.

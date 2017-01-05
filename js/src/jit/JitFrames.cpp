@@ -418,18 +418,17 @@ HandleExceptionIon(JSContext* cx, const InlineFrameIterator& frame, ResumeFromEx
 
         switch (tn->kind) {
           case JSTRY_FOR_IN:
-          case JSTRY_FOR_OF: {
+          case JSTRY_ITERCLOSE: {
             MOZ_ASSERT_IF(JSTRY_FOR_IN,
                           JSOp(*(script->main() + tn->start + tn->length)) == JSOP_ENDITER);
+            MOZ_ASSERT(tn->stackDepth > 0);
 
-            uint32_t iterDepth = tn->kind == JSTRY_FOR_IN ? 0 : 1;
-            MOZ_ASSERT(tn->stackDepth > iterDepth);
-
-            uint32_t localSlot = tn->stackDepth - iterDepth;
+            uint32_t localSlot = tn->stackDepth;
             CloseLiveIteratorIon(cx, frame, localSlot);
             break;
           }
 
+          case JSTRY_FOR_OF:
           case JSTRY_LOOP:
             break;
 
@@ -602,12 +601,11 @@ ProcessTryNotesBaseline(JSContext* cx, const JitFrameIterator& frame, Environmen
           }
 
           case JSTRY_FOR_IN:
-          case JSTRY_FOR_OF: {
+          case JSTRY_ITERCLOSE: {
             uint8_t* framePointer;
             uint8_t* stackPointer;
             BaselineFrameAndStackPointersFromTryNote(tn, frame, &framePointer, &stackPointer);
-            uint32_t iterDepth = tn->kind == JSTRY_FOR_IN ? 0 : 1;
-            Value iterValue(*(reinterpret_cast<Value*>(stackPointer) + iterDepth));
+            Value iterValue(*(reinterpret_cast<Value*>(stackPointer)));
             RootedObject iterObject(cx, &iterValue.toObject());
             if (!UnwindIteratorForException(cx, iterObject)) {
                 // See comment in the JSTRY_FOR_IN case in Interpreter.cpp's
@@ -619,6 +617,7 @@ ProcessTryNotesBaseline(JSContext* cx, const JitFrameIterator& frame, Environmen
             break;
           }
 
+          case JSTRY_FOR_OF:
           case JSTRY_LOOP:
             break;
 

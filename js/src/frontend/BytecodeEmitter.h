@@ -682,6 +682,9 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     MOZ_MUST_USE bool emitIteratorClose(mozilla::Maybe<JumpTarget> yieldStarTryStart = mozilla::Nothing(),
                                         bool allowSelfHosted = false);
 
+    template <typename InnerEmitter>
+    MOZ_MUST_USE bool wrapWithIteratorCloseTryNote(int32_t iterDepth, InnerEmitter emitter);
+
     // Check if the value on top of the stack is "undefined". If so, replace
     // that value on the stack with the value defined by |defaultExpr|.
     // |pattern| is a lhs node of the default expression.  If it's an
