@@ -7961,6 +7961,9 @@ BytecodeEmitter::emitYieldStar(ParseNode* iter, ParseNode* gen)
         return false;
     MOZ_ASSERT(this->stackDepth == depth);
     JumpList checkResult;
+    // Note that there is no GOSUB to the finally block here. If the iterator has a
+    // "throw" method, it does not perform IteratorClose per
+    // ES 14.4.13, YieldExpression : yield * AssignmentExpression, step 5.b.ii.
     if (!emitJump(JSOP_GOTO, &checkResult))                      // goto checkResult
         return false;
 
