@@ -41,7 +41,9 @@ outer = delegate(inner);
 assertIteratorNext(outer, 1);
 delete GeneratorObjectPrototype.throw;
 var outer_throw_42 = GeneratorObjectPrototype_throw.bind(outer, 42);
-assertThrowsValue(outer_throw_42, 42);
+// yield* protocol violation: no 'throw' method
+assertThrowsInstanceOf(outer_throw_42, TypeError);
+// Now done, so just throws.
 assertThrowsValue(outer_throw_42, 42);
 
 // Monkeypunch a different throw handler.
