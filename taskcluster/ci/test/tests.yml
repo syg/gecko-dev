@@ -251,10 +251,10 @@ jsreftest:
             default: default
     chunks:
         by-test-platform:
-            android-4.3-arm7-api-15/debug: 20
-            android.*: 6
+            android-4.3-arm7-api-15/debug: 35
+            android.*: 10
             windows.*: 1
-            default: 2
+            default: 3
     e10s:
         by-test-platform:
             # Bug 1321782
