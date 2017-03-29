@@ -2202,6 +2202,7 @@ js_fgets(char* buf, int size, FILE* file)
 const char*
 frontend::TokenKindToDesc(TokenKind tt)
 {
+    /*
     switch (tt) {
 #define EMIT_CASE(name, desc) case TOK_##name: return desc;
       FOR_EACH_TOKEN_KIND(EMIT_CASE)
@@ -2210,6 +2211,7 @@ frontend::TokenKindToDesc(TokenKind tt)
         MOZ_ASSERT_UNREACHABLE("TOK_LIMIT should not be passed.");
         break;
     }
+    */
 
     return "<bad TokenKind>";
 }
@@ -2218,12 +2220,14 @@ frontend::TokenKindToDesc(TokenKind tt)
 const char*
 TokenKindToString(TokenKind tt)
 {
+    /*
     switch (tt) {
 #define EMIT_CASE(name, desc) case TOK_##name: return "TOK_" #name;
       FOR_EACH_TOKEN_KIND(EMIT_CASE)
 #undef EMIT_CASE
       case TOK_LIMIT: break;
     }
+    */
 
     return "<bad TokenKind>";
 }
