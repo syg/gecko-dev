@@ -11,6 +11,7 @@
 
 namespace js {
 
+template <bool IsConstructor>
 class DeadObjectProxy : public BaseProxyHandler
 {
   public:
@@ -52,11 +53,15 @@ class DeadObjectProxy : public BaseProxyHandler
     virtual bool regexp_toShared(JSContext* cx, HandleObject proxy,
                                  MutableHandle<RegExpShared*> shared) const override;
 
-    virtual bool isCallable(JSObject* obj) const override;
-    virtual bool isConstructor(JSObject* obj) const override;
+    virtual bool isConstructor(JSObject* obj) const override { return IsConstructor; }
+
+    static const DeadObjectProxy* singleton() {
+        static DeadObjectProxy singleton;
+        return &singleton;
+    }
 
     static const char family;
-    static const DeadObjectProxy singleton;
+    //static const DeadObjectProxy singleton;
 };
 
 bool

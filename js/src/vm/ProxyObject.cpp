@@ -128,7 +128,10 @@ ProxyObject::nuke()
     setSameCompartmentPrivate(NullValue());
 
     // Update the handler to make this a DeadObjectProxy.
-    setHandler(&DeadObjectProxy::singleton);
+    if (constructor)
+        setHandler(DeadObjectProxy<true>::singleton());
+    else
+        setHandler(DeadObjectProxy<false>::singleton());
 
     // The proxy's extra slots are not cleared and will continue to be
     // traced. This avoids the possibility of triggering write barriers while
