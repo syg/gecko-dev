@@ -12166,15 +12166,24 @@ CodeGenerator::visitDebugger(LDebugger* ins)
 {
     Register cx = ToRegister(ins->getTemp(0));
     Register temp = ToRegister(ins->getTemp(1));
+    Register callee = ToRegister(ins->callee());
+
+    masm.push(temp);
+    masm.storePtr(ImmPtr(ins->mir()->script), temp);
+    masm.storePtr(ImmPtr(ins->mir()->pc), temp);
+    masm.pop(temp);
 
     masm.loadJSContext(cx);
     masm.setupUnalignedABICall(temp);
     masm.passABIArg(cx);
+    masm.passABIArg(callee);
     masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, GlobalHasLiveOnDebuggerStatement));
 
+    /*
     Label bail;
     masm.branchIfTrueBool(ReturnReg, &bail);
     bailoutFrom(&bail, ins->snapshot());
+    */
 }
 
 void

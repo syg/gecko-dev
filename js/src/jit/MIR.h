@@ -13624,11 +13624,22 @@ class MAtomicTypedArrayElementBinop
     }
 };
 
-class MDebugger : public MNullaryInstruction
+class MDebugger : public MUnaryInstruction, public SingleObjectPolicy::Data
 {
+  public:
+    JSScript* script;
+    jsbytecode* pc;
+
+  protected:
+    MDebugger(MDefinition* callee, JSScript* script, jsbytecode* pc)
+      : MUnaryInstruction(callee),
+        script(script), pc(pc)
+    { }
+
   public:
     INSTRUCTION_HEADER(Debugger)
     TRIVIAL_NEW_WRAPPERS
+    NAMED_OPERANDS((0, callee))
 };
 
 class MCheckIsObj

@@ -1763,7 +1763,7 @@ Printf1_(const char* output, uintptr_t value) {
     js::UniqueChars line = JS_sprintf_append(nullptr, output, value);
     if (!line)
         oomUnsafe.crash("OOM at masm.printf");
-    fprintf(stderr, "%s", line.get());
+    fprintf(stderr, "%s\n", line.get());
 }
 
 void

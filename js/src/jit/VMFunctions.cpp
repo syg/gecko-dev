@@ -1121,10 +1121,14 @@ OnDebuggerStatement(JSContext* cx, BaselineFrame* frame, jsbytecode* pc, bool* m
 }
 
 bool
-GlobalHasLiveOnDebuggerStatement(JSContext* cx)
+GlobalHasLiveOnDebuggerStatement(JSContext* cx, JSFunction* callee)
 {
+    fprintf(stderr, ">>SHU callee %p toStringStart %u\n", callee, callee->nonLazyScript()->toStringStart());
+    return false;
+    /*
     return cx->compartment()->isDebuggee() &&
            Debugger::hasLiveHook(cx->global(), Debugger::OnDebuggerStatement);
+    */
 }
 
 bool

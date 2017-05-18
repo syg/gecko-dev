@@ -4816,7 +4816,8 @@ LIRGenerator::visitGlobalNameConflictsCheck(MGlobalNameConflictsCheck* ins)
 void
 LIRGenerator::visitDebugger(MDebugger* ins)
 {
-    LDebugger* lir = new(alloc()) LDebugger(tempFixed(CallTempReg0), tempFixed(CallTempReg1));
+    LDebugger* lir = new(alloc()) LDebugger(tempFixed(CallTempReg0), tempFixed(CallTempReg1),
+                                            useRegisterAtStart(ins->callee()));
     assignSnapshot(lir, Bailout_Debugger);
     add(lir, ins);
 }

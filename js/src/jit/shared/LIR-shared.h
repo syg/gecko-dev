@@ -9072,14 +9072,23 @@ class LMemoryBarrier : public LInstructionHelper<0, 0, 0>
     }
 };
 
-class LDebugger : public LCallInstructionHelper<0, 0, 2>
+class LDebugger : public LCallInstructionHelper<0, 1, 2>
 {
   public:
     LIR_HEADER(Debugger)
 
-    LDebugger(const LDefinition& temp1, const LDefinition& temp2) {
+    LDebugger(const LDefinition& temp1, const LDefinition& temp2, const LAllocation& callee) {
         setTemp(0, temp1);
         setTemp(1, temp2);
+        setOperand(0, callee);
+    }
+
+    const LAllocation* callee() {
+        return getOperand(0);
+    }
+
+    MDebugger* mir() const {
+        return mir_->toDebugger();
     }
 };
 

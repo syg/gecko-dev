@@ -736,7 +736,7 @@ HandleDebugTrap(JSContext* cx, BaselineFrame* frame, uint8_t* retAddr, bool* mus
 MOZ_MUST_USE bool
 OnDebuggerStatement(JSContext* cx, BaselineFrame* frame, jsbytecode* pc, bool* mustReturn);
 MOZ_MUST_USE bool
-GlobalHasLiveOnDebuggerStatement(JSContext* cx);
+GlobalHasLiveOnDebuggerStatement(JSContext* cx, JSFunction* callee);
 
 MOZ_MUST_USE bool
 EnterWith(JSContext* cx, BaselineFrame* frame, HandleValue val, Handle<WithScope*> templ);

@@ -12525,7 +12525,23 @@ IonBuilder::getAliasedVar(EnvironmentCoordinate ec)
 AbortReasonOr<Ok>
 IonBuilder::jsop_getaliasedvar(EnvironmentCoordinate ec)
 {
+    PropertyName* name = EnvironmentCoordinateName(envCoordinateNameCache, script(), pc);
+    if (name->hasLatin1Chars()) {
+        JS::AutoCheckCannotGC nogc;
+        const Latin1Char* chars = name->latin1Chars(nogc);
+        if (name->length() == 2 && chars[0] == 't' && chars[1] == 'e' && ec.slot() > 195) {
+            //fprintf(stderr, ">>SHU loading 'te' slot %u on script %p pc %p\n", ec.slot(), script(), pc);
+            if (script()->toStringStart() == 281406) {
+                getCallee()->dump();
+                fprintf(stderr, ">>SHU here\n");
+                MDebugger* dbg = MDebugger::New(alloc(), getCallee(), script(), pc);
+                current->add(dbg);
+            }
+        }
+    }
+
     JSObject* call = nullptr;
+    /*
     if (hasStaticEnvironmentObject(ec, &call) && call) {
         PropertyName* name = EnvironmentCoordinateName(envCoordinateNameCache, script(), pc);
         bool emitted = false;
@@ -12533,6 +12549,7 @@ IonBuilder::jsop_getaliasedvar(EnvironmentCoordinate ec)
         if (emitted)
             return Ok();
     }
+    */
 
     // See jsop_checkaliasedlexical.
     MDefinition* load = takeLexicalCheck();
@@ -12921,13 +12938,14 @@ IonBuilder::jsop_instanceof()
 AbortReasonOr<Ok>
 IonBuilder::jsop_debugger()
 {
-    MDebugger* debugger = MDebugger::New(alloc());
+    MDebugger* debugger = MDebugger::New(alloc(), getCallee(), nullptr, nullptr);
     current->add(debugger);
 
     // The |debugger;| statement will always bail out to baseline if
     // cx->compartment()->isDebuggee(). Resume in-place and have baseline
     // handle the details.
-    return resumeAt(debugger, pc);
+    return Ok();
+    //return resumeAt(debugger, pc);
 }
 
 MInstruction*
