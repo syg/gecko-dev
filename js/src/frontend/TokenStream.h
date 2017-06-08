@@ -178,7 +178,7 @@ struct Token
             double      value;          // floating point number
             DecimalPoint decimalPoint;  // literal contains '.'
         } number;
-        RegExpFlag      reflags;        // regexp flags; use tokenbuf to access
+        RegExpFlag      reflags;        // regexp flags; use charBuf to access
                                         //   regexp chars
     } u;
 #ifdef DEBUG
@@ -459,7 +459,7 @@ class TokenStreamAnyChars
         return sourceMapURL_.get();
     }
 
-    // This class maps a userbuf offset (which is 0-indexed) to a line number
+    // This class maps a inputBuf offset (which is 0-indexed) to a line number
     // (which is 1-indexed) and a column index (which is 0-indexed).
     class SourceCoords
     {
@@ -637,7 +637,7 @@ class MOZ_STACK_CLASS TokenStream final : public TokenStreamAnyChars
     TokenStream(JSContext* cx, const ReadOnlyCompileOptions& options,
                 const CharT* base, size_t length, StrictModeGetter* smg);
 
-    const CharBuffer& getTokenbuf() const { return tokenbuf; }
+    const CharBuffer& getCharBuf() const { return charBuf; }
 
     // If there is an invalid escape in a template, report it and return false,
     // otherwise return true.
@@ -682,14 +682,14 @@ class MOZ_STACK_CLASS TokenStream final : public TokenStreamAnyChars
     JSAtom* getRawTemplateStringAtom() {
         MOZ_ASSERT(currentToken().type == TOK_TEMPLATE_HEAD ||
                    currentToken().type == TOK_NO_SUBS_TEMPLATE);
-        const CharT* cur = userbuf.rawCharPtrAt(currentToken().pos.begin + 1);
+        const CharT* cur = inputBuf.rawCharPtrAt(currentToken().pos.begin + 1);
         const CharT* end;
         if (currentToken().type == TOK_TEMPLATE_HEAD) {
             // Of the form    |`...${|   or   |}...${|
-            end = userbuf.rawCharPtrAt(currentToken().pos.end - 2);
+            end = inputBuf.rawCharPtrAt(currentToken().pos.end - 2);
         } else {
             // NO_SUBS_TEMPLATE is of the form   |`...`|   or   |}...`|
-            end = userbuf.rawCharPtrAt(currentToken().pos.end - 1);
+            end = inputBuf.rawCharPtrAt(currentToken().pos.end - 1);
         }
 
         CharBuffer charbuf(cx);
@@ -733,7 +733,7 @@ class MOZ_STACK_CLASS TokenStream final : public TokenStreamAnyChars
     }
 
     static JSAtom* atomize(JSContext* cx, CharBuffer& cb);
-    MOZ_MUST_USE bool putIdentInTokenbuf(const CharT* identStart);
+    MOZ_MUST_USE bool putIdentInCharBuf(const CharT* identStart);
 
   public:
     // Advance to the next token.  If the token stream encountered an error,
@@ -904,11 +904,11 @@ class MOZ_STACK_CLASS TokenStream final : public TokenStreamAnyChars
     MOZ_MUST_USE bool seek(const Position& pos, const TokenStream& other);
 
     const CharT* rawCharPtrAt(size_t offset) const {
-        return userbuf.rawCharPtrAt(offset);
+        return inputBuf.rawCharPtrAt(offset);
     }
 
     const CharT* rawLimit() const {
-        return userbuf.limit();
+        return inputBuf.limit();
     }
 
   private:
@@ -922,9 +922,9 @@ class MOZ_STACK_CLASS TokenStream final : public TokenStreamAnyChars
     // where we have only the substring in memory. The |startOffset| argument
     // indicates the offset within this larger string at which our string
     // begins, the offset of |buf[0]|.
-    class TokenBuf {
+    class InputBuffer {
       public:
-        TokenBuf(JSContext* cx, const CharT* buf, size_t length, size_t startOffset)
+        InputBuffer(JSContext* cx, const CharT* buf, size_t length, size_t startOffset)
           : base_(buf),
             startOffset_(startOffset),
             limit_(buf + length),
@@ -999,7 +999,7 @@ class MOZ_STACK_CLASS TokenStream final : public TokenStreamAnyChars
         }
 
 #ifdef DEBUG
-        // Poison the TokenBuf so it cannot be accessed again.
+        // Poison the InputBufferso it cannot be accessed again.
         void poison() {
             ptr = nullptr;
         }
@@ -1054,9 +1054,9 @@ class MOZ_STACK_CLASS TokenStream final : public TokenStreamAnyChars
 
     // |expect| cannot be an EOL char.
     bool matchChar(int32_t expect) {
-        MOZ_ASSERT(!TokenBuf::isRawEOLChar(expect));
-        return MOZ_LIKELY(userbuf.hasRawChars()) &&
-               userbuf.matchRawChar(expect);
+        MOZ_ASSERT(!InputBuffer::isRawEOLChar(expect));
+        return MOZ_LIKELY(inputBuf.hasRawChars()) &&
+               inputBuf.matchRawChar(expect);
     }
 
     void consumeKnownChar(int32_t expect) {
@@ -1074,7 +1074,7 @@ class MOZ_STACK_CLASS TokenStream final : public TokenStreamAnyChars
 
     void skipChars(uint8_t n) {
         while (n-- > 0) {
-            MOZ_ASSERT(userbuf.hasRawChars());
+            MOZ_ASSERT(inputBuf.hasRawChars());
             mozilla::DebugOnly<int32_t> c = getCharIgnoreEOL();
             MOZ_ASSERT(c != '\n');
         }
@@ -1082,15 +1082,15 @@ class MOZ_STACK_CLASS TokenStream final : public TokenStreamAnyChars
 
     void skipCharsIgnoreEOL(uint8_t n) {
         while (n-- > 0) {
-            MOZ_ASSERT(userbuf.hasRawChars());
+            MOZ_ASSERT(inputBuf.hasRawChars());
             getCharIgnoreEOL();
         }
     }
 
     MOZ_MUST_USE MOZ_ALWAYS_INLINE bool updateLineInfoForEOL();
 
-    TokenBuf            userbuf;            // user input buffer
-    CharBuffer          tokenbuf;           // current token string buffer
+    InputBuffer         inputBuf;         // user input buffer
+    CharBuffer          charBuf;          // current token string buffer
 };
 
 extern const char*

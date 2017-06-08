@@ -425,8 +425,8 @@ TokenStreamAnyChars::TokenStreamAnyChars(JSContext* cx, const ReadOnlyCompileOpt
 TokenStream::TokenStream(JSContext* cx, const ReadOnlyCompileOptions& options,
                          const CharT* base, size_t length, StrictModeGetter* smg)
   : TokenStreamAnyChars(cx, options, smg),
-    userbuf(cx, base, length, options.column),
-    tokenbuf(cx)
+    inputBuf(cx, base, length, options.column),
+    charBuf(cx)
 {
     // Nb: the following tables could be static, but initializing them here is
     // much easier.  Don't worry, the time to initialize them for each
@@ -472,7 +472,7 @@ MOZ_MUST_USE MOZ_ALWAYS_INLINE bool
 TokenStream::updateLineInfoForEOL()
 {
     prevLinebase = linebase;
-    linebase = userbuf.offset();
+    linebase = inputBuf.offset();
     lineno++;
     return srcCoords.add(lineno, linebase);
 }
@@ -487,13 +487,13 @@ TokenStreamAnyChars::updateFlagsForEOL()
 bool
 TokenStream::getChar(int32_t* cp)
 {
-    if (MOZ_UNLIKELY(!userbuf.hasRawChars())) {
+    if (MOZ_UNLIKELY(!inputBuf.hasRawChars())) {
         flags.isEOF = true;
         *cp = EOF;
         return true;
     }
 
-    int32_t c = userbuf.getRawChar();
+    int32_t c = inputBuf.getRawChar();
 
     do {
         // Normalize the char16_t if it was a newline.
@@ -502,8 +502,8 @@ TokenStream::getChar(int32_t* cp)
 
         if (MOZ_UNLIKELY(c == '\r')) {
             // If it's a \r\n sequence: treat as a single EOL, skip over the \n.
-            if (MOZ_LIKELY(userbuf.hasRawChars()))
-                userbuf.matchRawChar('\n');
+            if (MOZ_LIKELY(inputBuf.hasRawChars()))
+                inputBuf.matchRawChar('\n');
 
             break;
         }
@@ -530,8 +530,8 @@ TokenStream::getChar(int32_t* cp)
 int32_t
 TokenStream::getCharIgnoreEOL()
 {
-    if (MOZ_LIKELY(userbuf.hasRawChars()))
-        return userbuf.getRawChar();
+    if (MOZ_LIKELY(inputBuf.hasRawChars()))
+        return inputBuf.getRawChar();
 
     flags.isEOF = true;
     return EOF;
@@ -542,24 +542,24 @@ TokenStream::ungetChar(int32_t c)
 {
     if (c == EOF)
         return;
-    MOZ_ASSERT(!userbuf.atStart());
-    userbuf.ungetRawChar();
+    MOZ_ASSERT(!inputBuf.atStart());
+    inputBuf.ungetRawChar();
     if (c == '\n') {
 #ifdef DEBUG
-        int32_t c2 = userbuf.peekRawChar();
-        MOZ_ASSERT(TokenBuf::isRawEOLChar(c2));
+        int32_t c2 = inputBuf.peekRawChar();
+        MOZ_ASSERT(InputBuffer::isRawEOLChar(c2));
 #endif
 
         // If it's a \r\n sequence, also unget the \r.
-        if (!userbuf.atStart())
-            userbuf.matchRawCharBackwards('\r');
+        if (!inputBuf.atStart())
+            inputBuf.matchRawCharBackwards('\r');
 
         MOZ_ASSERT(prevLinebase != size_t(-1));    // we should never get more than one EOL char
         linebase = prevLinebase;
         prevLinebase = size_t(-1);
         lineno--;
     } else {
-        MOZ_ASSERT(userbuf.peekRawChar() == c);
+        MOZ_ASSERT(inputBuf.peekRawChar() == c);
     }
 }
 
@@ -568,8 +568,8 @@ TokenStream::ungetCharIgnoreEOL(int32_t c)
 {
     if (c == EOF)
         return;
-    MOZ_ASSERT(!userbuf.atStart());
-    userbuf.ungetRawChar();
+    MOZ_ASSERT(!inputBuf.atStart());
+    inputBuf.ungetRawChar();
 }
 
 // Return true iff |n| raw characters can be read from this without reading past
@@ -598,7 +598,7 @@ TokenStream::peekChars(int n, char16_t* cp)
 }
 
 size_t
-TokenStream::TokenBuf::findEOLMax(size_t start, size_t max)
+TokenStream::InputBuffer::findEOLMax(size_t start, size_t max)
 {
     const CharT* p = rawCharPtrAt(start);
 
@@ -609,7 +609,7 @@ TokenStream::TokenBuf::findEOLMax(size_t start, size_t max)
         if (n >= max)
             break;
         n++;
-        if (TokenBuf::isRawEOLChar(*p++))
+        if (InputBuffer::isRawEOLChar(*p++))
             break;
     }
     return start + n;
@@ -618,15 +618,15 @@ TokenStream::TokenBuf::findEOLMax(size_t start, size_t max)
 bool
 TokenStream::advance(size_t position)
 {
-    const CharT* end = userbuf.rawCharPtrAt(position);
-    while (userbuf.addressOfNextRawChar() < end) {
+    const CharT* end = inputBuf.rawCharPtrAt(position);
+    while (inputBuf.addressOfNextRawChar() < end) {
         int32_t c;
         if (!getChar(&c))
             return false;
     }
 
     Token* cur = &tokens[cursor];
-    cur->pos.begin = userbuf.offset();
+    cur->pos.begin = inputBuf.offset();
     MOZ_MAKE_MEM_UNDEFINED(&cur->type, sizeof(cur->type));
     lookahead = 0;
     return true;
@@ -635,7 +635,7 @@ TokenStream::advance(size_t position)
 void
 TokenStream::tell(Position* pos)
 {
-    pos->buf = userbuf.addressOfNextRawChar(/* allowPoisoned = */ true);
+    pos->buf = inputBuf.addressOfNextRawChar(/* allowPoisoned = */ true);
     pos->flags = flags;
     pos->lineno = lineno;
     pos->linebase = linebase;
@@ -649,7 +649,7 @@ TokenStream::tell(Position* pos)
 void
 TokenStream::seek(const Position& pos)
 {
-    userbuf.setAddressOfNextRawChar(pos.buf, /* allowPoisoned = */ true);
+    inputBuf.setAddressOfNextRawChar(pos.buf, /* allowPoisoned = */ true);
     flags = pos.flags;
     lineno = pos.lineno;
     linebase = pos.linebase;
@@ -782,19 +782,19 @@ TokenStream::computeLineOfContext(ErrorMetadata* err, uint32_t offset)
 
     // The window must start within the portion of the current line that we
     // actually have in our buffer.
-    if (windowStart < userbuf.startOffset())
-        windowStart = userbuf.startOffset();
+    if (windowStart < inputBuf.startOffset())
+        windowStart = inputBuf.startOffset();
 
     // The window must end within the current line, no later than
     // windowRadius after offset.
-    size_t windowEnd = userbuf.findEOLMax(offset, windowRadius);
+    size_t windowEnd = inputBuf.findEOLMax(offset, windowRadius);
     size_t windowLength = windowEnd - windowStart;
     MOZ_ASSERT(windowLength <= windowRadius * 2);
 
     // Create the windowed string, not including the potential line
     // terminator.
     StringBuffer windowBuf(cx);
-    if (!windowBuf.append(userbuf.rawCharPtrAt(windowStart), windowLength) ||
+    if (!windowBuf.append(inputBuf.rawCharPtrAt(windowStart), windowLength) ||
         !windowBuf.append('\0'))
     {
         return false;
@@ -1048,7 +1048,7 @@ TokenStream::getDirective(bool isMultiline, bool shouldWarnDeprecated,
         }
 
         skipChars(directiveLength);
-        tokenbuf.clear();
+        charBuf.clear();
 
         do {
             int32_t c;
@@ -1074,23 +1074,23 @@ TokenStream::getDirective(bool isMultiline, bool shouldWarnDeprecated,
                 }
             }
 
-            if (!tokenbuf.append(c))
+            if (!charBuf.append(c))
                 return false;
         } while (true);
 
-        if (tokenbuf.empty()) {
+        if (charBuf.empty()) {
             // The directive's URL was missing, but this is not quite an
             // exception that we should stop and drop everything for.
             return true;
         }
 
-        size_t length = tokenbuf.length();
+        size_t length = charBuf.length();
 
         *destination = cx->make_pod_array<char16_t>(length + 1);
         if (!*destination)
             return false;
 
-        PodCopy(destination->get(), tokenbuf.begin(), length);
+        PodCopy(destination->get(), charBuf.begin(), length);
         (*destination)[length] = '\0';
     }
 
@@ -1133,7 +1133,7 @@ TokenStream::newToken(ptrdiff_t adjust)
 {
     cursor = (cursor + 1) & ntokensMask;
     Token* tp = &tokens[cursor];
-    tp->pos.begin = userbuf.offset() + adjust;
+    tp->pos.begin = inputBuf.offset() + adjust;
 
     // NOTE: tp->pos.end is not set until the very end of getTokenInternal().
     MOZ_MAKE_MEM_UNDEFINED(&tp->pos.end, sizeof(tp->pos.end));
@@ -1179,14 +1179,14 @@ TokenStream::matchTrailForLeadSurrogate(char16_t lead, char16_t* trail, uint32_t
 }
 
 bool
-TokenStream::putIdentInTokenbuf(const char16_t* identStart)
+TokenStream::putIdentInCharBuf(const char16_t* identStart)
 {
     int32_t c;
     uint32_t qc;
-    const CharT* tmp = userbuf.addressOfNextRawChar();
-    userbuf.setAddressOfNextRawChar(identStart);
+    const CharT* tmp = inputBuf.addressOfNextRawChar();
+    inputBuf.setAddressOfNextRawChar(identStart);
 
-    tokenbuf.clear();
+    charBuf.clear();
     for (;;) {
         c = getCharIgnoreEOL();
 
@@ -1197,8 +1197,8 @@ TokenStream::putIdentInTokenbuf(const char16_t* identStart)
                 if (!unicode::IsIdentifierPart(codePoint))
                     break;
 
-                if (!tokenbuf.append(c) || !tokenbuf.append(trail)) {
-                    userbuf.setAddressOfNextRawChar(tmp);
+                if (!charBuf.append(c) || !charBuf.append(trail)) {
+                    inputBuf.setAddressOfNextRawChar(tmp);
                     return false;
                 }
                 continue;
@@ -1212,8 +1212,8 @@ TokenStream::putIdentInTokenbuf(const char16_t* identStart)
             if (MOZ_UNLIKELY(unicode::IsSupplementary(qc))) {
                 char16_t lead, trail;
                 unicode::UTF16Encode(qc, &lead, &trail);
-                if (!tokenbuf.append(lead) || !tokenbuf.append(trail)) {
-                    userbuf.setAddressOfNextRawChar(tmp);
+                if (!charBuf.append(lead) || !charBuf.append(trail)) {
+                    inputBuf.setAddressOfNextRawChar(tmp);
                     return false;
                 }
                 continue;
@@ -1222,12 +1222,12 @@ TokenStream::putIdentInTokenbuf(const char16_t* identStart)
             c = qc;
         }
 
-        if (!tokenbuf.append(c)) {
-            userbuf.setAddressOfNextRawChar(tmp);
+        if (!charBuf.append(c)) {
+            inputBuf.setAddressOfNextRawChar(tmp);
             return false;
         }
     }
-    userbuf.setAddressOfNextRawChar(tmp);
+    inputBuf.setAddressOfNextRawChar(tmp);
     return true;
 }
 
@@ -1322,14 +1322,14 @@ TokenStream::getTokenInternal(TokenKind* ttp, Modifier modifier)
     }
 
   retry:
-    if (MOZ_UNLIKELY(!userbuf.hasRawChars())) {
+    if (MOZ_UNLIKELY(!inputBuf.hasRawChars())) {
         tp = newToken(0);
         tp->type = TOK_EOF;
         flags.isEOF = true;
         goto out;
     }
 
-    c = userbuf.getRawChar();
+    c = inputBuf.getRawChar();
     MOZ_ASSERT(c != EOF);
 
     // Chars not in the range 0..127 are rare.  Getting them out of the way
@@ -1355,7 +1355,7 @@ TokenStream::getTokenInternal(TokenKind* ttp, Modifier modifier)
                       "IdentifierStart contains '_', but as !IsUnicodeIDStart('_'), "
                       "ensure that '_' is never handled here");
         if (unicode::IsUnicodeIDStart(char16_t(c))) {
-            identStart = userbuf.addressOfNextRawChar() - 1;
+            identStart = inputBuf.addressOfNextRawChar() - 1;
             hadUnicodeEscape = false;
             goto identifier;
         }
@@ -1365,7 +1365,7 @@ TokenStream::getTokenInternal(TokenKind* ttp, Modifier modifier)
             if (matchTrailForLeadSurrogate(c, nullptr, &codePoint) &&
                 unicode::IsUnicodeIDStart(codePoint))
             {
-                identStart = userbuf.addressOfNextRawChar() - 2;
+                identStart = inputBuf.addressOfNextRawChar() - 2;
                 hadUnicodeEscape = false;
                 goto identifier;
             }
@@ -1413,7 +1413,7 @@ TokenStream::getTokenInternal(TokenKind* ttp, Modifier modifier)
     //
     if (c1kind == Ident) {
         tp = newToken(-1);
-        identStart = userbuf.addressOfNextRawChar() - 1;
+        identStart = inputBuf.addressOfNextRawChar() - 1;
         hadUnicodeEscape = false;
 
       identifier:
@@ -1441,19 +1441,19 @@ TokenStream::getTokenInternal(TokenKind* ttp, Modifier modifier)
         ungetCharIgnoreEOL(c);
 
         // Identifiers containing no Unicode escapes can be processed directly
-        // from userbuf.  The rest must use the escapes converted via tokenbuf
+        // from inputBuf.  The rest must use the escapes converted via charBuf
         // before atomizing.
         const CharT* chars;
         size_t length;
         if (hadUnicodeEscape) {
-            if (!putIdentInTokenbuf(identStart))
+            if (!putIdentInCharBuf(identStart))
                 goto error;
 
-            chars = tokenbuf.begin();
-            length = tokenbuf.length();
+            chars = charBuf.begin();
+            length = charBuf.length();
         } else {
             chars = identStart;
-            length = userbuf.addressOfNextRawChar() - identStart;
+            length = inputBuf.addressOfNextRawChar() - identStart;
         }
 
         // Represent reserved words as reserved word tokens.
@@ -1476,7 +1476,7 @@ TokenStream::getTokenInternal(TokenKind* ttp, Modifier modifier)
     //
     if (c1kind == Dec) {
         tp = newToken(-1);
-        numStart = userbuf.addressOfNextRawChar() - 1;
+        numStart = inputBuf.addressOfNextRawChar() - 1;
 
       decimal:
         decimalPoint = NoDecimal;
@@ -1525,15 +1525,15 @@ TokenStream::getTokenInternal(TokenKind* ttp, Modifier modifier)
         }
 
         // Unlike identifiers and strings, numbers cannot contain escaped
-        // chars, so we don't need to use tokenbuf.  Instead we can just
-        // convert the char16_t characters in userbuf to the numeric value.
+        // chars, so we don't need to use charBuf.  Instead we can just
+        // convert the char16_t characters in inputBuf to the numeric value.
         double dval;
         if (!((decimalPoint == HasDecimal) || hasExp)) {
-            if (!GetDecimalInteger(cx, numStart, userbuf.addressOfNextRawChar(), &dval))
+            if (!GetDecimalInteger(cx, numStart, inputBuf.addressOfNextRawChar(), &dval))
                 goto error;
         } else {
             const CharT* dummy;
-            if (!js_strtod(cx, numStart, userbuf.addressOfNextRawChar(), &dummy, &dval))
+            if (!js_strtod(cx, numStart, inputBuf.addressOfNextRawChar(), &dummy, &dval))
                 goto error;
         }
         tp->type = TOK_NUMBER;
@@ -1553,8 +1553,8 @@ TokenStream::getTokenInternal(TokenKind* ttp, Modifier modifier)
     //
     if (c1kind == EOL) {
         // If it's a \r\n sequence: treat as a single EOL, skip over the \n.
-        if (c == '\r' && userbuf.hasRawChars())
-            userbuf.matchRawChar('\n');
+        if (c == '\r' && inputBuf.hasRawChars())
+            inputBuf.matchRawChar('\n');
         if (!updateLineInfoForEOL())
             goto error;
         updateFlagsForEOL();
@@ -1575,7 +1575,7 @@ TokenStream::getTokenInternal(TokenKind* ttp, Modifier modifier)
                 reportError(JSMSG_MISSING_HEXDIGITS);
                 goto error;
             }
-            numStart = userbuf.addressOfNextRawChar() - 1;  // one past the '0x'
+            numStart = inputBuf.addressOfNextRawChar() - 1;  // one past the '0x'
             while (JS7_ISHEX(c))
                 c = getCharIgnoreEOL();
         } else if (c == 'b' || c == 'B') {
@@ -1586,7 +1586,7 @@ TokenStream::getTokenInternal(TokenKind* ttp, Modifier modifier)
                 reportError(JSMSG_MISSING_BINARY_DIGITS);
                 goto error;
             }
-            numStart = userbuf.addressOfNextRawChar() - 1;  // one past the '0b'
+            numStart = inputBuf.addressOfNextRawChar() - 1;  // one past the '0b'
             while (c == '0' || c == '1')
                 c = getCharIgnoreEOL();
         } else if (c == 'o' || c == 'O') {
@@ -1597,12 +1597,12 @@ TokenStream::getTokenInternal(TokenKind* ttp, Modifier modifier)
                 reportError(JSMSG_MISSING_OCTAL_DIGITS);
                 goto error;
             }
-            numStart = userbuf.addressOfNextRawChar() - 1;  // one past the '0o'
+            numStart = inputBuf.addressOfNextRawChar() - 1;  // one past the '0o'
             while ('0' <= c && c <= '7')
                 c = getCharIgnoreEOL();
         } else if (JS7_ISDEC(c)) {
             radix = 8;
-            numStart = userbuf.addressOfNextRawChar() - 1;  // one past the '0'
+            numStart = inputBuf.addressOfNextRawChar() - 1;  // one past the '0'
             while (JS7_ISDEC(c)) {
                 // Octal integer literals are not permitted in strict mode code.
                 if (!reportStrictModeError(JSMSG_DEPRECATED_OCTAL))
@@ -1623,7 +1623,7 @@ TokenStream::getTokenInternal(TokenKind* ttp, Modifier modifier)
             }
         } else {
             // '0' not followed by 'x', 'X' or a digit;  scan as a decimal number.
-            numStart = userbuf.addressOfNextRawChar() - 1;
+            numStart = inputBuf.addressOfNextRawChar() - 1;
             goto decimal;
         }
         ungetCharIgnoreEOL(c);
@@ -1647,7 +1647,7 @@ TokenStream::getTokenInternal(TokenKind* ttp, Modifier modifier)
 
         double dval;
         const char16_t* dummy;
-        if (!GetPrefixInteger(cx, numStart, userbuf.addressOfNextRawChar(), radix, &dummy, &dval))
+        if (!GetPrefixInteger(cx, numStart, inputBuf.addressOfNextRawChar(), radix, &dummy, &dval))
             goto error;
         tp->type = TOK_NUMBER;
         tp->setNumber(dval, NoDecimal);
@@ -1662,7 +1662,7 @@ TokenStream::getTokenInternal(TokenKind* ttp, Modifier modifier)
       case '.':
         c = getCharIgnoreEOL();
         if (JS7_ISDEC(c)) {
-            numStart = userbuf.addressOfNextRawChar() - 2;
+            numStart = inputBuf.addressOfNextRawChar() - 2;
             decimalPoint = HasDecimal;
             hasExp = false;
             goto decimal_dot;
@@ -1696,7 +1696,7 @@ TokenStream::getTokenInternal(TokenKind* ttp, Modifier modifier)
       case '\\': {
         uint32_t escapeLength = matchUnicodeEscapeIdStart(&qc);
         if (escapeLength > 0) {
-            identStart = userbuf.addressOfNextRawChar() - escapeLength - 1;
+            identStart = inputBuf.addressOfNextRawChar() - escapeLength - 1;
             hadUnicodeEscape = true;
             goto identifier;
         }
@@ -1820,7 +1820,7 @@ TokenStream::getTokenInternal(TokenKind* ttp, Modifier modifier)
 
         // Look for a regexp.
         if (modifier == Operand) {
-            tokenbuf.clear();
+            charBuf.clear();
 
             bool inCharClass = false;
             do {
@@ -1828,7 +1828,7 @@ TokenStream::getTokenInternal(TokenKind* ttp, Modifier modifier)
                     goto error;
 
                 if (c == '\\') {
-                    if (!tokenbuf.append(c))
+                    if (!charBuf.append(c))
                         goto error;
                     if (!getChar(&c))
                         goto error;
@@ -1845,12 +1845,12 @@ TokenStream::getTokenInternal(TokenKind* ttp, Modifier modifier)
                     reportError(JSMSG_UNTERMINATED_REGEXP);
                     goto error;
                 }
-                if (!tokenbuf.append(c))
+                if (!charBuf.append(c))
                     goto error;
             } while (true);
 
             RegExpFlag reflags = NoFlags;
-            unsigned length = tokenbuf.length() + 1;
+            unsigned length = charBuf.length() + 1;
             while (true) {
                 if (!peekChar(&c))
                     goto error;
@@ -1920,7 +1920,7 @@ TokenStream::getTokenInternal(TokenKind* ttp, Modifier modifier)
 
   out:
     flags.isDirtyLine = true;
-    tp->pos.end = userbuf.offset();
+    tp->pos.end = inputBuf.offset();
 #ifdef DEBUG
     // Save the modifier used to get this token, so that if an ungetToken()
     // occurs and then the token is re-gotten (or peeked, etc.), we can assert
@@ -1938,11 +1938,11 @@ TokenStream::getTokenInternal(TokenKind* ttp, Modifier modifier)
     // uninitialized.
     flags.hadError = true;
 #ifdef DEBUG
-    // Poisoning userbuf on error establishes an invariant: once an erroneous
-    // token has been seen, userbuf will not be consulted again.  This is true
+    // Poisoning inputBuf on error establishes an invariant: once an erroneous
+    // token has been seen, inputBuf will not be consulted again.  This is true
     // because the parser will deal with the illegal token by aborting parsing
     // immediately.
-    userbuf.poison();
+    inputBuf.poison();
 #endif
     MOZ_MAKE_MEM_UNDEFINED(ttp, sizeof(*ttp));
     return false;
@@ -1957,7 +1957,7 @@ TokenStream::getStringOrTemplateToken(int untilChar, Token** tp)
     bool parsingTemplate = (untilChar == '`');
 
     *tp = newToken(-1);
-    tokenbuf.clear();
+    charBuf.clear();
 
     // We need to detect any of these chars:  " or ', \n (or its
     // equivalents), \\, EOF.  Because we detect EOL sequences here and
@@ -1972,7 +1972,7 @@ TokenStream::getStringOrTemplateToken(int untilChar, Token** tp)
         if (c == '\\') {
             // When parsing templates, we don't immediately report errors for
             // invalid escapes; these are handled by the parser.
-            // In those cases we don't append to tokenbuf, since it won't be
+            // In those cases we don't append to charBuf, since it won't be
             // read.
             if (!getChar(&c))
                 return false;
@@ -1998,7 +1998,7 @@ TokenStream::getStringOrTemplateToken(int untilChar, Token** tp)
                 if (!peekChar(&c2))
                     return false;
 
-                uint32_t start = userbuf.offset() - 2;
+                uint32_t start = inputBuf.offset() - 2;
 
                 if (c2 == '{') {
                     consumeKnownChar('{');
@@ -2064,7 +2064,7 @@ TokenStream::getStringOrTemplateToken(int untilChar, Token** tp)
                     if (code < unicode::NonBMPMin) {
                         c = code;
                     } else {
-                        if (!tokenbuf.append(unicode::LeadSurrogate(code)))
+                        if (!charBuf.append(unicode::LeadSurrogate(code)))
                             return false;
                         c = unicode::TrailSurrogate(code);
                     }
@@ -2098,7 +2098,7 @@ TokenStream::getStringOrTemplateToken(int untilChar, Token** tp)
                     c = (JS7_UNHEX(cp[0]) << 4) + JS7_UNHEX(cp[1]);
                     skipChars(2);
                 } else {
-                    uint32_t start = userbuf.offset() - 2;
+                    uint32_t start = inputBuf.offset() - 2;
                     if (parsingTemplate) {
                         setInvalidTemplateEscape(start, InvalidEscapeType::Hexadecimal);
                         continue;
@@ -2120,7 +2120,7 @@ TokenStream::getStringOrTemplateToken(int untilChar, Token** tp)
                     // Strict mode code allows only \0, then a non-digit.
                     if (val != 0 || JS7_ISDEC(c)) {
                         if (parsingTemplate) {
-                            setInvalidTemplateEscape(userbuf.offset() - 2, InvalidEscapeType::Octal);
+                            setInvalidTemplateEscape(inputBuf.offset() - 2, InvalidEscapeType::Octal);
                             continue;
                         }
                         if (!reportStrictModeError(JSMSG_DEPRECATED_OCTAL))
@@ -2147,7 +2147,7 @@ TokenStream::getStringOrTemplateToken(int untilChar, Token** tp)
                 }
                 break;
             }
-        } else if (TokenBuf::isRawEOLChar(c)) {
+        } else if (InputBuffer::isRawEOLChar(c)) {
             if (!parsingTemplate) {
                 ungetCharIgnoreEOL(c);
                 error(JSMSG_UNTERMINATED_STRING);
@@ -2155,7 +2155,7 @@ TokenStream::getStringOrTemplateToken(int untilChar, Token** tp)
             }
             if (c == '\r') {
                 c = '\n';
-                if (userbuf.peekRawChar() == '\n')
+                if (inputBuf.peekRawChar() == '\n')
                     skipCharsIgnoreEOL(1);
             }
 
@@ -2169,13 +2169,13 @@ TokenStream::getStringOrTemplateToken(int untilChar, Token** tp)
             ungetCharIgnoreEOL(nc);
         }
 
-        if (!tokenbuf.append(c)) {
+        if (!charBuf.append(c)) {
             ReportOutOfMemory(cx);
             return false;
         }
     }
 
-    JSAtom* atom = atomize(cx, tokenbuf);
+    JSAtom* atom = atomize(cx, charBuf);
     if (!atom)
         return false;
 

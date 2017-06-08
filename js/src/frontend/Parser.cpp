@@ -9437,8 +9437,8 @@ Parser<ParseHandler, CharT>::newRegExp()
 {
     MOZ_ASSERT(!options().selfHostingMode);
     // Create the regexp even when doing a syntax parse, to check the regexp's syntax.
-    const char16_t* chars = tokenStream.getTokenbuf().begin();
-    size_t length = tokenStream.getTokenbuf().length();
+    const char16_t* chars = tokenStream.getCharBuf().begin();
+    size_t length = tokenStream.getCharBuf().length();
     RegExpFlag flags = tokenStream.currentToken().regExpFlags();
 
     Rooted<RegExpObject*> reobj(context);
