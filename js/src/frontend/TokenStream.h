@@ -550,6 +550,16 @@ class TokenStreamAnyChars
      */
     bool fillExcludingContext(ErrorMetadata* err, uint32_t offset);
 
+    // Compute a line of context for an otherwise-filled-in |err| at the given
+    // offset in this token stream.  (This function basically exists to make
+    // |computeErrorMetadata| more readable and shouldn't be called elsewhere.)
+    //
+    // This is virtual to localize error reporting functions to
+    // TokenStreamAnyChars, to obviate the need to pass around a particular
+    // TokenStream for error reporting. The cost of making this virtual is
+    // irrelevant since it is used in error-cases only.
+    virtual MOZ_MUST_USE bool computeLineOfContext(ErrorMetadata* err, uint32_t offset) = 0;
+
     void updateFlagsForEOL();
 
     const Token& nextToken() const {
@@ -560,15 +570,42 @@ class TokenStreamAnyChars
     bool hasLookahead() const { return lookahead > 0; }
 
   public:
+    // TokenStream-specific error reporters.
+    void reportError(unsigned errorNumber, ...);
+
+    // Report the given error at the current offset.
+    void error(unsigned errorNumber, ...);
+
+    // Report the given error at the given offset.
+    void errorAt(uint32_t offset, unsigned errorNumber, ...);
+
+    // Warn at the current offset.
+    MOZ_MUST_USE bool warning(unsigned errorNumber, ...);
+
     MOZ_MUST_USE bool compileWarning(ErrorMetadata&& metadata, UniquePtr<JSErrorNotes> notes,
                                      unsigned flags, unsigned errorNumber, va_list args);
 
     void reportErrorNoOffset(unsigned errorNumber, ...);
 
+    // General-purpose error reporters.  You should avoid calling these
+    // directly, and instead use the more succinct alternatives (error(),
+    // warning(), &c.) in TokenStream, Parser, and BytecodeEmitter.
+    bool reportStrictModeErrorNumberVA(UniquePtr<JSErrorNotes> notes, uint32_t offset,
+                                       bool strictMode, unsigned errorNumber, va_list args);
+    bool reportExtraWarningErrorNumberVA(UniquePtr<JSErrorNotes> notes, uint32_t offset,
+                                         unsigned errorNumber, va_list args);
+
     // Compute error metadata for an error at no offset.
     void computeErrorMetadataNoOffset(ErrorMetadata* err);
 
+    // Compute error metadata for an error at the given offset.
+    MOZ_MUST_USE bool computeErrorMetadata(ErrorMetadata* err, uint32_t offset);
+
   protected:
+    // This is protected because it should only be called by the tokenizer while
+    // tokenizing not by, for example, BytecodeEmitter.
+    bool reportStrictModeError(unsigned errorNumber, ...);
+
     // Options used for parsing/tokenizing.
     const ReadOnlyCompileOptions& options_;
 
@@ -649,36 +686,13 @@ class MOZ_STACK_CLASS TokenStream final : public TokenStreamAnyChars
         return false;
     }
 
-    // TokenStream-specific error reporters.
-    void reportError(unsigned errorNumber, ...);
-
-    // Report the given error at the current offset.
-    void error(unsigned errorNumber, ...);
-
-    // Report the given error at the given offset.
-    void errorAt(uint32_t offset, unsigned errorNumber, ...);
-
-    // Warn at the current offset.
-    MOZ_MUST_USE bool warning(unsigned errorNumber, ...);
-
   private:
     // Compute a line of context for an otherwise-filled-in |err| at the given
     // offset in this token stream.  (This function basically exists to make
     // |computeErrorMetadata| more readable and shouldn't be called elsewhere.)
-    MOZ_MUST_USE bool computeLineOfContext(ErrorMetadata* err, uint32_t offset);
+    MOZ_MUST_USE bool computeLineOfContext(ErrorMetadata* err, uint32_t offset) override;
 
   public:
-    // Compute error metadata for an error at the given offset.
-    MOZ_MUST_USE bool computeErrorMetadata(ErrorMetadata* err, uint32_t offset);
-
-    // General-purpose error reporters.  You should avoid calling these
-    // directly, and instead use the more succinct alternatives (error(),
-    // warning(), &c.) in TokenStream, Parser, and BytecodeEmitter.
-    bool reportStrictModeErrorNumberVA(UniquePtr<JSErrorNotes> notes, uint32_t offset,
-                                       bool strictMode, unsigned errorNumber, va_list args);
-    bool reportExtraWarningErrorNumberVA(UniquePtr<JSErrorNotes> notes, uint32_t offset,
-                                         unsigned errorNumber, va_list args);
-
     JSAtom* getRawTemplateStringAtom() {
         MOZ_ASSERT(currentToken().type == TOK_TEMPLATE_HEAD ||
                    currentToken().type == TOK_NO_SUBS_TEMPLATE);
@@ -708,10 +722,6 @@ class MOZ_STACK_CLASS TokenStream final : public TokenStreamAnyChars
     }
 
   private:
-    // This is private because it should only be called by the tokenizer while
-    // tokenizing not by, for example, BytecodeEmitter.
-    bool reportStrictModeError(unsigned errorNumber, ...);
-
     void reportInvalidEscapeError(uint32_t offset, InvalidEscapeType type) {
         switch (type) {
             case InvalidEscapeType::None:

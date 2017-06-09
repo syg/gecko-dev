@@ -671,8 +671,9 @@ TokenStream::seek(const Position& pos, const TokenStream& other)
 }
 
 bool
-TokenStream::reportStrictModeErrorNumberVA(UniquePtr<JSErrorNotes> notes, uint32_t offset,
-                                           bool strictMode, unsigned errorNumber, va_list args)
+TokenStreamAnyChars::reportStrictModeErrorNumberVA(UniquePtr<JSErrorNotes> notes, uint32_t offset,
+                                                   bool strictMode, unsigned errorNumber,
+                                                   va_list args)
 {
     if (!strictMode && !options().extraWarningsOption)
         return true;
@@ -739,7 +740,7 @@ TokenStreamAnyChars::fillExcludingContext(ErrorMetadata* err, uint32_t offset)
 }
 
 bool
-TokenStream::computeErrorMetadata(ErrorMetadata* err, uint32_t offset)
+TokenStreamAnyChars::computeErrorMetadata(ErrorMetadata* err, uint32_t offset)
 {
     if (offset == NoOffset) {
         computeErrorMetadataNoOffset(err);
@@ -810,7 +811,7 @@ TokenStream::computeLineOfContext(ErrorMetadata* err, uint32_t offset)
 }
 
 bool
-TokenStream::reportStrictModeError(unsigned errorNumber, ...)
+TokenStreamAnyChars::reportStrictModeError(unsigned errorNumber, ...)
 {
     va_list args;
     va_start(args, errorNumber);
@@ -821,7 +822,7 @@ TokenStream::reportStrictModeError(unsigned errorNumber, ...)
 }
 
 void
-TokenStream::reportError(unsigned errorNumber, ...)
+TokenStreamAnyChars::reportError(unsigned errorNumber, ...)
 {
     va_list args;
     va_start(args, errorNumber);
@@ -848,7 +849,7 @@ TokenStreamAnyChars::reportErrorNoOffset(unsigned errorNumber, ...)
 }
 
 bool
-TokenStream::warning(unsigned errorNumber, ...)
+TokenStreamAnyChars::warning(unsigned errorNumber, ...)
 {
     va_list args;
     va_start(args, errorNumber);
@@ -863,8 +864,9 @@ TokenStream::warning(unsigned errorNumber, ...)
 }
 
 bool
-TokenStream::reportExtraWarningErrorNumberVA(UniquePtr<JSErrorNotes> notes, uint32_t offset,
-                                             unsigned errorNumber, va_list args)
+TokenStreamAnyChars::reportExtraWarningErrorNumberVA(UniquePtr<JSErrorNotes> notes,
+                                                     uint32_t offset, unsigned errorNumber,
+                                                     va_list args)
 {
     if (!options().extraWarningsOption)
         return true;
@@ -878,7 +880,7 @@ TokenStream::reportExtraWarningErrorNumberVA(UniquePtr<JSErrorNotes> notes, uint
 }
 
 void
-TokenStream::error(unsigned errorNumber, ...)
+TokenStreamAnyChars::error(unsigned errorNumber, ...)
 {
     va_list args;
     va_start(args, errorNumber);
@@ -891,7 +893,7 @@ TokenStream::error(unsigned errorNumber, ...)
 }
 
 void
-TokenStream::errorAt(uint32_t offset, unsigned errorNumber, ...)
+TokenStreamAnyChars::errorAt(uint32_t offset, unsigned errorNumber, ...)
 {
     va_list args;
     va_start(args, errorNumber);
